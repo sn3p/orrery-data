@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local pipeline inputs, snapshots, and generated release artifacts
+.context/
+.data/
+artifacts/

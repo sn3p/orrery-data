@@ -1,0 +1,212 @@
+"""Complete snapshots, read-only checks, and versioned static exports."""
+
+from collections import Counter
+import gzip
+import http.client
+import json
+from pathlib import Path
+import re
+import shutil
+import tempfile
+import zlib
+
+from . import SCHEMA_VERSION, __version__
+from .formats import DataError, FIELDS, discoveries, master_rows
+from .storage import (acquire, atomic_json, deterministic_gzip, digest, encode,
+                      file_info, now, read_json, request, response_metadata,
+                      verify_file, write_json, writer_lock)
+
+
+def current(store):
+    pointer = store / "current.json"
+    return read_json(pointer)["snapshot_version"] if pointer.exists() else None
+
+
+def load_snapshot(store, version=None, verify=True):
+    version = version or current(store)
+    if not version or not re.fullmatch(r"snapshot-v1-[a-f0-9]{64}", version):
+        raise DataError("No valid snapshot selected; run refresh first")
+    directory = store / "snapshots" / version
+    manifest = read_json(directory / "snapshot.json")
+    if (manifest["snapshot_version"] != version
+            or "snapshot-v1-" + digest(manifest["identity"]) != version
+            or manifest["schema_version"] != SCHEMA_VERSION
+            or manifest["identity"]["schema_version"] != manifest["schema_version"]
+            or manifest["identity"]["tool_version"] != manifest["tool_version"]):
+        raise DataError("Snapshot identity/schema mismatch")
+    if set(manifest["sources"]) != {"mpcorb", "numbered"}:
+        raise DataError("Snapshot requires both mpcorb and numbered sources")
+    if manifest["identity"]["sources"] != {name: info["decoded"]["sha256"] for name, info in manifest["sources"].items()}:
+        raise DataError("Snapshot source identity mismatch")
+    if set(manifest["files"]) != {"master.jsonl.gz", "MPCORB-header.txt"}:
+        raise DataError("Snapshot is missing required files")
+    counts = manifest["counts"]
+    if (not all(type(value) is int and value >= 0 for value in counts.values())
+            or counts["master_records"] + counts["unsupported_orbits"] != counts["orbital_records"]
+            or counts["known_discovery"] + counts["missing_discovery"] != counts["master_records"]
+            or counts["numbered_orbits"] + counts["unnumbered_orbits"] != counts["orbital_records"]
+            or counts["known_discovery"] + counts["unmatched_discovery_records"] != counts["discovery_records"]):
+        raise DataError("Snapshot counts do not reconcile")
+    if verify:
+        for name, info in manifest["sources"].items():
+            if name not in ("mpcorb", "numbered"):
+                raise DataError("Unexpected snapshot source")
+            verify_file(directory / f"{name}.input", info)
+        for name in ("master.jsonl.gz", "MPCORB-header.txt"):
+            verify_file(directory / name, manifest["files"][name])
+    return directory, manifest
+
+
+def check(store, urls, timeout):
+    baseline = load_snapshot(store, verify=False)[1] if current(store) else None
+    results = {}
+    for name, url in urls.items():
+        row = {"url": url, "status": "unknown"}
+        old = baseline["sources"][name] if baseline else None
+        try:
+            with request(url, method="HEAD", timeout=timeout) as response:
+                if response.status != 200:
+                    raise DataError(f"Expected HTTP 200, got {response.status}")
+                row.update(response_metadata(response))
+            if not old or old["url"] != url:
+                row["reason"] = "no baseline for this URL"
+            elif row["etag"] and old["etag"]:
+                if row["etag"] != old["etag"]:
+                    row.update(status="changed", reason="ETag changed")
+                elif not row["etag"].startswith("W/"):
+                    row.update(status="unchanged", reason="strong ETag matches (server validator, not a download hash)")
+                else:
+                    row["reason"] = "weak ETag cannot establish byte identity"
+            elif row["last_modified"] and old["last_modified"] and row["last_modified"] != old["last_modified"]:
+                row.update(status="changed", reason="Last-Modified changed")
+            elif row["content_length"] and old["content_length"] and row["content_length"] != old["content_length"]:
+                row.update(status="changed", reason="Content-Length changed")
+            else:
+                row["reason"] = "no comparable strong validator; refresh to compare content hashes"
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            row["reason"] = str(exc)
+        results[name] = row
+    states = {row["status"] for row in results.values()}
+    return {"checked_at": now(), "snapshot_version": baseline["snapshot_version"] if baseline else None,
+            "status": "changed" if "changed" in states else "unknown" if "unknown" in states else "unchanged",
+            "sources": results}
+
+
+def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
+    with writer_lock(store):
+        previous = load_snapshot(store)[1] if current(store) else None
+        snapshots = store / "snapshots"
+        snapshots.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".refresh-", dir=store) as temp:
+            stage = Path(temp)
+            sources = {name: acquire(name, stage, url, local.get(name), metadata.get(name, {}), timeout)
+                       for name, url in urls.items()}
+            discovery = discoveries(stage / "numbered.txt")
+            counts, header = Counter(), []
+            with deterministic_gzip(stage / "master.jsonl.gz") as target:
+                for record in master_rows(stage / "mpcorb.txt", discovery, counts, header):
+                    target.write((encode(record) + "\n").encode())
+            (stage / "MPCORB-header.txt").write_text("".join(header), encoding="utf-8")
+            if previous and not allow_count_decrease:
+                for key in ("orbital_records", "discovery_records", "master_records", "known_discovery"):
+                    if counts[key] < previous["counts"][key]:
+                        raise DataError(f"{key} decreased from {previous['counts'][key]} to {counts[key]}; "
+                                        "inspect sources, then explicitly use --allow-count-decrease if intentional")
+            identity = {"schema_version": SCHEMA_VERSION, "tool_version": __version__,
+                        "sources": {name: info["decoded"]["sha256"] for name, info in sources.items()}}
+            version = "snapshot-v1-" + digest(identity)
+            manifest = {"snapshot_version": version, "identity": identity,
+                        "schema_version": SCHEMA_VERSION, "tool_version": __version__,
+                        "created_at": now(), "sources": sources, "counts": dict(counts),
+                        "files": {name: file_info(stage / name) for name in ("master.jsonl.gz", "MPCORB-header.txt")},
+                        "exclusions": {"master": {"non_elliptic_orbits": counts["unsupported_orbits"]},
+                                       "discovery": {"missing_discovery_date": counts["missing_discovery"]}},
+                        "compression": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_VERSION}}
+            write_json(stage / "snapshot.json", manifest)
+            for name in urls:
+                (stage / f"{name}.txt").unlink()
+            destination = snapshots / version
+            if destination.exists():
+                # First acquisition wins; retries cannot rewrite immutable provenance.
+                _, manifest = load_snapshot(store, version)
+            else:
+                stage.rename(destination)
+            atomic_json(store / "current.json", {"snapshot_version": version})
+        return {"status": "unchanged" if previous and previous["snapshot_version"] == version else "updated",
+                "snapshot_version": version, "counts": manifest["counts"], "path": str(destination)}
+
+
+def export(store, output, version=None, limit=None):
+    if limit is not None and limit <= 0:
+        raise DataError("--limit must be a positive integer")
+    source, snapshot = load_snapshot(store, version)
+    selection = {"profile": "discovery", "limit": limit,
+                 "select": "first-known-dates-in-mpcorb-order", "sort": "disc-ascending-stable"}
+    identity = {"snapshot_version": snapshot["snapshot_version"], "tool_version": __version__,
+                "schema_version": SCHEMA_VERSION, "selection": selection}
+    export_version = "export-v1-" + digest(identity)
+    with writer_lock(output):
+        destination = output / export_version
+        if destination.exists():
+            manifest = read_json(destination / "manifest.json")
+            if manifest["identity"] != identity or manifest["data_version"] != export_version:
+                raise DataError("Existing export identity mismatch")
+            names = {"master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt"}
+            if set(manifest["artifacts"]) != names:
+                raise DataError("Existing export is missing required artifacts")
+            for name, info in manifest["artifacts"].items():
+                verify_file(destination / name, info)
+            expected_sums = "".join(f"{file_info(destination / name)['sha256']}  {name}\n"
+                                    for name in sorted([*names, "manifest.json"]))
+            if (destination / "SHA256SUMS").read_text() != expected_sums:
+                raise DataError("Existing export SHA256SUMS mismatch")
+        else:
+            with tempfile.TemporaryDirectory(prefix=".export-", dir=output) as temp:
+                stage = Path(temp)
+                for name in ("master.jsonl.gz", "MPCORB-header.txt"):
+                    shutil.copyfile(source / name, stage / name)
+                shutil.copyfile(Path(__file__).with_name("NOTICE.txt"), stage / "NOTICE.txt")
+                selected = []
+                master_count, known_count = 0, 0
+                with gzip.open(source / "master.jsonl.gz", "rt", encoding="utf-8") as stream:
+                    for line in stream:
+                        row = json.loads(line)
+                        master_count += 1
+                        known_count += row["disc"] is not None
+                        if row["disc"] is not None and (limit is None or len(selected) < limit):
+                            selected.append(tuple(row[key] for key in FIELDS))
+                if (master_count != snapshot["counts"]["master_records"]
+                        or known_count != snapshot["counts"]["known_discovery"]):
+                    raise DataError("Master contents do not match snapshot counts")
+                selected.sort(key=lambda row: row[0])
+                with (stage / "catalog.json").open("wb") as catalog, deterministic_gzip(stage / "catalog.json.gz") as compressed:
+                    def emit(data):
+                        catalog.write(data)
+                        compressed.write(data)
+                    emit(b"[")
+                    for index, row in enumerate(selected):
+                        if index:
+                            emit(b",")
+                        emit(encode(dict(zip(FIELDS, row))).encode())
+                    emit(b"]\n")
+                artifacts = {name: file_info(stage / name) for name in (
+                    "master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt")}
+                for name in ("catalog.json", "catalog.json.gz"):
+                    artifacts[name].update(profile="discovery", records=len(selected))
+                artifacts["master.jsonl.gz"].update(profile="master", records=snapshot["counts"]["master_records"])
+                manifest = {"data_version": export_version, "identity": identity,
+                            "snapshot_version": snapshot["snapshot_version"], "schema_version": SCHEMA_VERSION,
+                            "tool_version": __version__, "created_at": now(), "selection": selection,
+                            "sources": snapshot["sources"], "counts": {**snapshot["counts"], "discovery_export": len(selected)},
+                            "exclusions": {**snapshot["exclusions"], "selection_limit": snapshot["counts"]["known_discovery"] - len(selected)},
+                            "compression": {"master": snapshot["compression"],
+                                            "catalog": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_VERSION}},
+                            "artifacts": artifacts}
+                write_json(stage / "manifest.json", manifest)
+                # Convenient release-side checksum list includes the manifest itself.
+                lines = [f"{file_info(stage / name)['sha256']}  {name}\n" for name in sorted([*artifacts, "manifest.json"])]
+                (stage / "SHA256SUMS").write_text("".join(lines))
+                stage.rename(destination)
+        atomic_json(output / "latest.json", {"data_version": export_version})
+    return {"data_version": export_version, "path": str(destination), "counts": manifest["counts"],
+            "artifacts": manifest["artifacts"]}

@@ -1,0 +1,6 @@
+     (1) Ceres                           1801 01 01  Palermo                  Piazzi, G.
+     (2) Pallas                          1802 03 28  Bremen                   Olbers, H. W.
+     (3) Juno                            1804 09 01  Lilienthal               Harding, K.
+(100000) Astronautica        1982 SH1    1982 09 28  Palomar            60731 Gibson, J.
+(360000)                     2012 XX21   2001 12 18* Socorro                  LINEAR
+(620000)                     2019 YS4    2019 12 30* Haleakala                Pan-STARRS 1
