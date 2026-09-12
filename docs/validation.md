@@ -148,7 +148,10 @@ python3 scripts/validate_saved_release.py \
   --report /path/release-validation.json
 ```
 
-Run from committed producer code. Every invocation prepares into a fresh output
+Run from committed producer code with assertions enabled. The release validator
+rejects `python -O`, `python -OO` and enabled `PYTHONOPTIMIZE` before validation
+or output writes, so disabled checks cannot produce a passing report.
+Every invocation prepares into a fresh output
 root, compares every SQLite field against all 1,563,495 master records, compares
 all full/100k export payload hashes to the retained references, repeats
 preparation in the same directory, copies the candidate independently,

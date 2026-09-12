@@ -15,6 +15,9 @@ from validate_saved_database import EXPECTED, MASTER_SHA256, ROOT, cli, sha, ver
 
 
 def main():
+    if not __debug__:
+        raise SystemExit("Saved release validation requires assertions; run Python without "
+                         "-O/-OO or PYTHONOPTIMIZE.")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--reference-exports", type=Path, required=True)
