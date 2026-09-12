@@ -79,7 +79,8 @@ def check(store, urls, timeout):
                     row["reason"] = "weak ETag cannot establish byte identity"
             elif row["last_modified"] and old["last_modified"] and row["last_modified"] != old["last_modified"]:
                 row.update(status="changed", reason="Last-Modified changed")
-            elif row["content_length"] and old["content_length"] and row["content_length"] != old["content_length"]:
+            elif (row["content_length"] is not None and old["content_length"] is not None
+                  and int(row["content_length"]) != int(old["content_length"])):
                 row.update(status="changed", reason="Content-Length changed")
             else:
                 row["reason"] = "no comparable strong validator; refresh to compare content hashes"

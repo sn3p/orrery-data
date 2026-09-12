@@ -253,6 +253,43 @@ class CLI(unittest.TestCase):
         self.assertEqual(checked["sources"]["mpcorb"]["status"], "unchanged")
         self.assertEqual(before, self.tree(self.store))
 
+    def test_check_compares_content_lengths_numerically_without_mutation(self):
+        metadata = self.directory / "metadata.json"
+        cases = [
+            (80686609, "80686609", "unknown"),
+            ("80686609", "080686609", "unknown"),
+            ("080686609", "80686609", "unknown"),
+            (0, "0", "unknown"), ("000", "0", "unknown"),
+            (0, "1", "changed"), (1, "0", "changed"),
+            ("0", "1", "changed"), (1, "2", "changed"),
+            (None, "0", "unknown"), (0, None, "unknown"),
+            (1, "invalid", "unknown"),
+        ]
+        for index, (saved, received, expected) in enumerate(cases):
+            with self.subTest(saved=saved, received=received):
+                self.store = self.directory / f"store-{index}"
+                self.output = self.directory / f"exports-{index}"
+                # Import through the real metadata boundary; ETag/Last-Modified are unknown.
+                metadata.write_text(json.dumps({name: {"content_length": saved}
+                                                for name in ("mpcorb", "numbered")}))
+                snapshot = self.refresh(None, None, *self.http_args(), "--source-metadata", metadata)
+                self.export()
+                before, before_output = self.tree(self.store), self.tree(self.output)
+                self.requests.clear()
+                for response in self.responses.values():
+                    response["headers"] = {} if received is None else {"Content-Length": received}
+                result = self.cli("check", *self.http_args(), code=2 if expected == "unknown" else 0)
+                self.assertEqual(result["status"], expected)
+                self.assertEqual(result["snapshot_version"], snapshot["snapshot_version"])
+                for source in result["sources"].values():
+                    self.assertEqual(source["status"], expected)
+                    self.assertEqual(source["content_length"], received)
+                    if expected == "changed":
+                        self.assertEqual(source["reason"], "Content-Length changed")
+                self.assertEqual(self.requests, [("HEAD", "/orbits"), ("HEAD", "/dates")])
+                self.assertEqual(before, self.tree(self.store))
+                self.assertEqual(before_output, self.tree(self.output))
+
     def test_check_without_baseline_creates_nothing(self):
         result = self.cli("check", *self.http_args(), code=2)
         self.assertEqual(result["status"], "unknown")

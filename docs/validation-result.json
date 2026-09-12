@@ -115,7 +115,7 @@
     "machine": "arm64",
     "zlib": "1.2.12"
   },
-  "cli_tests": 28,
+  "cli_tests": 29,
   "tool_version": "0.1.2",
   "upstream_check": {
     "checked_at": "2026-09-12T18:28:56Z",

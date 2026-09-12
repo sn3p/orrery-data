@@ -45,9 +45,11 @@ Those remain required in a later app integration workspace.
 
 All checks above passed with tool 0.1.2 on Python 3.12.7/macOS arm64. Both
 live MPC strong ETags matched the saved sources at 2026-09-12T18:28:56Z.
-The 28 CLI tests and installed-package refresh/export upgrade check passed.
+The 29 CLI tests and installed-package refresh/export upgrade check passed.
 Provenance regressions cover unknown fields, malformed known values, null
 local retrieval times and valid metadata round trips into both manifests.
+Read-only checks also cover numeric Content-Length equivalence, leading zeros,
+zero-length changes, missing lengths and malformed HTTP lengths for both sources.
 The 0.1.1-to-0.1.2 upgrade rejects previously accepted malformed metadata,
 creates a corrected snapshot and preserves the old snapshot unchanged. The initial
 independent review and full-catalog checks are also recorded in this PR.
