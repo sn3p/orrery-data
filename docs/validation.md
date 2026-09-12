@@ -165,7 +165,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 60 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 63 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
