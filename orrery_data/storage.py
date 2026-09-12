@@ -103,7 +103,7 @@ def request(url, method="GET", timeout=60):
 
 def acquire(name, stage, url, local, metadata, timeout):
     raw = stage / f"{name}.input"
-    info = {"url": url, "retrieved_at": now(), "acquisition": "local" if local else "http",
+    info = {"url": url, "retrieved_at": None if local else now(), "acquisition": "local" if local else "http",
             "etag": None, "last_modified": None, "content_length": None}
     if local:
         # Only explicit source metadata is retained; private local paths are not published.

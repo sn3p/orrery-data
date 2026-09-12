@@ -1,7 +1,7 @@
 {
   "status": "passed",
   "source_snapshot": "2026-09-12",
-  "snapshot_version": "snapshot-v1-24dfe4b8c7b46c5fe1d120e45e2dbbbf026fc587a8f9e6a2b789508c661849f8",
+  "snapshot_version": "snapshot-v1-af2279ec4d6447bf8e9f314152288b88df615d10c2c07e6225ad9b7b442b8a7f",
   "counts": {
     "orbital_records": 1563495,
     "master_records": 1563495,
@@ -14,7 +14,7 @@
     "unmatched_discovery_records": 0
   },
   "full_export": {
-    "data_version": "export-v1-41698d53db8e7d9fff88c2c5554d223160fa646ac2f73a11ff4c427df7056dba",
+    "data_version": "export-v1-bcdf6bac209360ac7a6a3b646d8395c1df37752d7683ce07b1fbb51bb8ad4272",
     "counts": {
       "orbital_records": 1563495,
       "master_records": 1563495,
@@ -57,7 +57,7 @@
     }
   },
   "limited_export": {
-    "data_version": "export-v1-47ee5379f8ed25aa2786092b2fd716fb9c282b0bdad6e29961ba8b0863dd66b7",
+    "data_version": "export-v1-0cede08cdfab3b4de3d11faf741f466d0f64b526d467479aef52d1ed698d282a",
     "counts": {
       "orbital_records": 1563495,
       "master_records": 1563495,
@@ -115,10 +115,11 @@
     "machine": "arm64",
     "zlib": "1.2.12"
   },
-  "cli_tests": 23,
+  "cli_tests": 25,
+  "tool_version": "0.1.1",
   "upstream_check": {
-    "checked_at": "2026-09-12T16:51:16Z",
-    "snapshot_version": "snapshot-v1-24dfe4b8c7b46c5fe1d120e45e2dbbbf026fc587a8f9e6a2b789508c661849f8",
+    "checked_at": "2026-09-12T17:10:54Z",
+    "snapshot_version": "snapshot-v1-af2279ec4d6447bf8e9f314152288b88df615d10c2c07e6225ad9b7b442b8a7f",
     "status": "unchanged",
     "sources": {
       "mpcorb": {

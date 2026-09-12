@@ -238,6 +238,8 @@ class CLI(unittest.TestCase):
         snapshot = json.loads((Path(result["path"]) / "snapshot.json").read_text())
         self.assertEqual(snapshot["sources"]["mpcorb"]["etag"], '"original"')
         self.assertEqual(snapshot["sources"]["mpcorb"]["compression"], "gzip")
+        for source in snapshot["sources"].values():
+            self.assertRegex(source["retrieved_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
         before = self.tree(self.store)
         checked = self.cli("check", *self.http_args())
         self.assertEqual(checked["status"], "unchanged")
@@ -310,6 +312,38 @@ class CLI(unittest.TestCase):
         result = self.refresh(None, None, "--source-metadata", metadata)
         manifest = json.loads((Path(result["path"]) / "snapshot.json").read_text())
         self.assertEqual(manifest["sources"]["mpcorb"]["retrieved_at"], "2026-09-12T14:00:00Z")
+        exported = json.loads((Path(self.export()["path"]) / "manifest.json").read_text())
+        self.assertEqual(exported["sources"]["mpcorb"]["retrieved_at"], "2026-09-12T14:00:00Z")
+
+    def test_unknown_metadata_fields_fail_before_acquisition(self):
+        self.refresh()
+        self.export()
+        before, before_output = self.tree(self.store), self.tree(self.output)
+        metadata = self.directory / "metadata.json"
+        for source in ("mpcorb", "numbered"):
+            for field in ("decoded_sha265", "sha265", "retrievedAt"):
+                with self.subTest(source=source, field=field):
+                    metadata.write_text(json.dumps({source: {field: "0" * 64}}))
+                    result = self.refresh(None, None, "--source-metadata", metadata, code=1)
+                    self.assertIn(source, result["error"])
+                    self.assertIn(field, result["error"])
+                    self.assertEqual(before, self.tree(self.store))
+                    self.assertEqual(before_output, self.tree(self.output))
+        # Invalid metadata must fail before opening a network connection, too.
+        self.responses["/orbits"]["status"] = 500
+        result = self.cli("refresh", *self.http_args(), "--source-metadata", metadata, code=1)
+        self.assertIn("retrievedAt", result["error"])
+        self.assertEqual(before, self.tree(self.store))
+
+    def test_local_retrieval_time_is_unknown_without_saved_provenance(self):
+        result = self.refresh()
+        snapshot = json.loads((Path(result["path"]) / "snapshot.json").read_text())
+        exported = json.loads((Path(self.export()["path"]) / "manifest.json").read_text())
+        for manifest in (snapshot, exported):
+            self.assertIsNotNone(manifest["created_at"])
+            for name in ("mpcorb", "numbered"):
+                self.assertIsNone(manifest["sources"][name]["retrieved_at"])
+                self.assertEqual(manifest["sources"][name]["acquisition"], "local")
 
     def test_corrupt_snapshot_does_not_replace_previous_export(self):
         result = self.refresh()

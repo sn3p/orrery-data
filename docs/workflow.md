@@ -46,12 +46,20 @@ Local inputs may be plain or gzip (detected by magic bytes). Both local paths
 are required together. Metadata is optional; omit unknown values. The JSON is
 keyed by `mpcorb` and `numbered`, with optional `retrieved_at`, `last_modified`,
 `etag`, `content_length`, `sha256` (supplied file bytes), and `decoded_sha256`.
+Unknown field names are rejected before acquisition, including misspelled hash
+fields. Without explicit saved provenance, local `retrieved_at` remains null;
+the snapshot's `created_at` records generation time separately.
 The two expected hashes, when present, are checked before activation. Saved
 HTTP Content-Length describes the original response; it may differ from a
 losslessly gzipped local archive's byte size. The manifest separately records
 the stored bytes and decoded bytes. Paths to local private files are not
 written into release manifests. The URLs default to the official MPC endpoints;
 use `--mpcorb-url` / `--numbered-url` to explicitly record other upstream URLs.
+
+Tool 0.1.1 corrects local imports that previously recorded an unverified
+retrieval time. Refreshing with 0.1.1 creates a new snapshot identity even for
+the same source bytes, leaving older immutable snapshots intact. Supply saved
+metadata to retain a known retrieval time; do not infer it from file timestamps.
 
 ## Consumer integration (separate app workspaces)
 

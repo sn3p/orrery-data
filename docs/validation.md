@@ -43,9 +43,12 @@ Those remain required in a later app integration workspace.
 
 ## Validated 2026-09-12 snapshot
 
-All checks above passed on Python 3.12.7/macOS arm64. Both live MPC strong
-ETags matched the saved sources at 2026-09-12 16:51 UTC. The 23 CLI tests,
-installed-package refresh/export smoke test and independent review passed.
+All checks above passed with tool 0.1.1 on Python 3.12.7/macOS arm64. Both
+live MPC strong ETags matched the saved sources at 2026-09-12T17:10:54Z.
+The 25 CLI tests and installed-package refresh/export upgrade check passed.
+Both Copilot provenance findings have CLI regression coverage, including
+misspelled metadata fields and unknown local retrieval times. The initial
+independent review and full-catalog checks are also recorded in this PR.
 See [machine-readable results and full SHA-256 hashes](validation-result.json).
 
 | Artifact | Records | Bytes |
