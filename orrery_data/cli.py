@@ -1,13 +1,17 @@
 """JSON-on-stdout command boundaries; errors do not advance active versions."""
 
 import argparse
+from datetime import date
 import http.client
 from pathlib import Path
+import re
+import sqlite3
 import sys
 import zlib
 
 from . import __version__
-from .formats import DataError
+from .database import DEFAULT_DATABASE, build_database, database_info, query_database
+from .formats import DataError, julian_day
 from .metadata import validate_source_metadata
 from .pipeline import check, export, refresh
 from .storage import URLS, encode, read_json
@@ -20,11 +24,34 @@ def positive(value):
     return number
 
 
+def nonnegative(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be nonnegative")
+    return number
+
+
+def query_limit(value):
+    number = positive(value)
+    if number > 10000:
+        raise argparse.ArgumentTypeError("must be at most 10000")
+    return number
+
+
+def discovery_date(value):
+    try:
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            raise ValueError()
+        return julian_day(date.fromisoformat(value))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a valid YYYY-MM-DD date") from exc
+
+
 def parser():
     root = argparse.ArgumentParser(description="Validated MPC snapshots and Orrery catalogs")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("check", "refresh", "export"):
+    for name in ("check", "refresh", "export", "build-db"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--store", type=Path, default=Path(".data"), help="local snapshot store (default: .data)")
         if name in ("check", "refresh"):
@@ -36,10 +63,32 @@ def parser():
             cmd.add_argument("--numbered", type=Path, help="import local NumberedMPs (plain or gzip)")
             cmd.add_argument("--source-metadata", type=Path, help="optional per-source JSON provenance and expected hashes")
             cmd.add_argument("--allow-count-decrease", action="store_true", help="accept an inspected reduction in source/eligible counts")
-        if name == "export":
-            cmd.add_argument("--output", type=Path, default=Path("artifacts"))
+        if name in ("export", "build-db"):
             cmd.add_argument("--snapshot", help="pin a snapshot version (default: current)")
+        if name == "build-db":
+            cmd.add_argument("--database", type=Path, default=DEFAULT_DATABASE,
+                             help="database to atomically replace (default: artifacts/orrery.sqlite3)")
+        elif name == "export":
+            cmd.add_argument("--output", type=Path, default=Path("artifacts"))
             cmd.add_argument("--limit", type=positive, help="select first N eligible MPCORB records before sorting; default: all")
+    for name in ("db-info", "query"):
+        cmd = commands.add_parser(name)
+        cmd.add_argument("--database", type=Path, default=DEFAULT_DATABASE,
+                         help="existing local database (default: artifacts/orrery.sqlite3)")
+        if name == "db-info":
+            cmd.add_argument("--verify", action="store_true", help="also run full integrity and foreign key checks")
+        else:
+            exact = cmd.add_mutually_exclusive_group()
+            exact.add_argument("--id", dest="object_id", help="exact MPC authority ID")
+            exact.add_argument("--number", type=positive, help="exact permanent MPC number")
+            exact.add_argument("--packed-designation", help="exact, case-sensitive packed MPC designation")
+            cmd.add_argument("--discovery", choices=("all", "known", "missing"), default="all")
+            cmd.add_argument("--discovered-from", type=discovery_date, help="inclusive YYYY-MM-DD calendar date")
+            cmd.add_argument("--discovered-to", type=discovery_date, help="inclusive YYYY-MM-DD calendar date")
+            cmd.add_argument("--order", choices=("source", "discovery"), default="source",
+                             help="source order, or discovery date with nulls last and source-order ties")
+            cmd.add_argument("--limit", type=query_limit, default=20, help="page size 1–10000 (default: 20)")
+            cmd.add_argument("--offset", type=nonnegative, default=0, help="skip matching rows (default: 0)")
     return root
 
 
@@ -55,9 +104,18 @@ def main(argv=None):
             validate_source_metadata(metadata)
             result = refresh(args.store, {name: getattr(args, name + "_url") for name in URLS},
                              {name: getattr(args, name) for name in URLS}, metadata, args.timeout, args.allow_count_decrease)
-        else:
+        elif args.command == "export":
             result = export(args.store, args.output, args.snapshot, args.limit)
-    except (OSError, ValueError, KeyError, TypeError, EOFError, zlib.error, http.client.HTTPException) as exc:
+        elif args.command == "build-db":
+            result = build_database(args.store, args.database, args.snapshot)
+        elif args.command == "db-info":
+            result = database_info(args.database, args.verify)
+        else:
+            result = query_database(args.database, **{k: getattr(args, k) for k in (
+                "object_id", "number", "packed_designation", "discovery", "discovered_from", "discovered_to",
+                "order", "limit", "offset")})
+    except (OSError, ValueError, KeyError, TypeError, EOFError, OverflowError, sqlite3.Error,
+            zlib.error, http.client.HTTPException) as exc:
         print(encode({"error": str(exc)}), file=sys.stderr)
         return 1
     print(encode(result))

@@ -224,3 +224,12 @@ __marimo__/
 .context/
 .data/
 artifacts/
+
+# Generated local SQLite databases, sidecars and interrupted build directories
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+.sqlite-build-*/

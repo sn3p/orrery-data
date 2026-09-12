@@ -1,7 +1,8 @@
 # Orrery Data
 
-Validated, versioned minor-planet snapshots and static exports for Orrery and
-Orrery3D. Python 3.11+ on macOS/Linux; no runtime dependencies or server.
+Validated, versioned minor-planet snapshots, local SQLite queries and static
+exports for Orrery and Orrery3D. Python 3.11+ on macOS/Linux with its standard
+`sqlite3` module; no third-party runtime dependencies or server.
 
 The orbital elements and discovery circumstances used by this project are
 maintained by [The Minor Planet Center (MPC)](https://minorplanetcenter.net/):
@@ -24,7 +25,7 @@ python -m unittest discover -s tests -v
 ```
 
 Run the installed `orrery-data` command, or `python3 -m orrery_data` directly
-from this checkout. Three commands cover the update workflow:
+from this checkout:
 
 ```sh
 # Inspect both upstream validators; does not download catalogs or change versions.
@@ -38,6 +39,13 @@ orrery-data export
 
 # Optional consumer limit: first 100k eligible MPCORB rows, then date-sort.
 orrery-data export --limit 100000
+
+# Build a complete local database from the current validated snapshot.
+orrery-data build-db
+orrery-data db-info --verify
+orrery-data query --number 1
+orrery-data query --discovery missing --limit 10
+orrery-data query --discovered-to 2000-01-01 --order discovery --limit 20
 ```
 
 `check` prints `unchanged`, `changed`, or `unknown` for each source. Matching
@@ -65,10 +73,18 @@ small `latest.json` pointer after success. It includes:
   counts, exclusions and selection settings.
 - `MPCORB-header.txt` and `NOTICE.txt`: upstream header and attribution.
 
-Raw inputs, local stores and large generated exports are ignored by Git.
+`build-db` atomically replaces `artifacts/orrery.sqlite3` with the complete
+master, including unknown discovery dates. Use `--database /path/catalog.sqlite3`
+on the build and read commands for another location, or `--snapshot` on the
+builder to pin an existing snapshot. `db-info` returns embedded provenance and
+credits; `--verify` adds integrity checks. `query` returns bounded pages with
+the master JSON fields and a total matching count. Reads never create a missing
+database. See [SQLite commands, schema and recovery](docs/sqlite.md).
+
+Raw inputs, local stores, generated databases and large exports are ignored by Git.
 This repository does not automatically publish releases or update either app.
-The first milestone prepares complete snapshots locally; database, deltas,
-sampling, date-range UI and app integration remain separate work.
+HTTP hosting, release publication, browser SQLite, deltas, sampling, date-range
+UI and app integration remain separate work.
 
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)

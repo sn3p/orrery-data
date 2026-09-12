@@ -1,5 +1,9 @@
 # Schema v1
 
+This page describes the unchanged JSON profiles. The separate local database
+uses [SQLite schema v1](sqlite.md#schema-and-versions), including explicit SQL
+names for the distinct `W`/`w` fields.
+
 The master is UTF-8 JSON Lines inside gzip. The discovery profile is a JSON
 array, available plain and gzipped. Both are strict JSON: no NaN or infinity.
 Numeric fields are parsed from MPC's fixed-width columns without rounding.

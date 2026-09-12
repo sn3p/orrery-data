@@ -77,6 +77,12 @@ values; do not infer retrieval time from file timestamps.
 
 ## Consumer integration (separate app workspaces)
 
+For local inspection of a prepared snapshot, use `orrery-data build-db`,
+`orrery-data db-info --verify` and `orrery-data query`. The database is a
+separate complete replacement artifact; existing static export selection and
+release preparation stay unchanged. [SQLite workflow and recovery](sqlite.md)
+documents pinning, queries, schema versions and failure handling.
+
 Choose a fixed `export-v1-...` and verify the downloaded compressed artifact
 against its manifest SHA-256 during the app build. Decompress `catalog.json.gz`
 into the app's static build assets, then serve those assets normally. Pin the
