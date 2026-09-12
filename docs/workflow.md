@@ -46,9 +46,22 @@ Local inputs may be plain or gzip (detected by magic bytes). Both local paths
 are required together. Metadata is optional; omit unknown values. The JSON is
 keyed by `mpcorb` and `numbered`, with optional `retrieved_at`, `last_modified`,
 `etag`, `content_length`, `sha256` (supplied file bytes), and `decoded_sha256`.
-Unknown field names are rejected before acquisition, including misspelled hash
-fields. Without explicit saved provenance, local `retrieved_at` remains null;
-the snapshot's `created_at` records generation time separately.
+Unknown fields and malformed values are rejected before file acquisition or
+network access. Expected hashes must be 64 lowercase hexadecimal characters;
+null is not a hash assertion. The provenance fields accept null for unknown
+values, or these formats:
+
+- `retrieved_at`: a valid calendar timestamp with seconds, optional fractional
+  seconds, and `Z` or an explicit `±HH:MM` UTC offset (for example,
+  `2026-09-12T14:57:32Z`). Leap-second timestamps are not supported.
+- `last_modified`: an [HTTP date](https://www.rfc-editor.org/rfc/rfc9110.html#name-date-time-formats),
+  including the two obsolete HTTP date formats accepted for saved responses.
+- `etag`: a quoted HTTP entity tag, optionally prefixed with `W/`.
+- `content_length`: a nonnegative JSON integer or an ASCII decimal digit string.
+  Booleans, fractions, signs and whitespace are rejected.
+
+Without explicit saved provenance, local `retrieved_at` remains null; the
+snapshot's `created_at` records generation time separately.
 The two expected hashes, when present, are checked before activation. Saved
 HTTP Content-Length describes the original response; it may differ from a
 losslessly gzipped local archive's byte size. The manifest separately records
@@ -56,10 +69,11 @@ the stored bytes and decoded bytes. Paths to local private files are not
 written into release manifests. The URLs default to the official MPC endpoints;
 use `--mpcorb-url` / `--numbered-url` to explicitly record other upstream URLs.
 
-Tool 0.1.1 corrects local imports that previously recorded an unverified
-retrieval time. Refreshing with 0.1.1 creates a new snapshot identity even for
-the same source bytes, leaving older immutable snapshots intact. Supply saved
-metadata to retain a known retrieval time; do not infer it from file timestamps.
+Tool 0.1.1 corrected unverified local retrieval times; 0.1.2 also rejects
+malformed supplied provenance. Refreshing with 0.1.2 creates a new snapshot
+identity even for the same source bytes, leaving older immutable snapshots
+intact. Reimport older snapshots with valid saved metadata or omit unknown
+values; do not infer retrieval time from file timestamps.
 
 ## Consumer integration (separate app workspaces)
 

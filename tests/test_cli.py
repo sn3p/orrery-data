@@ -28,9 +28,11 @@ class CLI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.responses = {}
+        cls.requests = []
 
         class Handler(BaseHTTPRequestHandler):
             def respond(self, body):
+                cls.requests.append((self.command, self.path))
                 config = cls.responses[self.path]
                 if config.get("malformed_status"):
                     self.wfile.write(b"NOT HTTP\r\n\r\n")
@@ -60,6 +62,7 @@ class CLI(unittest.TestCase):
         cls.thread.join()
 
     def setUp(self):
+        self.requests.clear()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
@@ -334,6 +337,99 @@ class CLI(unittest.TestCase):
         result = self.cli("refresh", *self.http_args(), "--source-metadata", metadata, code=1)
         self.assertIn("retrievedAt", result["error"])
         self.assertEqual(before, self.tree(self.store))
+
+    def test_malformed_metadata_fails_before_local_or_http_acquisition(self):
+        self.refresh()
+        self.export()
+        before, before_output = self.tree(self.store), self.tree(self.output)
+        metadata = self.directory / "metadata.json"
+        invalid = {
+            "sha256": [None, True, 123, {}, [], "", "0" * 63, "g" * 64, "A" * 64, "0" * 64 + "\n"],
+            "decoded_sha256": [None, 123, {}, "0" * 65, "z" * 64],
+            "retrieved_at": [True, 123, {}, [], "", "yesterday", "2026-09-12",
+                             "2026-09-12T14:00:00", "2026-02-30T14:00:00Z",
+                             "2026-09-12T24:00:00Z", "2026-09-12T14:00:00+02:60",
+                             "2026-09-12T14:00:00Z junk"],
+            "content_length": [True, False, -1, 1.5, {}, [], "", "-1", "+1", "1.0", " 1", "١", "1\n"],
+            "last_modified": [True, 123, {}, [], "", "yesterday", "2026-09-12T14:00:00Z",
+                              "Mon, 30 Feb 2026 12:00:00 GMT", "Sat, 12 Sep 2026 12:57:00 GMT junk"],
+            "etag": [True, 123, {}, [], "", "unquoted", 'w/"tag"', '"tag"\r\nX: value', '"two tags", "bad"'],
+        }
+        for source in ("mpcorb", "numbered"):
+            for field, values in invalid.items():
+                for value in values:
+                    with self.subTest(source=source, field=field, value=value):
+                        metadata.write_text(json.dumps({source: {field: value}}))
+                        # Nonexistent inputs prove metadata is checked before local copying.
+                        for inputs in (["--mpcorb", self.directory / "absent-orbits",
+                                        "--numbered", self.directory / "absent-dates"], self.http_args()):
+                            error = self.cli("refresh", *inputs, "--source-metadata", metadata, code=1)["error"]
+                            self.assertIn(f"{source}.{field}:", error)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(before, self.tree(self.store))
+        self.assertEqual(before_output, self.tree(self.output))
+        fresh = self.directory / "fresh-store"
+        self.cli("refresh", *self.http_args(), "--source-metadata", metadata, store=fresh, code=1)
+        self.assertFalse(fresh.exists())
+
+    def test_valid_metadata_survives_snapshot_and_export(self):
+        metadata = self.directory / "metadata.json"
+        variants = [
+            {"retrieved_at": None, "content_length": None, "last_modified": None, "etag": None},
+            {"retrieved_at": "2026-09-12T14:00:00Z", "content_length": 0,
+             "last_modified": "Sat, 12 Sep 2026 12:57:00 GMT", "etag": '"strong"'},
+            {"retrieved_at": "2026-09-12T16:00:00.123456+02:00", "content_length": "80686609",
+             "last_modified": "Sunday, 06-Nov-94 08:49:37 GMT", "etag": 'W/"weak"'},
+            {"retrieved_at": "2026-09-12t09:00:00-05:00", "content_length": "000",
+             "last_modified": "Sun Nov  6 08:49:37 1994", "etag": '""'},
+        ]
+        for index, fields in enumerate(variants):
+            with self.subTest(fields=fields):
+                # Fresh versions retain the first acquisition's provenance.
+                self.store = self.directory / f"store-{index}"
+                self.output = self.directory / f"exports-{index}"
+                values = {}
+                for source, data in (("mpcorb", self.orbits), ("numbered", self.dates)):
+                    sha = hashlib.sha256(data.encode()).hexdigest()
+                    values[source] = dict(fields, sha256=sha, decoded_sha256=sha)
+                metadata.write_text(json.dumps(values))
+                result = self.refresh(None, None, "--source-metadata", metadata)
+                snapshot = json.loads((Path(result["path"]) / "snapshot.json").read_text())
+                exported = json.loads((Path(self.export()["path"]) / "manifest.json").read_text())
+                for manifest in (snapshot, exported):
+                    for source in values:
+                        for field, value in fields.items():
+                            self.assertEqual(manifest["sources"][source][field], value)
+                        self.assertEqual(manifest["sources"][source]["sha256"], values[source]["sha256"])
+                        self.assertEqual(manifest["sources"][source]["decoded"]["sha256"], values[source]["decoded_sha256"])
+
+    def test_valid_metadata_keeps_http_acquisition_and_hash_assertions(self):
+        metadata = self.directory / "metadata.json"
+        values = {}
+        for source, route, decoded in (("mpcorb", "/orbits", self.orbits), ("numbered", "/dates", self.dates)):
+            values[source] = {"sha256": hashlib.sha256(self.responses[route]["body"]).hexdigest(),
+                              "decoded_sha256": hashlib.sha256(decoded.encode()).hexdigest(),
+                              "retrieved_at": None, "last_modified": None, "etag": None, "content_length": None}
+        metadata.write_text(json.dumps(values))
+        result = self.cli("refresh", *self.http_args(), "--source-metadata", metadata)
+        snapshot = json.loads((Path(result["path"]) / "snapshot.json").read_text())
+        exported = json.loads((Path(self.export()["path"]) / "manifest.json").read_text())
+        for manifest in (snapshot, exported):
+            for source in values:
+                self.assertEqual(manifest["sources"][source]["etag"], '"original"')
+                self.assertIsNotNone(manifest["sources"][source]["retrieved_at"])
+        before, before_output = self.tree(self.store), self.tree(self.output)
+        for source in values:
+            for field in ("sha256", "decoded_sha256"):
+                original = values[source][field]
+                values[source][field] = "0" * 64
+                metadata.write_text(json.dumps(values))
+                error = self.cli("refresh", *self.http_args(), "--source-metadata", metadata, code=1)["error"]
+                self.assertIn(source, error)
+                self.assertIn("checksum", error)
+                self.assertEqual(before, self.tree(self.store))
+                self.assertEqual(before_output, self.tree(self.output))
+                values[source][field] = original
 
     def test_local_retrieval_time_is_unknown_without_saved_provenance(self):
         result = self.refresh()

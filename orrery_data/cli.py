@@ -8,6 +8,7 @@ import zlib
 
 from . import __version__
 from .formats import DataError
+from .metadata import validate_source_metadata
 from .pipeline import check, export, refresh
 from .storage import URLS, encode, read_json
 
@@ -51,13 +52,7 @@ def main(argv=None):
             if bool(args.mpcorb) != bool(args.numbered):
                 raise DataError("Provide both --mpcorb and --numbered, or neither")
             metadata = read_json(args.source_metadata) if args.source_metadata else {}
-            if not isinstance(metadata, dict) or not all(k in URLS and isinstance(v, dict) for k, v in metadata.items()):
-                raise DataError("Source metadata must contain mpcorb/numbered objects")
-            allowed_fields = {"retrieved_at", "last_modified", "etag", "content_length", "sha256", "decoded_sha256"}
-            for name, fields in metadata.items():
-                unknown = fields.keys() - allowed_fields
-                if unknown:
-                    raise DataError(f"{name}: unknown source metadata fields: {', '.join(sorted(unknown))}")
+            validate_source_metadata(metadata)
             result = refresh(args.store, {name: getattr(args, name + "_url") for name in URLS},
                              {name: getattr(args, name) for name in URLS}, metadata, args.timeout, args.allow_count_decrease)
         else:
