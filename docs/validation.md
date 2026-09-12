@@ -44,7 +44,11 @@ CLI queries, verifies embedded provenance/credits and read-only file hashes,
 and regenerates both JSON exports to compare exact retained artifact hashes.
 No network fetch occurs. Allow several minutes and at least 2 GB free for the
 database, replacement stage and exports. The final database/exports remain in
-`--work-dir`, outside Git. The existing saved-source test below independently
+`--work-dir`, outside Git. Each invocation regenerates both JSON profiles under
+a fresh `exports-*` directory, including when `--work-dir` is reused; the report's
+`export_directory` identifies that directory relative to `--work-dir`. Previous
+exports are retained but cannot bypass the current serialization check.
+The existing saved-source test below independently
 checks upstream parsing and the original importer algorithm.
 
 The full saved-source regression is opt-in because its roughly 100 MB of
@@ -75,7 +79,8 @@ Those remain required in a later app integration workspace.
 
 ## SQLite milestone result
 
-Tool 0.2.0 passed all 43 tests (the original 29 plus 14 SQLite regressions)
+Tool 0.2.0 passed all 45 tests (the original 29, 14 SQLite regressions and two
+saved-validator regressions)
 on Python 3.12.7/macOS arm64. Independent review found no actionable issues.
 The installed wheel's CLI passed refresh/build/query/integrity/export checks
 from outside the source directory. Both full database builds matched every
@@ -86,6 +91,9 @@ exports. The final database contains 1,563,495 records (895,910 dated and
 on this machine. Timings are observations, not performance guarantees.
 See [SQLite verification results and hashes](sqlite-validation-result.json).
 The generated database is local and untracked; no data release is published.
+The validator regressions exercise real export CLI subprocesses in a reused
+work directory, proving that both profiles regenerate and cached artifacts
+cannot conceal a failure in the current serializer.
 
 ## First milestone: validated 2026-09-12 snapshot
 

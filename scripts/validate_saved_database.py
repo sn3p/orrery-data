@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -53,6 +54,26 @@ def verify_rows(database, master):
                 counts["master_records"] += 1
                 counts["missing_discovery" if expected["disc"] is None else "known_discovery"] += 1
     assert counts == EXPECTED, counts
+
+
+def verify_exports(store, version, reference_exports, work_dir, timings):
+    # An existing export version bypasses serialization. Every validation run
+    # must use a new root, while retaining both profiles for later inspection.
+    output = Path(tempfile.mkdtemp(prefix="exports-", dir=work_dir))
+    exports = []
+    for limit in (None, 100000):
+        flags = [] if limit is None else ["--limit", limit]
+        exported, timings[f"export_{limit or 'all'}"] = cli("export", "--store", store, "--snapshot", version,
+                                                         "--output", output, *flags)
+        references = [json.loads(p.read_text()) for p in reference_exports.glob("*/manifest.json")]
+        reference = next(r for r in references if r["selection"]["limit"] == limit)
+        assert exported["artifacts"] == reference["artifacts"]
+        directory = Path(exported["path"])
+        for line in (directory / "SHA256SUMS").read_text().splitlines():
+            expected, name = line.split("  ")
+            assert sha(directory / name) == expected
+        exports.append({"limit": limit, "artifacts": exported["artifacts"]})
+    return exports, output
 
 
 def main():
@@ -101,24 +122,12 @@ def main():
     assert again["database_version"] == built["database_version"]
     verify_rows(database, master)
     print("Re-exporting all/100k JSON and comparing exact retained artifact hashes...", flush=True)
-    exports = []
-    for limit in (None, 100000):
-        flags = [] if limit is None else ["--limit", limit]
-        exported, timings[f"export_{limit or 'all'}"] = cli("export", "--store", args.store, "--snapshot", version,
-                                                           "--output", args.work_dir / "exports", *flags)
-        references = [json.loads(p.read_text()) for p in args.reference_exports.glob("*/manifest.json")]
-        reference = next(r for r in references if r["selection"]["limit"] == limit)
-        assert exported["artifacts"] == reference["artifacts"]
-        directory = Path(exported["path"])
-        for line in (directory / "SHA256SUMS").read_text().splitlines():
-            expected, name = line.split("  ")
-            assert sha(directory / name) == expected
-        exports.append({"limit": limit, "artifacts": exported["artifacts"]})
+    exports, export_directory = verify_exports(args.store, version, args.reference_exports, args.work_dir, timings)
     report = {"status": "passed", "source_snapshot": "2026-09-12", "snapshot_version": version,
               "database_version": again["database_version"], "database_schema_version": again["database_schema_version"],
               "tool_version": info["tool_version"], "sqlite_version": sqlite3.sqlite_version,
               "counts": EXPECTED, "database_artifact": again["artifact"], "master_sha256": MASTER_SHA256,
-              "exports": exports, "timings_seconds": timings,
+              "exports": exports, "export_directory": export_directory.name, "timings_seconds": timings,
               "checks": ["existing snapshot checksums", "every master field equals SQLite on first and repeated build",
                          "complete counts and unique identities", "integrity and foreign keys", "provenance/header/notice equality",
                          "real CLI identity/date/null/pagination queries", "read commands retain database bytes",
