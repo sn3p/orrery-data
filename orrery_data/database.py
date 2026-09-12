@@ -181,6 +181,15 @@ def open_database(database):
                 or metadata["identity"]["snapshot_version"] != metadata["snapshot"]["snapshot_version"]
                 or metadata["database_version"] != "sqlite-v1-" + digest(metadata["identity"])):
             raise DataError("Database metadata identity mismatch")
+        if not all(isinstance(metadata[key], str) for key in ("mpcorb_header", "notice")):
+            raise DataError("Invalid database provenance text")
+        header = metadata["mpcorb_header"].encode("utf-8")
+        header_info = {"sha256": hashlib.sha256(header).hexdigest(), "bytes": len(header)}
+        if (metadata["identity"]["files"] != metadata["snapshot"]["files"]
+                or header_info != metadata["identity"]["files"]["MPCORB-header.txt"]
+                or hashlib.sha256(metadata["notice"].encode("utf-8")).hexdigest()
+                != metadata["identity"]["notice_sha256"]):
+            raise DataError("Database provenance checksum mismatch")
         yield connection, metadata
 
 

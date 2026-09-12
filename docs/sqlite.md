@@ -65,6 +65,10 @@ full integrity and foreign-key checks. These commands open existing files with
 files fail without creating directories or databases. Unsupported application
 IDs/schema versions, invalid metadata or corrupt files fail; rebuild from the
 retained source snapshot. There is no arbitrary SQL execution command.
+Every read also checks the embedded MPC header's UTF-8 bytes/hash and the
+attribution notice hash against the database identity, and requires the
+identity's file manifest to match the embedded snapshot's file manifest.
+SQLite's structural integrity check alone does not validate those values.
 
 ## Schema and versions
 

@@ -1,6 +1,7 @@
 """The saved-data validator must regenerate exports even in a reused work directory."""
 
 from pathlib import Path
+import json
 import subprocess
 import tempfile
 import unittest
@@ -60,6 +61,12 @@ with patch("orrery_data.pipeline.deterministic_gzip", side_effect=OSError("injec
         with patch.object(validator.subprocess, "run", side_effect=fail_new_serialization):
             with self.assertRaisesRegex(RuntimeError, "injected serialization failure"):
                 self.verify()
+
+    def test_committed_report_identifies_the_fresh_export_directory(self):
+        report = json.loads((ROOT / "docs/sqlite-validation-result.json").read_text())
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["export_directory"].startswith("exports-"))
+        self.assertEqual(Path(report["export_directory"]).name, report["export_directory"])
 
 
 if __name__ == "__main__":

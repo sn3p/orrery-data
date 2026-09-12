@@ -1,6 +1,7 @@
 """SQLite regression coverage at real CLI, persistence and failure boundaries."""
 
 from contextlib import closing
+import copy
 import fcntl
 import gzip
 import hashlib
@@ -326,6 +327,43 @@ with patch("orrery_data.database.insert_master", side_effect=pause):
         self.cli("query", "--discovery", "missing", "--discovered-from", "2000-01-01", code=1)
         self.cli("query", "--discovered-from", "2001-01-01", "--discovered-to", "2000-01-01", code=1)
         self.assertFalse(self.database.exists())
+
+    def test_altered_provenance_is_rejected_by_every_read_command(self):
+        from orrery_data.storage import digest
+
+        self.cli("build-db")
+        pristine = self.database.read_bytes()
+        with closing(sqlite3.connect(self.database)) as connection:
+            original = {k: json.loads(v) for k, v in connection.execute("SELECT key, value FROM metadata")}
+        for case in ("notice", "mpcorb_header", "notice_type", "header_type", "snapshot_files",
+                     "identity_files", "header_bytes"):
+            with self.subTest(case=case):
+                self.database.write_bytes(pristine)
+                metadata = copy.deepcopy(original)
+                if case in ("notice", "mpcorb_header"):
+                    # Same length: checksum comparison must detect the alteration.
+                    metadata[case] = "X" + metadata[case][1:]
+                elif case in ("notice_type", "header_type"):
+                    metadata["notice" if case == "notice_type" else "mpcorb_header"] = None
+                elif case == "snapshot_files":
+                    metadata["snapshot"]["files"]["master.jsonl.gz"]["sha256"] = "0" * 64
+                else:
+                    metadata["identity"]["files"]["MPCORB-header.txt"]["bytes"] += 1
+                    if case == "header_bytes":
+                        metadata["snapshot"]["files"] = copy.deepcopy(metadata["identity"]["files"])
+                    metadata["database_version"] = "sqlite-v1-" + digest(metadata["identity"])
+                with closing(sqlite3.connect(self.database)) as connection:
+                    connection.executemany("UPDATE metadata SET value = ? WHERE key = ?",
+                                           [(json.dumps(v), k) for k, v in metadata.items()])
+                    connection.commit()
+                    self.assertEqual(connection.execute("PRAGMA integrity_check").fetchall(), [("ok",)])
+                before = self.checksum()
+                for command in (("db-info", "--verify"), ("db-info",), ("query", "--number", 1)):
+                    self.assertIn("provenance", self.cli(*command, code=1)["error"])
+                    self.assertEqual(before, self.checksum())
+        self.database.write_bytes(pristine)
+        self.assertEqual(self.cli("db-info", "--verify")["integrity"], "ok")
+        self.assertEqual(self.cli("query")["matched_records"], 9)
 
     def test_json_exports_unchanged_by_database_build(self):
         output = self.directory / "exports"

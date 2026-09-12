@@ -79,7 +79,7 @@ Those remain required in a later app integration workspace.
 
 ## SQLite milestone result
 
-Tool 0.2.0 passed all 45 tests (the original 29, 14 SQLite regressions and two
+Tool 0.2.0 passed all 47 tests (the original 29, 15 SQLite regressions and three
 saved-validator regressions)
 on Python 3.12.7/macOS arm64. Independent review found no actionable issues.
 The installed wheel's CLI passed refresh/build/query/integrity/export checks
@@ -87,13 +87,17 @@ from outside the source directory. Both full database builds matched every
 field of every saved master row. SQLite 3.51.0 integrity and foreign-key checks
 passed; full/100k JSON payload hashes remain identical to the retained 0.1.2
 exports. The final database contains 1,563,495 records (895,910 dated and
-667,585 null), occupies 377,061,376 bytes, and was built in about 23–25 seconds
+667,585 null), occupies 377,061,376 bytes, and was built in about 24–27 seconds
 on this machine. Timings are observations, not performance guarantees.
 See [SQLite verification results and hashes](sqlite-validation-result.json).
 The generated database is local and untracked; no data release is published.
 The validator regressions exercise real export CLI subprocesses in a reused
 work directory, proving that both profiles regenerate and cached artifacts
 cannot conceal a failure in the current serializer.
+The committed report is regenerated with that validator and checked for its
+fresh-export directory metadata. Provenance regressions also confirm that
+altered MPC header/notice text or file manifests fail every database read
+command even when SQLite's structural integrity check passes.
 
 ## First milestone: validated 2026-09-12 snapshot
 
