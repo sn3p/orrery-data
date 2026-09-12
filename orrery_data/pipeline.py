@@ -28,6 +28,18 @@ def load_snapshot(store, version=None, verify=True):
         raise DataError("No valid snapshot selected; run refresh first")
     directory = store / "snapshots" / version
     manifest = read_json(directory / "snapshot.json")
+    validate_snapshot_manifest(manifest, version)
+    if verify:
+        for name, info in manifest["sources"].items():
+            if name not in ("mpcorb", "numbered"):
+                raise DataError("Unexpected snapshot source")
+            verify_file(directory / f"{name}.input", info)
+        for name in ("master.jsonl.gz", "MPCORB-header.txt"):
+            verify_file(directory / name, manifest["files"][name])
+    return directory, manifest
+
+
+def validate_snapshot_manifest(manifest, version):
     if (manifest["snapshot_version"] != version
             or "snapshot-v1-" + digest(manifest["identity"]) != version
             or manifest["schema_version"] != SCHEMA_VERSION
@@ -47,14 +59,6 @@ def load_snapshot(store, version=None, verify=True):
             or counts["numbered_orbits"] + counts["unnumbered_orbits"] != counts["orbital_records"]
             or counts["known_discovery"] + counts["unmatched_discovery_records"] != counts["discovery_records"]):
         raise DataError("Snapshot counts do not reconcile")
-    if verify:
-        for name, info in manifest["sources"].items():
-            if name not in ("mpcorb", "numbered"):
-                raise DataError("Unexpected snapshot source")
-            verify_file(directory / f"{name}.input", info)
-        for name in ("master.jsonl.gz", "MPCORB-header.txt"):
-            verify_file(directory / name, manifest["files"][name])
-    return directory, manifest
 
 
 def check(store, urls, timeout):

@@ -127,3 +127,37 @@ suite preserve this rounded endpoint. Full and limited exports match every
 numeric field from the original importer, with the limit applied before sort.
 These are locally prepared artifacts, not a published data release or completed
 app/GPU integration.
+
+## Release preparation regression
+
+Tool 0.3.0 adds CLI coverage for complete/copyable bundles, exact unchanged
+JSON profiles, local/HTTP provenance, code/data identity separation, pinned
+snapshots, immutable reruns, count decreases, removals/corrections, input and
+output damage, mixed versions/metadata, interruption, failure/retry and locks.
+The actual manual-workflow helper runs against a local HTTP server, including
+reruns, invalid inputs, source failures, empty failure outputs and invocation
+from another working directory. `actionlint` validates the workflow YAML.
+
+Full saved release validation (no network and no mutation of reference inputs):
+
+```sh
+python3 scripts/validate_saved_release.py \
+  --store /path/retained/store \
+  --reference-exports /path/retained/releases \
+  --work-dir /path/release-validation \
+  --report /path/release-validation.json
+```
+
+Run from committed producer code. Every invocation prepares into a fresh output
+root, compares every SQLite field against all 1,563,495 master records, compares
+all full/100k export payload hashes to the retained references, repeats
+preparation in the same directory, copies the candidate independently,
+verifies it with a pinned manifest hash, exercises known/null/rounded-endpoint
+queries, and confirms damaged copied bytes are rejected. The complete candidate
+is retained; the temporary copied candidate is removed. `--clone-copy` uses
+macOS APFS copy-on-write for the independent transfer copy when space is tight.
+Normally allow at least 2 GB free. This validator reads the already validated
+saved snapshot; the earlier saved-source validator covers original parsing.
+The release report identifies the exact producing commit and artifact hashes.
+GitHub-hosted dispatch/upload/download and app rendering are separate,
+unverified surfaces; no manual workflow run or data publication is implied.
