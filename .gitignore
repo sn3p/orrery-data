@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Machine-specific Conductor overrides; keep shared settings.toml tracked
+.conductor/*.local.*
+
+# Local pipeline inputs, snapshots, and generated release artifacts
+.context/
+.data/
+artifacts/

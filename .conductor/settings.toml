@@ -1,0 +1,9 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+run_mode = "concurrent"
+
+[scripts.run.test]
+command = "python3 -m unittest discover -s tests -v"
+default = true
+icon = "test-tube"

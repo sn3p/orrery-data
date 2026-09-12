@@ -1,0 +1,143 @@
+{
+  "status": "passed",
+  "source_snapshot": "2026-09-12",
+  "snapshot_version": "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5",
+  "counts": {
+    "orbital_records": 1563495,
+    "master_records": 1563495,
+    "known_discovery": 895910,
+    "missing_discovery": 667585,
+    "numbered_orbits": 895910,
+    "unnumbered_orbits": 667585,
+    "unsupported_orbits": 0,
+    "discovery_records": 895910,
+    "unmatched_discovery_records": 0
+  },
+  "full_export": {
+    "data_version": "export-v1-42b1e8ae3c8d8e254de9772399a6375137fd8451badf1161ba8b464429b344ed",
+    "counts": {
+      "orbital_records": 1563495,
+      "master_records": 1563495,
+      "known_discovery": 895910,
+      "missing_discovery": 667585,
+      "numbered_orbits": 895910,
+      "unnumbered_orbits": 667585,
+      "unsupported_orbits": 0,
+      "discovery_records": 895910,
+      "unmatched_discovery_records": 0,
+      "discovery_export": 895910
+    },
+    "artifacts": {
+      "master.jsonl.gz": {
+        "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+        "bytes": 92289968,
+        "profile": "master",
+        "records": 1563495
+      },
+      "catalog.json": {
+        "sha256": "0fb42d148878ea3270ee81a6bd501ba65b50b78dd558a24abab45f0af084199b",
+        "bytes": 118824557,
+        "profile": "discovery",
+        "records": 895910
+      },
+      "catalog.json.gz": {
+        "sha256": "f915e083b1f18dff745d9130a215bb7b69588ec904c6ccf38e512463d14b0a4b",
+        "bytes": 34197622,
+        "profile": "discovery",
+        "records": 895910
+      },
+      "MPCORB-header.txt": {
+        "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+        "bytes": 2349
+      },
+      "NOTICE.txt": {
+        "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+        "bytes": 2446
+      }
+    }
+  },
+  "limited_export": {
+    "data_version": "export-v1-967f19b5f9456dbd006704a2114f7c9b56501eb99b61655710e5524bed6c1d1e",
+    "counts": {
+      "orbital_records": 1563495,
+      "master_records": 1563495,
+      "known_discovery": 895910,
+      "missing_discovery": 667585,
+      "numbered_orbits": 895910,
+      "unnumbered_orbits": 667585,
+      "unsupported_orbits": 0,
+      "discovery_records": 895910,
+      "unmatched_discovery_records": 0,
+      "discovery_export": 100000
+    },
+    "artifacts": {
+      "master.jsonl.gz": {
+        "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+        "bytes": 92289968,
+        "profile": "master",
+        "records": 1563495
+      },
+      "catalog.json": {
+        "sha256": "cbfc1ddb8f7ec3e0dae227ee6c4afb10582b60e43b1d9308c33362bdc617d28c",
+        "bytes": 13258794,
+        "profile": "discovery",
+        "records": 100000
+      },
+      "catalog.json.gz": {
+        "sha256": "3acef88eed47f2fb816de2b31b59adef319424c45a8d83af33021fdc0d1180f7",
+        "bytes": 3867423,
+        "profile": "discovery",
+        "records": 100000
+      },
+      "MPCORB-header.txt": {
+        "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+        "bytes": 2349
+      },
+      "NOTICE.txt": {
+        "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+        "bytes": 2446
+      }
+    }
+  },
+  "checks": [
+    "source hashes",
+    "complete counts",
+    "unique identities",
+    "null discovery coverage",
+    "all nine fields equal original importer (all and 100k)",
+    "manifest checksums",
+    "fresh-store determinism"
+  ],
+  "limits": "No browser/GPU rendering, transfer, preparation or playback performance validation.",
+  "runtime": {
+    "python": "3.12.7",
+    "os": "Darwin",
+    "machine": "arm64",
+    "zlib": "1.2.12"
+  },
+  "cli_tests": 29,
+  "tool_version": "0.1.2",
+  "upstream_check": {
+    "checked_at": "2026-09-12T18:28:56Z",
+    "snapshot_version": "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5",
+    "status": "unchanged",
+    "sources": {
+      "mpcorb": {
+        "url": "https://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz",
+        "status": "unchanged",
+        "etag": "\"59532b5-65b48bc98ae54\"",
+        "last_modified": "Sat, 12 Sep 2026 12:57:00 GMT",
+        "content_length": "93663925",
+        "reason": "strong ETag matches (server validator, not a download hash)"
+      },
+      "numbered": {
+        "url": "https://minorplanetcenter.net/iau/lists/NumberedMPs.txt",
+        "status": "unchanged",
+        "etag": "\"4cf2e11-65afcf5dbc156\"",
+        "last_modified": "Tue, 08 Sep 2026 18:32:43 GMT",
+        "content_length": "80686609",
+        "reason": "strong ETag matches (server validator, not a download hash)"
+      }
+    }
+  }
+}
