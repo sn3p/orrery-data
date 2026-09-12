@@ -187,6 +187,8 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     output = Path(output).absolute()
     require(not output.is_symlink() and not output.resolve().is_relative_to((store / "snapshots").resolve()),
             "Release output must not be a symlink or be inside immutable snapshots")
+    require(version is not None or output.resolve() != store.resolve(),
+            "Source store and release output must be different directories when refreshing")
     with writer_lock(output):
         previous_counts = None
         pointer = output / "latest.json"

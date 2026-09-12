@@ -260,6 +260,44 @@ class ReleaseCLI(unittest.TestCase):
         self.cli("prepare-release", "--snapshot", "invalid", "--mpcorb", "missing", "--producer-commit", COMMIT, code=1)
         self.cli("prepare-release", "--snapshot", "invalid", "--mpcorb-url", "http://unused", "--producer-commit", COMMIT, code=1)
 
+    def test_refresh_rejects_same_store_and_output_before_side_effects(self):
+        message = "Source store and release output must be different directories when refreshing"
+        self.assertIn(message, self.prepare("--output", self.store, code=1)["error"])
+        self.assertFalse(self.store.exists())
+        self.assertEqual(self.requests, [])
+
+        first = self.prepare()
+        before_store, before_output = self.tree(self.store), self.tree(self.output)
+        self.requests.clear()
+        store_link = self.directory / "linked-store"
+        store_link.symlink_to(self.store, target_is_directory=True)
+        parent_link = self.directory / "linked-parent"
+        parent_link.symlink_to(self.directory, target_is_directory=True)
+        for store, output in (
+            (self.store, self.store),
+            (self.store, self.store / ".." / self.store.name),
+            (Path(os.path.relpath(self.store, ROOT)), self.store),
+            (store_link, self.store),
+            (self.store, parent_link / self.store.name),
+        ):
+            with self.subTest(store=store, output=output):
+                self.assertIn(message, self.prepare("--store", store, "--output", output, code=1)["error"])
+                self.assertEqual(self.tree(self.store), before_store)
+                self.assertEqual(self.tree(self.output), before_output)
+                self.assertEqual(self.requests, [])
+        self.assertEqual(self.prepare(), first)
+
+    def test_pinned_preparation_can_share_store_and_output(self):
+        snapshot = self.cli("refresh", "--store", self.store, *self.http_args())["snapshot_version"]
+        before_store = self.tree(self.store)
+        self.requests.clear()
+        first = self.prepare("--output", self.store, offline=snapshot)
+        self.verify(first["path"])
+        self.assertEqual(self.prepare("--output", self.store, offline=snapshot), first)
+        after_store = self.tree(self.store)
+        self.assertEqual({name: after_store[name] for name in before_store}, before_store)
+        self.assertEqual(self.requests, [])
+
     def test_locks_partial_downloads_and_output_placement(self):
         first = self.prepare()
         before = self.tree(self.output)

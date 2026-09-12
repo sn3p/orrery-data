@@ -118,7 +118,10 @@ bytes unchanged for the same retained master and gzip runtime.
 ## Failure safety and count policy
 
 Preparation uses an advisory output lock and a private stage on the destination
-filesystem. Every artifact and cross-file identity is verified before the
+filesystem. Without `--snapshot`, `--store` and `--output` must resolve to different
+directories; preparation rejects identical roots before locking or refreshing.
+Pinned offline preparation may use the same directory for both.
+Every artifact and cross-file identity is verified before the
 candidate directory is installed; only then does `latest.json` advance atomically.
 An already existing candidate is verified before reuse. A damaged existing
 candidate or latest pointer fails closed and is never silently overwritten.

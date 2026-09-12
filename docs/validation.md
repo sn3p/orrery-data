@@ -134,6 +134,9 @@ Tool 0.3.0 adds CLI coverage for complete/copyable bundles, exact unchanged
 JSON profiles, local/HTTP provenance, code/data identity separation, pinned
 snapshots, immutable reruns, count decreases, removals/corrections, input and
 output damage, mixed versions/metadata, interruption, failure/retry and locks.
+CLI regressions reject identical source/output roots and path aliases before
+refreshing or writing, retain existing sources and candidates, and verify
+recovery with distinct roots and pinned preparation with a shared root.
 The actual manual-workflow helper runs against a local HTTP server, including
 reruns, invalid inputs, source failures, empty failure outputs and invocation
 from another working directory. `actionlint` validates the workflow YAML.
@@ -165,7 +168,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 63 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 65 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
