@@ -1,0 +1,105 @@
+{
+  "status": "passed",
+  "source_snapshot": "2026-09-12",
+  "snapshot_version": "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5",
+  "database_version": "sqlite-v1-5e39024f16a8c53c2f482e9b1a8ad693e95496b8395fefe1257e68d07769aef7",
+  "database_schema_version": 1,
+  "tool_version": "0.2.0",
+  "sqlite_version": "3.51.0",
+  "counts": {
+    "master_records": 1563495,
+    "known_discovery": 895910,
+    "missing_discovery": 667585
+  },
+  "database_artifact": {
+    "sha256": "ba1e237b63e9170bf64b49920a895f127d9036d70cc1d24d9ed3c562d19c1cc4",
+    "bytes": 377061376
+  },
+  "master_sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+  "exports": [
+    {
+      "limit": null,
+      "artifacts": {
+        "master.jsonl.gz": {
+          "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+          "bytes": 92289968,
+          "profile": "master",
+          "records": 1563495
+        },
+        "catalog.json": {
+          "sha256": "0fb42d148878ea3270ee81a6bd501ba65b50b78dd558a24abab45f0af084199b",
+          "bytes": 118824557,
+          "profile": "discovery",
+          "records": 895910
+        },
+        "catalog.json.gz": {
+          "sha256": "f915e083b1f18dff745d9130a215bb7b69588ec904c6ccf38e512463d14b0a4b",
+          "bytes": 34197622,
+          "profile": "discovery",
+          "records": 895910
+        },
+        "MPCORB-header.txt": {
+          "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+          "bytes": 2349
+        },
+        "NOTICE.txt": {
+          "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+          "bytes": 2446
+        }
+      }
+    },
+    {
+      "limit": 100000,
+      "artifacts": {
+        "master.jsonl.gz": {
+          "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+          "bytes": 92289968,
+          "profile": "master",
+          "records": 1563495
+        },
+        "catalog.json": {
+          "sha256": "cbfc1ddb8f7ec3e0dae227ee6c4afb10582b60e43b1d9308c33362bdc617d28c",
+          "bytes": 13258794,
+          "profile": "discovery",
+          "records": 100000
+        },
+        "catalog.json.gz": {
+          "sha256": "3acef88eed47f2fb816de2b31b59adef319424c45a8d83af33021fdc0d1180f7",
+          "bytes": 3867423,
+          "profile": "discovery",
+          "records": 100000
+        },
+        "MPCORB-header.txt": {
+          "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+          "bytes": 2349
+        },
+        "NOTICE.txt": {
+          "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+          "bytes": 2446
+        }
+      }
+    }
+  ],
+  "export_directory": "exports-0muqzhj0",
+  "timings_seconds": {
+    "build": 26.992,
+    "info_verify": 2.677,
+    "query_all": 0.122,
+    "query_known": 0.444,
+    "query_missing": 0.093,
+    "repeat_build": 23.643,
+    "export_all": 14.532,
+    "export_100000": 6.573
+  },
+  "checks": [
+    "existing snapshot checksums",
+    "every master field equals SQLite on first and repeated build",
+    "complete counts and unique identities",
+    "integrity and foreign keys",
+    "provenance/header/notice equality",
+    "real CLI identity/date/null/pagination queries",
+    "read commands retain database bytes",
+    "full and 100k JSON exports equal retained artifact hashes"
+  ],
+  "limits": "Local producer only; no HTTP hosting, release publication, browser or app integration verification."
+}

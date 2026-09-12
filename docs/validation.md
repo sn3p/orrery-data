@@ -15,6 +15,42 @@ concurrent writers, expected source hashes, validator outcomes, malformed HTTP,
 partial downloads, corrupt/truncated gzip and previous-output retention.
 CI runs this suite on Python 3.11–3.13 with no live-source dependency.
 
+SQLite regressions also use real CLI processes: complete field/provenance
+round trips, case-sensitive authority lookups, distinct W/w values, null dates,
+inclusive date filters, stable order/pagination, repeat/update/removal/rollback,
+existing readers across replacement, writer locks, invalid/corrupt inputs and
+outputs, read-only missing-file behavior, and injected insert/commit/integrity/
+replacement failures. A process is killed after real inserts before commit to
+verify retained output and retry recovery. Existing full/limited JSON exports
+are compared before and after database construction.
+
+## Full saved SQLite regression
+
+Build from the already validated 2026-09-12 store and compare against its
+retained full and 100k JSON exports:
+
+```sh
+python3 scripts/validate_saved_database.py \
+  --store /path/to/retained/store \
+  --reference-exports /path/to/retained/releases \
+  --work-dir /path/to/sqlite-validation \
+  --report .context/sqlite-validation.json
+```
+
+This checks the expected master SHA-256, invokes the real builder twice,
+compares every field of every database row against the master after both builds,
+checks SQLite integrity/foreign keys and complete dated/null counts, exercises
+CLI queries, verifies embedded provenance/credits and read-only file hashes,
+and regenerates both JSON exports to compare exact retained artifact hashes.
+No network fetch occurs. Allow several minutes and at least 2 GB free for the
+database, replacement stage and exports. The final database/exports remain in
+`--work-dir`, outside Git. Each invocation regenerates both JSON profiles under
+a fresh `exports-*` directory, including when `--work-dir` is reused; the report's
+`export_directory` identifies that directory relative to `--work-dir`. Previous
+exports are retained but cannot bypass the current serialization check.
+The existing saved-source test below independently
+checks upstream parsing and the original importer algorithm.
+
 The full saved-source regression is opt-in because its roughly 100 MB of
 compressed inputs do not belong in Git. Use the original 2026-09-12 MPCORB gzip,
 the losslessly archived NumberedMPs gzip, and their saved `.headers` files:
@@ -41,7 +77,29 @@ count. Generation timings measure this producer only. No transfer, browser,
 GPU preparation, playback, mobile or positional-accuracy benchmark is implied.
 Those remain required in a later app integration workspace.
 
-## Validated 2026-09-12 snapshot
+## SQLite milestone result
+
+Tool 0.2.0 passed all 47 tests (the original 29, 15 SQLite regressions and three
+saved-validator regressions)
+on Python 3.12.7/macOS arm64. Independent review found no actionable issues.
+The installed wheel's CLI passed refresh/build/query/integrity/export checks
+from outside the source directory. Both full database builds matched every
+field of every saved master row. SQLite 3.51.0 integrity and foreign-key checks
+passed; full/100k JSON payload hashes remain identical to the retained 0.1.2
+exports. The final database contains 1,563,495 records (895,910 dated and
+667,585 null), occupies 377,061,376 bytes, and was built in about 24–27 seconds
+on this machine. Timings are observations, not performance guarantees.
+See [SQLite verification results and hashes](sqlite-validation-result.json).
+The generated database is local and untracked; no data release is published.
+The validator regressions exercise real export CLI subprocesses in a reused
+work directory, proving that both profiles regenerate and cached artifacts
+cannot conceal a failure in the current serializer.
+The committed report is regenerated with that validator and checked for its
+fresh-export directory metadata. Provenance regressions also confirm that
+altered MPC header/notice text or file manifests fail every database read
+command even when SQLite's structural integrity check passes.
+
+## First milestone: validated 2026-09-12 snapshot
 
 All checks above passed with tool 0.1.2 on Python 3.12.7/macOS arm64. Both
 live MPC strong ETags matched the saved sources at 2026-09-12T18:28:56Z.
