@@ -13,6 +13,9 @@ import time
 
 from validate_saved_database import EXPECTED, MASTER_SHA256, ROOT, cli, sha, verify_rows
 
+# Retained source identity recorded in docs/release-validation-result.json.
+EXPECTED_SNAPSHOT_VERSION = "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5"
+
 
 def main():
     if not __debug__:
@@ -33,6 +36,9 @@ def main():
     subprocess.run(["git", "diff", "--exit-code", "HEAD", "--", "orrery_data", "scripts", "pyproject.toml"],
                    cwd=ROOT, check=True)
     version = json.loads((args.store / "current.json").read_text())["snapshot_version"]
+    if version != EXPECTED_SNAPSHOT_VERSION:
+        raise SystemExit(f"requires retained validated 2026-09-12 source snapshot {EXPECTED_SNAPSHOT_VERSION}; "
+                         f"current snapshot is {version}")
     snapshot_dir = args.store / "snapshots" / version
     master = snapshot_dir / "master.jsonl.gz"
     assert sha(master) == MASTER_SHA256, "requires retained validated master"

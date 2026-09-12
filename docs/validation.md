@@ -154,6 +154,11 @@ python3 scripts/validate_saved_release.py \
 Run from committed producer code with assertions enabled. The release validator
 rejects `python -O`, `python -OO` and enabled `PYTHONOPTIMIZE` before validation
 or output writes, so disabled checks cannot produce a passing report.
+It pins the retained snapshot version recorded in the committed release result
+as well as the master hash, rejecting a different source snapshot before creating
+its work directory. Regression coverage includes an added unmatched discovery
+record that changes the source identity and counts while leaving every export
+payload unchanged; rejection preserves source files and any existing report.
 Every invocation prepares into a fresh output
 root, compares every SQLite field against all 1,563,495 master records, compares
 all full/100k export payload hashes to the retained references, repeats
@@ -168,7 +173,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 65 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 67 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
