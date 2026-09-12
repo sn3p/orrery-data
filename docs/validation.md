@@ -134,6 +134,10 @@ Tool 0.3.0 adds CLI coverage for complete/copyable bundles, exact unchanged
 JSON profiles, local/HTTP provenance, code/data identity separation, pinned
 snapshots, immutable reruns, count decreases, removals/corrections, input and
 output damage, mixed versions/metadata, interruption, failure/retry and locks.
+Resealed manifest regressions cover required fields, generation timestamps,
+runtime consistency, preparation/count policy and rejection of invalid orphan
+candidates before activation. Valid recorded runtimes (including zlib `1.3`)
+and explicit count-decrease overrides remain accepted.
 CLI regressions reject identical source/output roots and path aliases before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
@@ -173,7 +177,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 67 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 70 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered

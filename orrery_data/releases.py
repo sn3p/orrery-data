@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+from datetime import datetime
 from pathlib import Path
 import platform
 import re
@@ -16,7 +17,8 @@ import zlib
 from . import SCHEMA_VERSION, __version__
 from .database import DATABASE_SCHEMA_VERSION, build_database, database_info
 from .formats import DataError, FIELDS
-from .pipeline import export, load_snapshot, refresh, validate_snapshot_manifest
+from .pipeline import (export, load_snapshot, refresh, validate_snapshot_counts,
+                       validate_snapshot_manifest)
 from .storage import (atomic_json, digest, file_info, now, read_json, verify_file,
                       write_json, writer_lock)
 
@@ -37,6 +39,44 @@ def validate_baseline(counts):
             and all(type(v) is int and v >= 0 for v in counts.values()),
             "Baseline counts require four nonnegative integers: " + ", ".join(COUNT_KEYS))
     return counts
+
+
+def release_timestamp(value):
+    require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value),
+            "Release generation timestamps must be UTC YYYY-MM-DDTHH:MM:SSZ")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise DataError("Invalid release generation timestamp") from exc
+
+
+def validate_release_metadata(manifest):
+    keys = {"release_version", "release_schema_version", "identity", "dataset_identity", "created_at",
+            "runtime", "sources", "counts", "database_version", "profiles", "preparation", "artifacts"}
+    require(isinstance(manifest, dict) and set(manifest) == keys, "Invalid release manifest fields")
+    require(all(isinstance(manifest[key], dict) for key in
+                ("identity", "dataset_identity", "runtime", "sources", "counts", "profiles", "preparation", "artifacts")),
+            "Release metadata fields must be objects")
+    require(type(manifest["release_schema_version"]) is int, "Invalid release schema version type")
+    created_at = release_timestamp(manifest["created_at"])
+    runtime = manifest["runtime"]
+    require(set(runtime) == {"python", "sqlite", "zlib"}
+            and all(isinstance(value, str) and re.fullmatch(r"[0-9]+(?:\.[0-9]+)+[a-zA-Z0-9.+-]*", value)
+                    for value in runtime.values()), "Invalid release runtime versions")
+    validate_snapshot_counts(manifest["counts"])
+    preparation = manifest["preparation"]
+    require(set(preparation) == {"baseline_counts", "previous_counts", "allow_count_decrease"}
+            and type(preparation["allow_count_decrease"]) is bool, "Invalid release preparation fields")
+    if preparation["baseline_counts"] is not None:
+        validate_baseline(preparation["baseline_counts"])
+    if preparation["previous_counts"] is not None:
+        validate_snapshot_counts(preparation["previous_counts"])
+    if not preparation["allow_count_decrease"]:
+        for baseline in (preparation["baseline_counts"], preparation["previous_counts"]):
+            if baseline is not None:
+                require(all(manifest["counts"][key] >= baseline[key] for key in COUNT_KEYS),
+                        "Release counts decreased without a recorded override")
+    return created_at
 
 
 def dataset_identity(snapshot):
@@ -102,6 +142,7 @@ def verify_release(directory, manifest_sha256=None):
         require(file_info(directory / "release.json")["sha256"] == manifest_sha256,
                 "Release manifest checksum mismatch")
     manifest = read_json(directory / "release.json")
+    created_at = validate_release_metadata(manifest)
     identity = manifest["identity"]
     require(manifest["release_schema_version"] == RELEASE_SCHEMA_VERSION
             and identity["release_schema_version"] == RELEASE_SCHEMA_VERSION,
@@ -134,6 +175,8 @@ def verify_release(directory, manifest_sha256=None):
     verify_file(directory / "MPCORB-header.txt", snapshot["files"]["MPCORB-header.txt"])
     require(file_info(directory / "NOTICE.txt")["sha256"] == identity["notice_sha256"], "Attribution mismatch")
     database = database_info(directory / "orrery.sqlite3", verify=True)
+    require(manifest["runtime"]["sqlite"] == database["sqlite_version"], "Release SQLite runtime mismatch")
+    require(release_timestamp(database["created_at"]) <= created_at, "Release predates database generation")
     require(database["snapshot"] == snapshot and database["tool_version"] == producer["tool_version"]
             and database["database_version"] == manifest["database_version"]
             and database["mpcorb_header"] == (directory / "MPCORB-header.txt").read_text(encoding="utf-8")
@@ -143,6 +186,9 @@ def verify_release(directory, manifest_sha256=None):
     for profile, limit in profiles.items():
         root = directory / "exports" / profile
         exported = read_json(root / "manifest.json")
+        require(exported["compression"]["catalog"]["zlib"] == manifest["runtime"]["zlib"],
+                "Release export zlib runtime mismatch")
+        require(release_timestamp(exported["created_at"]) <= created_at, "Release predates export generation")
         expected_identity = {"snapshot_version": snapshot["snapshot_version"],
                              "tool_version": producer["tool_version"], "schema_version": SCHEMA_VERSION,
                              "selection": selection(limit)}

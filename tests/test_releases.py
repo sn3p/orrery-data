@@ -260,6 +260,93 @@ class ReleaseCLI(unittest.TestCase):
         self.cli("prepare-release", "--snapshot", "invalid", "--mpcorb", "missing", "--producer-commit", COMMIT, code=1)
         self.cli("prepare-release", "--snapshot", "invalid", "--mpcorb-url", "http://unused", "--producer-commit", COMMIT, code=1)
 
+    def test_resealed_release_provenance_rejected(self):
+        first = self.prepare()
+        original = json.loads((Path(first["path"]) / "release.json").read_text())
+        mutations = [("missing-" + key, (key,), None, True) for key in original]
+        mutations += [
+            ("extra-field", ("unexpected",), True, False),
+            ("schema-bool", ("release_schema_version",), True, False),
+            ("created-null", ("created_at",), None, False),
+            ("created-invalid", ("created_at",), "2026-02-30T12:00:00Z", False),
+            ("created-no-zone", ("created_at",), "2026-09-12T12:00:00", False),
+            ("created-before-build", ("created_at",), "2000-01-01T00:00:00Z", False),
+            ("runtime-list", ("runtime",), [], False),
+            ("runtime-missing", ("runtime", "python"), None, True),
+            ("runtime-extra", ("runtime", "unexpected"), "1.0.0", False),
+            ("runtime-empty", ("runtime", "python"), " ", False),
+            ("runtime-invalid", ("runtime", "python"), "invented", False),
+            ("runtime-number", ("runtime", "sqlite"), 3, False),
+            ("runtime-sqlite-mismatch", ("runtime", "sqlite"), "0.0.0", False),
+            ("runtime-zlib-mismatch", ("runtime", "zlib"), "0.0.0", False),
+            ("preparation-list", ("preparation",), [], False),
+            ("preparation-missing", ("preparation", "baseline_counts"), None, True),
+            ("preparation-extra", ("preparation", "unexpected"), None, False),
+            ("override-string", ("preparation", "allow_count_decrease"), "false", False),
+            ("override-number", ("preparation", "allow_count_decrease"), 0, False),
+            ("baseline-partial", ("preparation", "baseline_counts"), {"orbital_records": 9}, False),
+            ("baseline-bool", ("preparation", "baseline_counts"),
+             {"orbital_records": True, "discovery_records": 6, "master_records": 9, "known_discovery": 6}, False),
+            ("baseline-decrease", ("preparation", "baseline_counts"),
+             {"orbital_records": 10, "discovery_records": 7, "master_records": 10, "known_discovery": 7}, False),
+            ("previous-partial", ("preparation", "previous_counts"), {"master_records": 9}, False),
+            ("previous-negative", ("preparation", "previous_counts"), {**original["counts"], "missing_discovery": -1}, False),
+            ("previous-inconsistent", ("preparation", "previous_counts"), {**original["counts"], "orbital_records": 10}, False),
+            ("previous-decrease", ("preparation", "previous_counts"),
+             {**original["counts"], "orbital_records": 10, "master_records": 10,
+              "unnumbered_orbits": 4, "missing_discovery": 4}, False),
+        ]
+        for label, keys, value, remove in mutations:
+            with self.subTest(mutation=label):
+                copied = self.directory / label
+                shutil.copytree(first["path"], copied)
+                manifest = json.loads(json.dumps(original))
+                target = manifest
+                for key in keys[:-1]:
+                    target = target[key]
+                if remove:
+                    del target[keys[-1]]
+                else:
+                    target[keys[-1]] = value
+                (copied / "release.json").write_text(json.dumps(manifest))
+                # Reseal only the root checksum list, even when the inventory is missing.
+                names = sorted([*original["artifacts"], "release.json"])
+                (copied / "SHA256SUMS").write_text("".join(f"{file_info(copied / n)['sha256']}  {n}\n" for n in names))
+                before = self.tree(copied)
+                self.verify(copied, code=1)
+                self.assertEqual(self.tree(copied), before)
+
+    def test_orphan_with_invalid_provenance_cannot_be_activated(self):
+        first = self.prepare()
+        bundle = Path(first["path"])
+        manifest_path = bundle / "release.json"
+        original = manifest_path.read_bytes()
+        manifest = json.loads(original)
+        del manifest["preparation"]
+        manifest_path.write_text(json.dumps(manifest))
+        self.reseal(bundle)
+        (self.output / "latest.json").unlink()
+        before = self.tree(self.output)
+        self.prepare(offline=first["snapshot_version"], code=1)
+        self.assertEqual(self.tree(self.output), before)
+        self.assertFalse((self.output / "latest.json").exists())
+        manifest_path.write_bytes(original)
+        self.reseal(bundle)
+        self.verify(self.prepare(offline=first["snapshot_version"])["path"])
+
+    def test_provenance_accepts_recorded_runtime_and_explicit_count_override(self):
+        baseline = self.directory / "baseline.json"
+        baseline.write_text(json.dumps({"orbital_records": 10, "discovery_records": 7,
+                                       "master_records": 10, "known_discovery": 7}))
+        script = ("import platform, sqlite3, zlib\n"
+                  "platform.python_version = lambda: '3.11.0'\n"
+                  "sqlite3.sqlite_version = '3.40.0'\nzlib.ZLIB_VERSION = '1.3'\n"
+                  "from orrery_data.cli import main\nraise SystemExit(main())")
+        first = self.prepare("--baseline-counts", baseline, "--allow-count-decrease", script=script)
+        self.verify(first["path"])
+        # Normal verification runs in this machine's runtime, not the recorded one.
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
     def test_refresh_rejects_same_store_and_output_before_side_effects(self):
         message = "Source store and release output must be different directories when refreshing"
         self.assertIn(message, self.prepare("--output", self.store, code=1)["error"])

@@ -52,8 +52,15 @@ def validate_snapshot_manifest(manifest, version):
         raise DataError("Snapshot source identity mismatch")
     if set(manifest["files"]) != {"master.jsonl.gz", "MPCORB-header.txt"}:
         raise DataError("Snapshot is missing required files")
-    counts = manifest["counts"]
-    if (not all(type(value) is int and value >= 0 for value in counts.values())
+    validate_snapshot_counts(manifest["counts"])
+
+
+def validate_snapshot_counts(counts):
+    keys = {"orbital_records", "master_records", "known_discovery", "missing_discovery",
+            "numbered_orbits", "unnumbered_orbits", "unsupported_orbits",
+            "discovery_records", "unmatched_discovery_records"}
+    if (not isinstance(counts, dict) or set(counts) != keys
+            or not all(type(value) is int and value >= 0 for value in counts.values())
             or counts["master_records"] + counts["unsupported_orbits"] != counts["orbital_records"]
             or counts["known_discovery"] + counts["missing_discovery"] != counts["master_records"]
             or counts["numbered_orbits"] + counts["unnumbered_orbits"] != counts["orbital_records"]

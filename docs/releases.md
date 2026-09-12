@@ -93,6 +93,17 @@ and each nested manifest/checksum file. Neither contains private local source
 paths. Preserve the MPC header, notice and matching master when redistributing
 catalogs; the software license does not relicense upstream data.
 
+Schema 1 requires the complete top-level manifest fields. Its `created_at` is a
+valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) no earlier than the contained database
+and export generation times. `runtime` contains Python, SQLite and zlib version
+strings; the SQLite and catalog zlib versions must match the contained metadata.
+These are the producing runtime's versions and may differ from the verifier's.
+`preparation` records a boolean `allow_count_decrease`, the four explicit
+`baseline_counts` or null, and the complete prior snapshot `previous_counts` or
+null. Counts must be nonnegative integers, prior snapshot counts must reconcile,
+and a decrease against either recorded baseline requires a true override.
+Standalone verification and candidate reuse enforce the same requirements.
+
 | Identity | Meaning |
 |---|---|
 | Producer `tool_version` and `commit` | Code that prepared the bundle; currently 0.3.0 |
