@@ -138,6 +138,9 @@ Resealed manifest regressions cover required fields, generation timestamps,
 runtime consistency, preparation/count policy and rejection of invalid orphan
 candidates before activation. Valid recorded runtimes (including zlib `1.3`)
 and explicit count-decrease overrides remain accepted.
+Additional release CLI regressions cover orbital ranges in full/selected catalogs,
+strict integer identity schemas, preservation of bundles when an output path is
+at or beneath a candidate, and differing zlib build/runtime versions.
 CLI regressions reject identical source/output roots and path aliases before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
@@ -156,6 +159,13 @@ python3 scripts/validate_saved_release.py \
 ```
 
 Run from committed producer code with assertions enabled. The release validator
+captures that commit's exact Git blobs into a private temporary directory, then
+runs its validator, comparison helper and every producer subprocess from that
+snapshot. Concurrent checkout/HEAD changes cannot change the code used or its
+reported commit. Python and system libraries remain those of the invoking machine.
+Regressions cover a complete fixture run while the original checkout and HEAD
+change and are restored, dirty-checkout report preservation, and relative paths.
+The release validator
 rejects `python -O`, `python -OO` and enabled `PYTHONOPTIMIZE` before validation
 or output writes, so disabled checks cannot produce a passing report.
 It pins the retained snapshot version recorded in the committed release result
@@ -177,7 +187,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 70 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 78 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered

@@ -11,13 +11,13 @@ import sys
 import tempfile
 import time
 
-from validate_saved_database import EXPECTED, MASTER_SHA256, ROOT, cli, sha, verify_rows
-
+ROOT = Path(__file__).resolve().parents[1]
 # Retained source identity recorded in docs/release-validation-result.json.
 EXPECTED_SNAPSHOT_VERSION = "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5"
+PRODUCER_PATHS = ("orrery_data", "scripts", "pyproject.toml")
 
 
-def main():
+def arguments():
     if not __debug__:
         raise SystemExit("Saved release validation requires assertions; run Python without "
                          "-O/-OO or PYTHONOPTIMIZE.")
@@ -32,9 +32,68 @@ def main():
         setattr(args, key, getattr(args, key).resolve())
     if args.clone_copy and sys.platform != "darwin":
         parser.error("--clone-copy requires macOS APFS")
+    return args
+
+
+def copy_committed_producer(commit, destination):
+    # Read immutable Git blobs, not checkout files or archive transformations.
+    # HEAD and the original worktree can change after this point without
+    # affecting any validator helper or producer process in this run.
+    entries = subprocess.check_output(["git", "ls-tree", "-rz", commit, "--", *PRODUCER_PATHS], cwd=ROOT)
+    for entry in entries.split(b"\0"):
+        if not entry:
+            continue
+        metadata, name = entry.split(b"\t", 1)
+        mode, kind, object_id = metadata.split()
+        if kind != b"blob" or mode not in (b"100644", b"100755"):
+            raise RuntimeError("Committed producer must contain only regular files")
+        target = destination / name.decode("utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(subprocess.check_output(["git", "cat-file", "blob", object_id.decode("ascii")], cwd=ROOT))
+        target.chmod(0o555 if mode == b"100755" else 0o444)
+
+
+def producer_command(*args):
+    script = ("import runpy, sys\n"
+              "sys.path.insert(0, sys.argv.pop(1))\n"
+              "runpy.run_module('orrery_data', run_name='__main__')\n")
+    return [sys.executable, "-I", "-B", "-c", script, str(ROOT), *map(str, args)]
+
+
+def cli(*args):
+    started = time.monotonic()
+    result = subprocess.run(producer_command(*args), cwd=ROOT, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    return json.loads(result.stdout), round(time.monotonic() - started, 3)
+
+
+def main():
+    args = arguments()  # Reject optimization and invalid arguments before creating files.
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    subprocess.run(["git", "diff", "--exit-code", "HEAD", "--", "orrery_data", "scripts", "pyproject.toml"],
-                   cwd=ROOT, check=True)
+    subprocess.run(["git", "diff", "--exit-code", commit, "--", *PRODUCER_PATHS], cwd=ROOT, check=True)
+    with tempfile.TemporaryDirectory(prefix="orrery-release-producer-") as temp:
+        producer = Path(temp)
+        copy_committed_producer(commit, producer)
+        # Run the validator and its independent SQL helper from that same
+        # committed snapshot. Isolated mode excludes ambient PYTHONPATH/code.
+        script = ("import runpy, sys\n"
+                  "root, commit = sys.argv[1:3]\n"
+                  "sys.argv = [root + '/scripts/validate_saved_release.py', *sys.argv[3:]]\n"
+                  "sys.path.insert(0, root + '/scripts')\n"
+                  "validator = runpy.run_path(sys.argv[0])\n"
+                  "validator['validate'](validator['arguments'](), commit)\n")
+        options = ["--store", str(args.store), "--reference-exports", str(args.reference_exports),
+                   "--work-dir", str(args.work_dir), "--report", str(args.report)]
+        if args.clone_copy:
+            options.append("--clone-copy")
+        subprocess.run([sys.executable, "-I", "-B", "-c", script, str(producer), commit, *options],
+                       cwd=producer, check=True)
+
+
+def validate(args, commit):
+    from validate_saved_database import EXPECTED, MASTER_SHA256, sha, verify_rows
+
     version = json.loads((args.store / "current.json").read_text())["snapshot_version"]
     if version != EXPECTED_SNAPSHOT_VERSION:
         raise SystemExit(f"requires retained validated 2026-09-12 source snapshot {EXPECTED_SNAPSHOT_VERSION}; "
@@ -93,7 +152,7 @@ def main():
     # A damaged transferred payload must fail without changing the original candidate.
     with (copied / "exports/first-100000/catalog.json.gz").open("ab") as stream:
         stream.write(b"damaged transfer")
-    rejected = subprocess.run([sys.executable, "-m", "orrery_data", "verify-release", "--bundle", str(copied)],
+    rejected = subprocess.run(producer_command("verify-release", "--bundle", copied),
                               cwd=ROOT, capture_output=True, text=True)
     assert rejected.returncode == 1 and "Checksum or size mismatch" in rejected.stderr
     assert sha(bundle / "exports/first-100000/catalog.json.gz") == exports["first-100000"]["catalog.json.gz"]["sha256"]

@@ -84,6 +84,8 @@ JSON reports; they do not rewrite a release manifest.
 
 Artifact bytes are deterministic for the same sources, tool, selection and
 Python/zlib implementation. Gzip uses level 6, zero mtime and no stored filename.
+New snapshot/export compression metadata records the loaded zlib runtime version
+(`ZLIB_RUNTIME_VERSION`); reused snapshots preserve their original provenance.
 Generation/acquisition timestamps and transport metadata can differ across
 independent builds, so manifest bytes and their checksum are not asserted equal
 between those builds. The manifest's artifact hashes, counts and content IDs

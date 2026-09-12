@@ -133,7 +133,7 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
                         "files": {name: file_info(stage / name) for name in ("master.jsonl.gz", "MPCORB-header.txt")},
                         "exclusions": {"master": {"non_elliptic_orbits": counts["unsupported_orbits"]},
                                        "discovery": {"missing_discovery_date": counts["missing_discovery"]}},
-                        "compression": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_VERSION}}
+                        "compression": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_RUNTIME_VERSION}}
             write_json(stage / "snapshot.json", manifest)
             for name in urls:
                 (stage / f"{name}.txt").unlink()
@@ -212,7 +212,7 @@ def export(store, output, version=None, limit=None):
                             "sources": snapshot["sources"], "counts": {**snapshot["counts"], "discovery_export": len(selected)},
                             "exclusions": {**snapshot["exclusions"], "selection_limit": snapshot["counts"]["known_discovery"] - len(selected)},
                             "compression": {"master": snapshot["compression"],
-                                            "catalog": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_VERSION}},
+                                            "catalog": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_RUNTIME_VERSION}},
                             "artifacts": artifacts}
                 write_json(stage / "manifest.json", manifest)
                 # Convenient release-side checksum list includes the manifest itself.

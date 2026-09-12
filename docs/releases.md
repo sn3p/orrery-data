@@ -98,6 +98,8 @@ valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) no earlier than the contained datab
 and export generation times. `runtime` contains Python, SQLite and zlib version
 strings; the SQLite and catalog zlib versions must match the contained metadata.
 These are the producing runtime's versions and may differ from the verifier's.
+New compression metadata uses the loaded zlib runtime version, including in
+snapshot and export manifests; pinned snapshots retain their original metadata.
 `preparation` records a boolean `allow_count_decrease`, the four explicit
 `baseline_counts` or null, and the complete prior snapshot `previous_counts` or
 null. Counts must be nonnegative integers, prior snapshot counts must reconcile,
@@ -132,6 +134,9 @@ Preparation uses an advisory output lock and a private stage on the destination
 filesystem. Without `--snapshot`, `--store` and `--output` must resolve to different
 directories; preparation rejects identical roots before locking or refreshing.
 Pinned offline preparation may use the same directory for both.
+The output must also be outside existing release candidates, including renamed
+copies and their subdirectories. Use the containing release root as `--output`,
+rather than a prior result's candidate path; invalid placements fail before locking.
 Every artifact and cross-file identity is verified before the
 candidate directory is installed; only then does `latest.json` advance atomically.
 An already existing candidate is verified before reuse. A damaged existing
@@ -193,7 +198,10 @@ paths, verifies all hashes/sizes and checksum lists, checks schema/version/count
 and source/credit consistency across SQLite and every export, runs SQLite
 integrity/FK checks, and checks catalog fields, finite values, date order,
 counts and gzip/plain equivalence. It does not fetch upstream sources or rerun
-the original importer; the full saved-data validator separately compares every
+the original importer. Catalog validation enforces schema 1's supported elliptic
+orbital ranges, including the valid printed 360-degree endpoint. Release identity
+schema versions must be integers; boolean and floating-point values are rejected.
+The full saved-data validator separately compares every
 SQLite field and the reference JSON payload hashes. Run verification before
 consuming downloaded data and keep the directory read-only during verification
 and use. Hashes detect damage; they are not authenticity signatures. Obtain the

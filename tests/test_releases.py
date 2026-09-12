@@ -340,9 +340,17 @@ class ReleaseCLI(unittest.TestCase):
                                        "master_records": 10, "known_discovery": 7}))
         script = ("import platform, sqlite3, zlib\n"
                   "platform.python_version = lambda: '3.11.0'\n"
-                  "sqlite3.sqlite_version = '3.40.0'\nzlib.ZLIB_VERSION = '1.3'\n"
+                  "sqlite3.sqlite_version = '3.40.0'\nzlib.ZLIB_VERSION = '9.9.9'\n"
+                  "zlib.ZLIB_RUNTIME_VERSION = '1.3'\n"
                   "from orrery_data.cli import main\nraise SystemExit(main())")
         first = self.prepare("--baseline-counts", baseline, "--allow-count-decrease", script=script)
+        bundle = Path(first["path"])
+        self.assertEqual(json.loads((bundle / "release.json").read_text())["runtime"]["zlib"], "1.3")
+        self.assertEqual(json.loads((bundle / "snapshot.json").read_text())["compression"]["zlib"], "1.3")
+        for profile in ("full", "first-2"):
+            compression = json.loads((bundle / f"exports/{profile}/manifest.json").read_text())["compression"]
+            self.assertEqual(compression["master"]["zlib"], "1.3")
+            self.assertEqual(compression["catalog"]["zlib"], "1.3")
         self.verify(first["path"])
         # Normal verification runs in this machine's runtime, not the recorded one.
         self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)

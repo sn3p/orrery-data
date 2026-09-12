@@ -1,12 +1,14 @@
-"""Saved-release validation must pin its source dataset and run its checks."""
+"""Saved-release validation must pin its source/code and run its checks."""
 
 import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +22,7 @@ class SavedReleaseValidation(unittest.TestCase):
         self.store = self.directory / "store"
         self.references = self.directory / "references"
         # Small valid inputs differ from the retained full dataset. Only the
-        # preflight tests substitute fixture identities; optimization tests
+        # validation tests substitute fixture identities; optimization tests
         # keep production expectations and must reject before reading inputs.
         self.snapshot = self.cli("refresh", "--store", self.store,
                                  "--mpcorb", ROOT / "tests/fixtures/MPCORB.DAT",
@@ -33,32 +35,115 @@ class SavedReleaseValidation(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True, check=True, timeout=30)
         return json.loads(result.stdout)
 
-    def preflight(self, work, report):
-        # Substitute a small retained fixture and clean producer Git checkout.
-        # Run the real argument/file/preflight path, stopping only at the costly
-        # release-build boundary; no source-identity check is mocked.
+    def producer(self, stop_before_prepare=True, pause=False):
+        # Commit the real producer/validator with only retained fixture values
+        # substituted. The bootstrap must read these committed Git objects.
         producer = self.directory / "producer"
         if not producer.exists():
+            shutil.copytree(ROOT / "orrery_data", producer / "orrery_data", ignore=shutil.ignore_patterns("__pycache__"))
+            (producer / "scripts").mkdir()
+            shutil.copyfile(ROOT / "pyproject.toml", producer / "pyproject.toml")
+            version = self.snapshot["snapshot_version"]
+            master = self.store / "snapshots" / version / "master.jsonl.gz"
+            values = {"EXPECTED_SNAPSHOT_VERSION": version,
+                      "MASTER_SHA256": hashlib.sha256(master.read_bytes()).hexdigest(),
+                      "EXPECTED": {key: self.snapshot["counts"][key]
+                                   for key in ("master_records", "known_discovery", "missing_discovery")}}
+            for name in ("validate_saved_release.py", "validate_saved_database.py"):
+                source = (ROOT / "scripts" / name).read_text()
+                for key, value in values.items():
+                    source = "\n".join(f"{key} = {value!r}" if line.startswith(key + " = ") else line
+                                       for line in source.split("\n"))
+                if name == "validate_saved_release.py":
+                    if stop_before_prepare:
+                        source = source.replace('    prepared, timings["prepare"] = cli(',
+                                                "    raise SystemExit('release preparation reached')\n"
+                                                '    prepared, timings["prepare"] = cli(')
+                    else:
+                        source = source.replace('(("all", 1563495), ("known", 895910), ("missing", 667585))',
+                                                '(("all", 9), ("known", 6), ("missing", 3))')
+                        source = source.replace('"K17S44L"', '"J60S01B"').replace('== 360.0', '== 224.49081')
+                (producer / "scripts" / name).write_text(source)
+            if pause:
+                entrypoint = producer / "orrery_data/__main__.py"
+                hook = ("import json, os, time\nfrom pathlib import Path\nimport sys\n"
+                        "events = Path(os.environ['ORRERY_TEST_EVENTS'])\n"
+                        "previous = events.read_text().splitlines() if events.exists() else []\n"
+                        "with events.open('a') as stream:\n"
+                        " stream.write(json.dumps({'root': str(Path(__file__).resolve().parents[1]), "
+                        "'command': sys.argv[1]}) + '\\n')\n"
+                        "gate = ('repeat' if sys.argv[1] == 'prepare-release' and previous else "
+                        "'copy' if sys.argv[1] == 'verify-release' and len(previous) == 2 else None)\n"
+                        "if gate:\n"
+                        " events.with_name(gate + '-paused').touch()\n"
+                        " deadline = time.monotonic() + 20\n"
+                        " while not events.with_name(gate + '-resume').exists():\n"
+                        "  if time.monotonic() > deadline: raise SystemExit('test gate timed out')\n"
+                        "  time.sleep(0.02)\n")
+                entrypoint.write_text(hook + entrypoint.read_text())
             subprocess.run(["git", "init", "--quiet", str(producer)], check=True, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=producer, check=True, capture_output=True)
             subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                            "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "Fixture"],
+                            "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture"],
                            cwd=producer, check=True, capture_output=True)
-        version = self.snapshot["snapshot_version"]
-        master = self.store / "snapshots" / version / "master.jsonl.gz"
-        script = ("import sys\nfrom pathlib import Path\n"
-                  f"sys.path.insert(0, {str(ROOT / 'scripts')!r})\n"
-                  "import validate_saved_release as validator\n"
-                  f"validator.ROOT = Path({str(producer)!r})\n"
-                  f"validator.EXPECTED_SNAPSHOT_VERSION = {version!r}\n"
-                  f"validator.MASTER_SHA256 = {hashlib.sha256(master.read_bytes()).hexdigest()!r}\n"
-                  "def stop(*args):\n"
-                  " assert args[0] == 'prepare-release'\n"
-                  " raise SystemExit('release preparation reached')\n"
-                  "validator.cli = stop\nvalidator.main()\n")
-        return subprocess.run([sys.executable, "-c", script, "--store", str(self.store),
-                               "--reference-exports", str(self.references), "--work-dir", str(work),
-                               "--report", str(report)], cwd=ROOT, env={**os.environ, "PYTHONOPTIMIZE": "0"},
+        return producer
+
+    def invocation(self, producer, work, report):
+        return [sys.executable, str(producer / "scripts/validate_saved_release.py"), "--store", str(self.store),
+                "--reference-exports", str(self.references), "--work-dir", str(work), "--report", str(report)]
+
+    def preflight(self, work, report):
+        # Run the real argument/file/preflight and committed-snapshot boundary,
+        # stopping only at release preparation; no identity check is mocked.
+        return subprocess.run(self.invocation(self.producer(), work, report),
+                              cwd=ROOT, env={**os.environ, "PYTHONOPTIMIZE": "0"},
                               capture_output=True, text=True, timeout=30)
+
+    def test_committed_producer_survives_changed_and_restored_source_and_head(self):
+        producer = self.producer(stop_before_prepare=False, pause=True)
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=producer, text=True).strip()
+        work, report, events = self.directory / "work", self.directory / "report.json", self.directory / "events"
+        process = subprocess.Popen(self.invocation(producer, work, report), cwd=ROOT,
+                                   env={**os.environ, "PYTHONOPTIMIZE": "0", "ORRERY_TEST_EVENTS": str(events)},
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            def wait_for(name):
+                deadline = time.monotonic() + 20
+                while not events.with_name(name).exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(events.with_name(name).exists(), f"validator did not reach {name}")
+
+            wait_for("repeat-paused")
+            # Changed producer code must never execute, even when HEAD moves
+            # with it and both changes disappear before the final report.
+            for name in ("orrery_data/releases.py", "scripts/validate_saved_database.py"):
+                (producer / name).write_text("raise RuntimeError('changed checkout executed')\n")
+            subprocess.run(["git", "add", "."], cwd=producer, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Concurrent changes"],
+                           cwd=producer, check=True, capture_output=True)
+            self.assertNotEqual(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=producer, text=True).strip(), commit)
+            events.with_name("repeat-resume").touch()
+            wait_for("copy-paused")
+            subprocess.run(["git", "reset", "--hard", commit], cwd=producer, check=True, capture_output=True)
+            events.with_name("copy-resume").touch()
+            stdout, stderr = process.communicate(timeout=30)
+            self.assertEqual(process.returncode, 0, stdout + stderr)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+        result = json.loads(report.read_text())
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["producer_commit"], commit)
+        self.assertEqual(result["release"]["producer"]["commit"], commit)
+        calls = [json.loads(line) for line in events.read_text().splitlines()]
+        self.assertEqual([call["command"] for call in calls],
+                         ["prepare-release", "prepare-release", "verify-release", "query", "query", "query", "query", "verify-release"])
+        roots = {call["root"] for call in calls}
+        self.assertEqual(len(roots), 1)
+        self.assertNotIn(str(producer), roots)
+        self.assertFalse(Path(roots.pop()).exists(), "private producer snapshot should be removed")
 
     def test_changed_sources_with_identical_master_rejected_before_writes(self):
         dates = (ROOT / "tests/fixtures/NumberedMPs.txt").read_text()
@@ -101,6 +186,29 @@ class SavedReleaseValidation(unittest.TestCase):
         self.assertIn("release preparation reached", result.stderr)
         self.assertTrue(work.is_dir())
         self.assertFalse(report.exists())
+
+    def test_relative_paths_keep_the_callers_directory(self):
+        producer = self.producer()
+        result = subprocess.run([sys.executable, str(producer / "scripts/validate_saved_release.py"),
+                                 "--store", "store", "--reference-exports", "references", "--work-dir", "work",
+                                 "--report", "report.json"], cwd=self.directory,
+                                env={**os.environ, "PYTHONOPTIMIZE": "0"}, capture_output=True, text=True, timeout=30)
+        self.assertIn("release preparation reached", result.stderr)
+        self.assertTrue((self.directory / "work").is_dir())
+        self.assertFalse((self.directory / "report.json").exists())
+
+    def test_dirty_producer_preserves_existing_report_before_preparation(self):
+        producer = self.producer()
+        path = producer / "orrery_data/releases.py"
+        path.write_text(path.read_text() + "\n# Uncommitted producer change\n")
+        work, report = self.directory / "work", self.directory / "report.json"
+        previous = b'{"previous_evidence":"keep"}\n'
+        report.write_bytes(previous)
+        result = self.preflight(work, report)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("release preparation reached", result.stderr)
+        self.assertFalse(work.exists())
+        self.assertEqual(report.read_bytes(), previous)
 
     def reject_optimized(self, label, flags=(), optimization=None, existing_report=False):
         work = self.directory / label

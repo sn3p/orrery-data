@@ -125,6 +125,9 @@ def verify_catalog(directory, manifest, expected_records):
         require(isinstance(row, dict) and set(row) == set(FIELDS)
                 and all(type(v) in (int, float) and math.isfinite(v) for v in row.values()),
                 "Invalid discovery catalog fields")
+        require(row["a"] > 0 and 0 <= row["e"] < 1 and row["n"] > 0
+                and 0 <= row["i"] <= 180 and all(0 <= row[key] <= 360 for key in ("W", "w", "M")),
+                "Invalid discovery orbital elements")
         require(row["disc"] >= previous, "Catalog discovery order mismatch")
         previous = row["disc"]
     for name in ("catalog.json", "catalog.json.gz"):
@@ -144,6 +147,9 @@ def verify_release(directory, manifest_sha256=None):
     manifest = read_json(directory / "release.json")
     created_at = validate_release_metadata(manifest)
     identity = manifest["identity"]
+    require(all(type(identity[key]) is int for key in
+                ("release_schema_version", "json_schema_version", "database_schema_version")),
+            "Invalid identity schema version types")
     require(manifest["release_schema_version"] == RELEASE_SCHEMA_VERSION
             and identity["release_schema_version"] == RELEASE_SCHEMA_VERSION,
             "Unsupported release schema")
@@ -231,9 +237,15 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     if baseline_counts is not None:
         validate_baseline(baseline_counts)
     output = Path(output).absolute()
-    require(not output.is_symlink() and not output.resolve().is_relative_to((store / "snapshots").resolve()),
+    resolved_output = output.resolve()
+    require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
             "Release output must not be a symlink or be inside immutable snapshots")
-    require(version is not None or output.resolve() != store.resolve(),
+    require(not any(parent.is_dir() and (re.fullmatch(r"release-v1-" + SHA256, parent.name)
+                                        or (parent / "release.json").exists()
+                                        or (parent / "release.json").is_symlink())
+                    for parent in (resolved_output, *resolved_output.parents)),
+            "Release output must not be at or inside an existing release candidate")
+    require(version is not None or resolved_output != store.resolve(),
             "Source store and release output must be different directories when refreshing")
     with writer_lock(output):
         previous_counts = None
@@ -286,7 +298,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
                 manifest = {"release_version": release_version, "release_schema_version": RELEASE_SCHEMA_VERSION,
                             "identity": identity, "dataset_identity": data_identity, "created_at": now(),
                             "runtime": {"python": platform.python_version(), "sqlite": sqlite3.sqlite_version,
-                                        "zlib": zlib.ZLIB_VERSION},
+                                        "zlib": zlib.ZLIB_RUNTIME_VERSION},
                             "sources": snapshot["sources"], "counts": snapshot["counts"],
                             "database_version": built["database_version"], "profiles": profile_metadata,
                             "preparation": {"baseline_counts": baseline_counts, "previous_counts": previous_counts,
