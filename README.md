@@ -3,6 +3,19 @@
 Validated, versioned minor-planet snapshots and static exports for Orrery and
 Orrery3D. Python 3.11+ on macOS/Linux; no runtime dependencies or server.
 
+The orbital elements and discovery circumstances used by this project are
+maintained by [The Minor Planet Center (MPC)](https://minorplanetcenter.net/):
+
+- [The MPC Orbit (MPCORB) Database](https://minorplanetcenter.net/iau/MPCORB.html):
+  orbital elements of minor planets.
+- [NumberedMPs.txt](https://minorplanetcenter.net/iau/lists/NumberedMPs.txt):
+  discovery circumstances of numbered minor planets.
+
+Thank you to the MPC, and to the astrometric observers and orbit computers
+whose work makes these datasets possible.
+
+## Usage
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
@@ -60,8 +73,9 @@ sampling, date-range UI and app integration remain separate work.
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)
 
+## Attribution
+
 The field mapping and selection behavior derive from the MIT-licensed
 [Orrery importer](https://github.com/sn3p/Orrery/blob/1968ca40f02b36a7190153ebcda4c706c30e0e7b/data/data_to_json.py).
-Data comes from the [Minor Planet Center](https://minorplanetcenter.net/iau/MPCORB.html).
 Keep the MPC header and [attribution notice](orrery_data/NOTICE.txt) with
 redistributed artifacts; the code license does not relicense upstream data.
