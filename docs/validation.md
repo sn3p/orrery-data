@@ -161,3 +161,15 @@ saved snapshot; the earlier saved-source validator covers original parsing.
 The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
+
+The 0.3.0 milestone passed all 60 tests, installed-wheel verification from
+outside the checkout, independent review and workflow linting. The full saved
+candidate matched every SQLite field and every retained full/100k export
+payload hash. Its original fresh preparation succeeded; the rerun encountered
+host disk exhaustion while writing the latest pointer. After reclaiming space
+with identical APFS-cloned payloads (reference hashes unchanged), two real CLI
+reruns preserved the candidate manifest exactly, every-row/hash comparisons
+passed again, and standalone copied-bundle queries/verification and deliberate
+corruption rejection passed. This recovery is retained explicitly in the
+[machine-readable release results](release-validation-result.json). Hosted
+manual dispatch/upload/download remains unverified; no data release was published.

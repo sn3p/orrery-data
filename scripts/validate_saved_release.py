@@ -90,7 +90,8 @@ def main():
     assert sha(bundle / "exports/first-100000/catalog.json.gz") == exports["first-100000"]["catalog.json.gz"]["sha256"]
     shutil.rmtree(copied)
     report = {"status": "passed", "producer_commit": commit, "python": platform.python_version(),
-              "release": prepared, "bundle_bytes": sum(v["bytes"] for v in manifest["artifacts"].values()),
+              "release": prepared, "artifact_payload_bytes": sum(v["bytes"] for v in manifest["artifacts"].values()),
+              "bundle_bytes": sum(p.stat().st_size for p in bundle.rglob("*") if p.is_file()),
               "every_sqlite_field_matches_master": True, "unchanged_export_artifacts": exports,
               "repeat_same_directory_immutable": True, "standalone_copy_verified_and_queried": True,
               "copy_method": "APFS clone" if args.clone_copy else "byte copy",
