@@ -12,7 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from orrery_data.releases import COMMIT, validate_baseline
-from orrery_data.paths import validate_writable_path
+from orrery_data.paths import validate_append_path, validate_writable_path
 from orrery_data.storage import atomic_json, loads_json, writer_lock
 
 
@@ -38,12 +38,15 @@ def main():
         allow = os.environ.get("RELEASE_ALLOW_COUNT_DECREASE", "false")
         if allow not in ("true", "false"):
             raise ValueError("Count decrease input must be true or false")
-        validate_writable_path(args.work_dir, label="Workflow work directory")
+        for root in (args.work_dir, args.work_dir / "store", args.work_dir / "releases"):
+            validate_writable_path(root, label="Workflow writer directory")
+            validate_append_path(root / ".lock", label="Workflow writer lock")
+        validate_writable_path(args.work_dir / "store/snapshots", label="Workflow snapshots directory")
         for name in ("baseline-counts.json", "prepared-release.json"):
             validate_writable_path(args.work_dir / name, label="Workflow metadata")
         for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
             if os.environ.get(key):
-                validate_writable_path(os.environ[key], label=key)
+                validate_append_path(os.environ[key], label=key)
         with writer_lock(args.work_dir):
             return prepare(args, commit, baseline, limits, allow)
     except subprocess.CalledProcessError as exc:

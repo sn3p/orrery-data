@@ -18,12 +18,13 @@ from . import SCHEMA_VERSION, __version__
 from .database import DATABASE_SCHEMA_VERSION, build_database, database_info, open_database
 from .contracts import URL, validate_contract
 from .metadata import validate_source_metadata
-from .records import iter_master
+from .records import iter_master, validate_catalog_record
 from .paths import validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
 from .storage import (URLS, atomic_json, digest, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
+                      verify_generated_gzip_header,
                       write_json, writer_lock)
 
 RELEASE_SCHEMA_VERSION = 1
@@ -125,6 +126,7 @@ def checksums(directory, names):
 def verify_catalog(directory, manifest, expected_records, connection, limit):
     plain = directory / "catalog.json"
     try:
+        verify_generated_gzip_header(directory / "catalog.json.gz")
         with gzip.open(directory / "catalog.json.gz", "rb") as stream:
             require(hashlib.file_digest(stream, "sha256").hexdigest() == file_info(plain)["sha256"],
                     "Compressed catalog differs from JSON")
@@ -142,12 +144,7 @@ def verify_catalog(directory, manifest, expected_records, connection, limit):
               ORDER BY o.source_order LIMIT ?)
         ORDER BY disc, source_order""", (-1 if limit is None else limit,))
     for index, (row, expected_row) in enumerate(zip_longest(rows, expected), 1):
-        require(isinstance(row, dict) and set(row) == set(FIELDS)
-                and all(type(v) in (int, float) and math.isfinite(v) for v in row.values()),
-                "Invalid discovery catalog fields")
-        require(row["a"] > 0 and 0 <= row["e"] < 1 and row["n"] > 0
-                and 0 <= row["i"] <= 180 and all(0 <= row[key] <= 360 for key in ("W", "w", "M")),
-                "Invalid discovery orbital elements")
+        validate_catalog_record(row)
         require(row["disc"] >= previous, "Catalog discovery order mismatch")
         previous = row["disc"]
         require(expected_row is not None and tuple(row[key] for key in FIELDS) == expected_row,
@@ -334,6 +331,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
         URL(value, f"Source URL {name}")
     if version is None:
         validate_writable_path(store, label="Source store")
+        validate_writable_path(store / "snapshots", label="Snapshot output")
     output = Path(output).absolute()
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),

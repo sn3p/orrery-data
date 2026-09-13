@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from . import __version__
 from .formats import DataError
+from .paths import validate_append_path
 
 
 URLS = {
@@ -63,6 +64,16 @@ def verify_file(path, info):
     validate_file_info(info, path.name)
     if file_info(path) != {k: info[k] for k in ("sha256", "bytes")}:
         raise DataError(f"Checksum or size mismatch: {path.name}")
+
+
+def verify_generated_gzip_header(path):
+    # Generated artifacts have no optional header fields or stored filename,
+    # and record mtime=0. Runtime and compression level cannot be inferred
+    # reliably from the stream; source-input gzip has no such header contract.
+    with path.open("rb") as stream:
+        header = stream.read(10)
+    if len(header) != 10 or header[:8] != b"\x1f\x8b\x08\x00\x00\x00\x00\x00":
+        raise DataError(f"Invalid {path.name}: generated gzip requires zero mtime and no optional header fields")
 
 
 def verify_decoded_source(path, info):
@@ -120,6 +131,7 @@ def atomic_json(path, value):
 
 @contextmanager
 def writer_lock(root):
+    validate_append_path(root / ".lock", label="Writer lock")
     root.mkdir(parents=True, exist_ok=True)
     with (root / ".lock").open("a") as lock:
         try:

@@ -214,8 +214,8 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 122 tests; installed-wheel verification from
-outside the checkout and workflow linting were completed earlier in this branch.
+The automated fixture suite, installed-wheel verification from outside the
+checkout and workflow linting are part of the release assurance gate below.
 The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
 host disk exhaustion while writing the latest pointer. After reclaiming space
@@ -230,26 +230,44 @@ That JSON is historical evidence for producer commit
 `d3e80458e8e1ee2cb55bccfa0e70e6453685ea62`, assembled from the original run and its
 recovery continuation. Its `recovery` section was added to document that event;
 it is not a verbatim report emitted by today's validator, which also records
-`python`. Later commits are covered by the automated CLI/HTTP/fixture suite and
-fresh verification of that retained bundle, not a new full-dataset generation
-at the current head. A fresh full run would produce its own report, producer
-identity and release version; preserve this historical report alongside it.
+`python`. This historical result does not establish validation of later producer commits.
+Each accepted producer commit needs a fresh full run with its own report,
+producer identity and release version; preserve this historical report alongside it.
 
 
 ## Systematic release assurance
 
 The acceptance matrix is [release-contract.md](release-contract.md). The suite
-includes 1,131 generated structural/type mutations over all four manifest kinds,
+includes generated structural/type mutations over all four manifest kinds,
 recursive snapshot/export/SQLite reader mutations, independently resealed payload
 inconsistencies, strict JSON failures, first-N selection and stable discovery ties.
 It covers 60 writer/candidate/path-alias combinations, retained-input/report
 isolation, per-run transfer ownership and concurrent local workflow baselines.
 The stored source loader also checks decoded bytes against the decoded-source
 identity; bundled releases cannot repeat this check without raw source files.
-These checks establish the listed invariants; test/review counts are not a proof
-that every possible defect is absent.
+These checks provide evidence for the listed invariants; test/review counts are
+not a proof that every possible defect is absent.
 
 The saved validator rejects work/report destinations that overlap retained inputs,
 producer code or immutable candidates. Reports may live inside a dedicated work
 directory. Transfer verification owns a unique temporary subtree, so retrying a
 run never deletes an unrelated `downloaded-copy` directory.
+
+Before accepting a release-producing change:
+
+1. Map every changed invariant to producer, existing-artifact reuse, reader and
+   failure/retry boundaries in the contract. Preserve positive compatibility cases.
+2. Reproduce each valid review finding at its actual boundary and add a regression
+   test. Apply shared rules to all affected entry points, then run the broader suite.
+3. Commit and freeze the executable code. Review the complete change independently
+   against the contract; record the reviewed SHA, evidence and remaining limits.
+   Any resulting code fix invalidates that freeze and needs affected-path checks.
+4. Run `scripts/validate_saved_release.py` from the final committed producer. Keep
+   its machine-readable report and artifact hashes with that commit's review evidence.
+   Historical full-data evidence cannot substitute for this run.
+5. Check CI at the published SHA and reconcile each acceptance item as verified,
+   intentionally outside scope or unverified. Keep hosted workflow evidence separate
+   from local helper execution and data verification.
+
+A resolved review thread records that finding's disposition. A passing review
+records its scope and commit; neither is a blanket correctness guarantee.

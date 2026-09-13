@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import stat
 
 from .formats import DataError
 
@@ -38,4 +39,17 @@ def validate_disjoint_paths(writable, inputs, *, label):
         source = resolved_path(source)
         if resolved.is_relative_to(source) or source.is_relative_to(resolved):
             raise DataError(f"{label} must not overlap retained inputs or producer code: {source}")
+    return resolved
+
+
+def validate_append_path(path, *, label="Append destination"):
+    """An append must own one regular inode; replacing a link is not possible."""
+    path = Path(path)
+    resolved = validate_writable_path(path, label=label)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return resolved
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise DataError(f"{label} must be a regular file with exactly one link")
     return resolved

@@ -157,5 +157,8 @@ def validate_contract(kind, value):
     for name, info in sources.items():
         if info['acquisition'] == 'http' and (info['retrieved_at'] is None or 'resolved_url' not in info):
             raise DataError(f'{kind} HTTP source {name} requires retrieval time and resolved URL')
+        if (info['acquisition'] == 'http' and info['content_length'] is not None
+                and int(info['content_length']) != info['bytes']):
+            raise DataError(f'{kind} HTTP source {name} Content-Length must match raw bytes')
         if info['compression'] == 'none' and info['decoded'] != {key: info[key] for key in ('sha256', 'bytes')}:
             raise DataError(f'{kind} uncompressed source {name} must match decoded metadata')

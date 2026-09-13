@@ -4,6 +4,7 @@ from collections import Counter
 import gzip
 import hashlib
 import http.client
+import os
 from pathlib import Path
 import re
 import shutil
@@ -12,12 +13,14 @@ import zlib
 
 from . import SCHEMA_VERSION, __version__
 from .formats import DataError, FIELDS, discoveries, master_rows
-from .contracts import validate_contract
-from .records import iter_master
+from .contracts import URL, validate_contract
+from .metadata import validate_source_metadata
+from .records import iter_master, validate_catalog_record
 from .paths import validate_writable_path
-from .storage import (acquire, atomic_json, deterministic_gzip, digest, encode,
+from .storage import (URLS, acquire, atomic_json, deterministic_gzip, digest, encode,
                       file_info, now, read_json, request, response_metadata,
-                      utc_timestamp, validate_file_info, verify_decoded_source, verify_file, write_json, writer_lock)
+                      utc_timestamp, validate_file_info, verify_decoded_source, verify_file,
+                      verify_generated_gzip_header, write_json, writer_lock)
 
 
 def current(store):
@@ -207,7 +210,25 @@ def check(store, urls, timeout):
 
 
 def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
+    store = Path(store)
+    if not isinstance(urls, dict) or urls.keys() != URLS.keys():
+        raise DataError("Source URLs require mpcorb and numbered")
+    for name, url in urls.items():
+        URL(url, f"Source URL {name}")
+    if not isinstance(local, dict) or not local.keys() <= URLS.keys():
+        raise DataError("Local sources must contain mpcorb/numbered paths")
+    for name, path in local.items():
+        if path is not None and (not isinstance(path, (str, os.PathLike)) or not os.fspath(path)):
+            raise DataError(f"Local source {name} must be a nonempty path or null")
+    if sum(path is not None for path in local.values()) not in (0, 2):
+        raise DataError("Provide both local mpcorb and numbered paths, or neither")
+    validate_source_metadata(metadata)
+    if type(timeout) is not int or timeout <= 0:
+        raise DataError("Timeout must be a positive integer")
+    if type(allow_count_decrease) is not bool:
+        raise DataError("Count decrease override must be boolean")
     validate_writable_path(store, label="Source store")
+    validate_writable_path(store / "snapshots", label="Snapshot output")
     with writer_lock(store):
         previous = load_snapshot(store)[1] if current(store) else None
         snapshots = store / "snapshots"
@@ -237,6 +258,7 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
                         "exclusions": {"master": {"non_elliptic_orbits": counts["unsupported_orbits"]},
                                        "discovery": {"missing_discovery_date": counts["missing_discovery"]}},
                         "compression": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_RUNTIME_VERSION}}
+            validate_snapshot_manifest(manifest, version)
             write_json(stage / "snapshot.json", manifest)
             for name in urls:
                 (stage / f"{name}.txt").unlink()
@@ -249,6 +271,21 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
             atomic_json(store / "current.json", {"snapshot_version": version})
         return {"status": "unchanged" if previous and previous["snapshot_version"] == version else "updated",
                 "snapshot_version": version, "counts": manifest["counts"], "path": str(destination)}
+
+
+def selected_master(path, counts, limit):
+    selected = []
+    total = known = 0
+    for row in iter_master(path):
+        total += 1
+        known += row["disc"] is not None
+        if row["disc"] is not None and (limit is None or len(selected) < limit):
+            selected.append(tuple(row[key] for key in FIELDS))
+    if (total, known, total - known) != tuple(counts[key] for key in
+                                             ("master_records", "known_discovery", "missing_discovery")):
+        raise DataError("Master contents do not match snapshot counts")
+    selected.sort(key=lambda row: row[0])
+    return selected
 
 
 def export(store, output, version=None, limit=None):
@@ -280,13 +317,15 @@ def export(store, output, version=None, limit=None):
             for name, info in snapshot["files"].items():
                 verify_file(destination / name, info)
             verify_file(destination / "NOTICE.txt", file_info(Path(__file__).with_name("NOTICE.txt")))
-            selected = []
-            for row in iter_master(source / "master.jsonl.gz"):
-                if row["disc"] is not None and (limit is None or len(selected) < limit):
-                    selected.append({key: row[key] for key in FIELDS})
-            selected.sort(key=lambda row: row["disc"])
-            if read_json(destination / "catalog.json") != selected:
+            selected = selected_master(source / "master.jsonl.gz", snapshot["counts"], limit)
+            catalog = read_json(destination / "catalog.json")
+            if not isinstance(catalog, list) or len(catalog) != len(selected):
                 raise DataError("Existing export catalog differs from selected master data")
+            for row, expected in zip(catalog, selected):
+                validate_catalog_record(row)
+                if tuple(row[key] for key in FIELDS) != expected:
+                    raise DataError("Existing export catalog differs from selected master data")
+            verify_generated_gzip_header(destination / "catalog.json.gz")
             with gzip.open(destination / "catalog.json.gz", "rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != file_info(destination / "catalog.json")["sha256"]:
                     raise DataError("Existing compressed catalog differs from JSON")
@@ -300,17 +339,7 @@ def export(store, output, version=None, limit=None):
                 for name in ("master.jsonl.gz", "MPCORB-header.txt"):
                     shutil.copyfile(source / name, stage / name)
                 shutil.copyfile(Path(__file__).with_name("NOTICE.txt"), stage / "NOTICE.txt")
-                selected = []
-                master_count, known_count = 0, 0
-                for row in iter_master(source / "master.jsonl.gz"):
-                    master_count += 1
-                    known_count += row["disc"] is not None
-                    if row["disc"] is not None and (limit is None or len(selected) < limit):
-                        selected.append(tuple(row[key] for key in FIELDS))
-                if (master_count != snapshot["counts"]["master_records"]
-                        or known_count != snapshot["counts"]["known_discovery"]):
-                    raise DataError("Master contents do not match snapshot counts")
-                selected.sort(key=lambda row: row[0])
+                selected = selected_master(source / "master.jsonl.gz", snapshot["counts"], limit)
                 with (stage / "catalog.json").open("wb") as catalog, deterministic_gzip(stage / "catalog.json.gz") as compressed:
                     def emit(data):
                         catalog.write(data)
@@ -334,6 +363,7 @@ def export(store, output, version=None, limit=None):
                             "compression": {"master": snapshot["compression"],
                                             "catalog": {"format": "gzip", "level": 6, "mtime": 0, "zlib": zlib.ZLIB_RUNTIME_VERSION}},
                             "artifacts": artifacts}
+                validate_export_manifest(manifest)
                 write_json(stage / "manifest.json", manifest)
                 # Convenient release-side checksum list includes the manifest itself.
                 lines = [f"{file_info(stage / name)['sha256']}  {name}\n" for name in sorted([*artifacts, "manifest.json"])]

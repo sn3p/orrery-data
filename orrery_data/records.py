@@ -2,13 +2,23 @@
 
 import gzip
 import math
+import re
 
 from .formats import DataError, FIELDS, identity
-from .storage import loads_json
+from .storage import loads_json, verify_generated_gzip_header
 
 OBJECT_FIELDS = ("id", "number", "packed_designation", "readable_designation", "disc")
 ORBIT_FIELDS = (*FIELDS[1:], "orbit_reference", "orbit_computer")
 MASTER_FIELDS = (*OBJECT_FIELDS, *ORBIT_FIELDS)
+
+
+def validate_catalog_record(row):
+    if (not isinstance(row, dict) or row.keys() != set(FIELDS)
+            or not all(type(value) in (int, float) and math.isfinite(value) for value in row.values())):
+        raise DataError("Invalid discovery catalog fields")
+    if (row["a"] <= 0 or row["n"] <= 0 or not 0 <= row["e"] < 1
+            or not 0 <= row["i"] <= 180 or not all(0 <= row[k] <= 360 for k in ("W", "w", "M"))):
+        raise DataError("Invalid discovery orbital elements")
 
 
 def validate_record(row):
@@ -23,6 +33,9 @@ def validate_record(row):
         raise DataError("Invalid master number")
     if identity(row["packed_designation"]) != (row["id"], row["number"]):
         raise DataError("Master MPC identity mismatch")
+    display_number = re.match(r"\(([0-9]+)\)", row["readable_designation"] or "")
+    if display_number and int(display_number[1]) != row["number"]:
+        raise DataError("Packed and readable MPC numbers disagree")
     if row["disc"] is not None and row["number"] is None:
         raise DataError("Only numbered master records can have discovery dates")
     for key in FIELDS:
@@ -35,9 +48,9 @@ def validate_record(row):
         raise DataError("Invalid master elliptic orbit")
 
 
-
 def iter_master(path):
     try:
+        verify_generated_gzip_header(path)
         with gzip.open(path, "rt", encoding="utf-8") as stream:
             for number, line in enumerate(stream, 1):
                 try:

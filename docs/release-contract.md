@@ -26,12 +26,23 @@ hardware failure, resource exhaustion, or a compromised operating system.
 ## Manifest structure
 
 All JSON objects reject duplicate keys. Every object below has an exact field
-set except source records, where `resolved_url` is optional for local acquisition. Integers exclude
-booleans and floating point. Numeric payload values must be finite; JSON NaN and
-infinity are rejected. Each manifest field is covered by structural mutation
-tests (missing, extra and wrong JSON type), with relational and boundary tests
-in addition. Schema definitions live in `orrery_data/contracts.py`; serialization
-stays in the producer, and tests exercise the real file/CLI boundaries.
+set except source records, where `resolved_url` is optional for local acquisition
+and required for HTTP acquisition. Integers exclude booleans and floating point.
+Numeric payload values must be finite; JSON NaN and infinity are rejected.
+Schema definitions live in `orrery_data/contracts.py`; serialization stays in
+the producer.
+
+The tests maintain an independent field inventory for all four manifest kinds.
+Fixtures include full and selected exports, null and populated preparation
+baselines/previous counts, and HTTP/local acquisition. Recursive missing-field,
+extra-field and wrong-type mutations exercise the schema checker directly;
+those probe counts describe direct checks, not total boundary coverage or proof
+of completeness. Release metadata mutations also run through `verify_release`
+on resealed files, including supported dynamic map entries and populated
+preparation objects, and assert that verification writes nothing. Snapshot,
+SQLite and cached-export mutations exercise their respective readers/activation
+boundaries. Positive compatibility cases and independently resealed relational
+and payload cases supplement structural mutations.
 
 | Object | Required fields / rules |
 | --- | --- |
@@ -63,7 +74,10 @@ remain the actual recorded values. Recorded versions need not equal the verifier
 
 Stored source loading verifies both raw and decoded bytes against their hashes;
 local saved HTTP Content-Length may describe the upstream representation rather
-than locally recompressed bytes. HTTP header strings remain recorded observations.
+than locally recompressed bytes. For HTTP acquisition, Content-Length must agree
+with recorded raw bytes. Other HTTP header strings remain recorded observations. Generated master/catalog gzip
+headers require zero mtime and no optional fields or stored filename; compression
+level and the actual producing runtime remain recorded claims.
 
 ## Payload and state guarantees
 
@@ -71,7 +85,7 @@ than locally recompressed bytes. HTTP header strings remain recorded observation
 | --- | --- |
 | Fixed layout | Bundle contains exactly the supported files and directories; no symlinks or special files; manifest paths cannot choose files to open |
 | Transport | Every byte count/hash and checksum list agrees; trusted manifest pin rejects resealing |
-| Master | Strict schema-v1 records, valid MPC identities, finite supported orbits, exact master/known/missing counts |
+| Master | Strict schema-v1 records, valid MPC identities and consistent displayed numbers, finite supported orbits, exact master/known/missing counts |
 | SQLite | Read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
 | Discovery catalogs | Full/selected rows equal the corresponding source-order selection from SQLite/master, then stable discovery sort; exact nine fields and gzip/plain equality |
 | Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers |

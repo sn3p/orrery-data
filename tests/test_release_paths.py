@@ -112,6 +112,174 @@ class ReleaseWriterPaths(unittest.TestCase):
                 "RELEASE_BASELINE_COUNTS": json.dumps(baseline), "RELEASE_SELECTED_LIMITS": "2",
                 "GITHUB_OUTPUT": "", "GITHUB_STEP_SUMMARY": ""}
 
+    def test_snapshot_child_aliases_fail_before_refresh_or_preparation_writes(self):
+        prepared = self.prepare()
+        bundle = Path(prepared["path"])
+        renamed = self.directory / "renamed-candidate"
+        shutil.copytree(bundle, renamed)
+        before = {root: tree(root) for root in (self.store, self.output, renamed)}
+        for index, target in enumerate((bundle, renamed, bundle / "exports/full")):
+            store = self.directory / f"aliased-store-{index}"
+            store.mkdir()
+            (store / "snapshots").symlink_to(target, target_is_directory=True)
+            output = self.directory / f"new-release-output-{index}"
+            commands = [
+                ("refresh", "--store", store, *self.http_args()),
+                ("prepare-release", "--store", store, "--output", output,
+                 "--producer-commit", test_releases.COMMIT, *self.http_args()),
+            ]
+            for command in commands:
+                with self.subTest(target=target, command=command[0]):
+                    self.requests.clear()
+                    self.assertIn("immutable", self.cli(*command, code=1)["error"])
+                    self.assertEqual(self.requests, [])
+                    self.assertEqual(list(store.iterdir()), [store / "snapshots"])
+                    self.assertFalse(output.exists())
+                    for root, expected in before.items():
+                        self.assertEqual(tree(root), expected)
+
+    def test_workflow_child_aliases_preserve_baseline_reports_and_candidates(self):
+        prepared = self.prepare()
+        bundle = Path(prepared["path"])
+        before = {root: tree(root) for root in (self.store, self.output)}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for index, child in enumerate(("store", "store/snapshots", "releases")):
+            with self.subTest(child=child):
+                work = self.directory / f"workflow-{index}"
+                work.mkdir()
+                (work / "baseline-counts.json").write_text("previous baseline evidence")
+                (work / "prepared-release.json").write_text("previous preparation evidence")
+                alias = work / child
+                alias.parent.mkdir(parents=True, exist_ok=True)
+                alias.symlink_to(bundle, target_is_directory=True)
+                previous_work = tree(work)
+                self.requests.clear()
+                result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                        cwd=ROOT, env=self.workflow_environment(prepared["counts"]),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("immutable", result.stderr)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(tree(work), previous_work)
+                self.assertFalse((work / ".lock").exists())
+                for root, expected in before.items():
+                    self.assertEqual(tree(root), expected)
+
+    def test_workflow_append_paths_reject_hard_links_and_nonregular_files(self):
+        prepared = self.prepare()
+        bundle = Path(prepared["path"])
+        before = {root: tree(root) for root in (self.store, self.output)}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for kind in ("hard-link", "symlink", "fifo", "directory"):
+                with self.subTest(key=key, kind=kind):
+                    append = self.directory / f"{key}-{kind}"
+                    if kind == "hard-link":
+                        os.link(bundle / "NOTICE.txt", append)
+                    elif kind == "symlink":
+                        append.symlink_to(self.directory / "not-created-output")
+                    elif kind == "fifo":
+                        os.mkfifo(append)
+                    else:
+                        append.mkdir()
+                    work = self.directory / f"work-{key}-{kind}"
+                    work.mkdir()
+                    (work / "baseline-counts.json").write_text("previous baseline evidence")
+                    (work / "prepared-release.json").write_text("previous preparation evidence")
+                    previous_work = tree(work)
+                    self.requests.clear()
+                    env = {**self.workflow_environment(prepared["counts"]), key: str(append)}
+                    result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("regular file with exactly one link", result.stderr)
+                    self.assertEqual(self.requests, [])
+                    self.assertEqual(tree(work), previous_work)
+                    self.assertFalse((work / ".lock").exists())
+                    self.assertFalse((self.directory / "not-created-output").exists())
+                    for root, expected in before.items():
+                        self.assertEqual(tree(root), expected)
+
+    def test_normal_workflow_outputs_keep_existing_append_contents(self):
+        prepared = self.prepare()
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        work = self.directory / "workflow"
+        outputs = {key: self.directory / key for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY")}
+        for path in outputs.values():
+            path.write_text("earlier step output\n")
+        env = {**self.workflow_environment(prepared["counts"]), **{key: str(path) for key, path in outputs.items()}}
+        result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in outputs.values():
+            self.assertTrue(path.read_text().startswith("earlier step output\n"))
+        self.assertIn("\nbundle=", outputs["GITHUB_OUTPUT"].read_text())
+        self.assertIn("Prepared a release candidate", outputs["GITHUB_STEP_SUMMARY"].read_text())
+
+    def test_workflow_child_lock_aliases_fail_before_baseline_replacement(self):
+        prepared = self.prepare()
+        bundle = Path(prepared["path"])
+        before = {root: tree(root) for root in (self.store, self.output)}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for child in ("store", "releases"):
+            with self.subTest(child=child):
+                work = self.directory / f"workflow-{child}"
+                (work / child).mkdir(parents=True)
+                (work / "baseline-counts.json").write_text("previous baseline evidence")
+                (work / "prepared-release.json").write_text("previous preparation evidence")
+                os.link(bundle / "NOTICE.txt", work / child / ".lock")
+                previous_work = tree(work)
+                self.requests.clear()
+                result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                        cwd=ROOT, env=self.workflow_environment(prepared["counts"]),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("regular file with exactly one link", result.stderr)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(tree(work), previous_work)
+                self.assertFalse((work / ".lock").exists())
+                for root, expected in before.items():
+                    self.assertEqual(tree(root), expected)
+
+    def test_all_writer_entries_reject_lock_aliases_and_special_files(self):
+        prepared = self.prepare()
+        before = {root: tree(root) for root in (self.store, self.output)}
+        retained = self.directory / "retained-lock-target"
+        retained.write_text("retained lock target evidence")
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for kind in ("symlink", "hard-link", "fifo"):
+            root = self.directory / f"writer-{kind}"
+            root.mkdir()
+            lock = root / ".lock"
+            if kind == "symlink":
+                lock.symlink_to(retained)
+            elif kind == "hard-link":
+                os.link(retained, lock)
+            else:
+                os.mkfifo(lock)
+            commands = [
+                ("refresh", "--store", root, *self.http_args()),
+                ("export", "--store", self.store, "--output", root),
+                ("build-db", "--store", self.store, "--database", root / "data.sqlite3"),
+                ("prepare-release", "--store", self.store, "--output", root,
+                 "--snapshot", prepared["snapshot_version"], "--producer-commit", test_releases.COMMIT),
+            ]
+            for command in commands:
+                with self.subTest(kind=kind, command=command[0]):
+                    self.requests.clear()
+                    self.assertIn("regular file with exactly one link", self.cli(*command, code=1)["error"])
+                    self.assertEqual(self.requests, [])
+                    self.assertEqual(list(root.iterdir()), [lock])
+                    self.assertEqual(retained.read_text(), "retained lock target evidence")
+                    for path, expected in before.items():
+                        self.assertEqual(tree(path), expected)
+            result = subprocess.run([sys.executable, str(helper), "--work-dir", str(root), *self.http_args()],
+                                    cwd=ROOT, env=self.workflow_environment(prepared["counts"]),
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("regular file with exactly one link", result.stderr)
+            self.assertEqual(list(root.iterdir()), [lock])
+
     def test_workflow_rejects_immutable_work_and_metadata_paths_before_writes(self):
         prepared = self.prepare()
         bundle = Path(prepared["path"])

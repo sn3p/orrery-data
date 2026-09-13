@@ -2,6 +2,7 @@
 
 import copy
 import gzip
+import io
 import json
 from pathlib import Path
 import shutil
@@ -17,13 +18,68 @@ from orrery_data.releases import prepare_release, verify_release
 from orrery_data.storage import digest, file_info, loads_json, read_json, write_json
 
 
+def fields(names, **nested):
+    return {**dict.fromkeys(names.split()), **nested}
+
+
+# Test-owned schema-1 field inventory, transcribed from the published contract.
+# Never derive this from a producer fixture or import production schema objects:
+# a field removed from both the producer and validator must still fail here.
+FILE_INVENTORY = fields('sha256 bytes')
+COUNT_INVENTORY = fields('orbital_records master_records known_discovery missing_discovery '
+                         'numbered_orbits unnumbered_orbits unsupported_orbits '
+                         'discovery_records unmatched_discovery_records')
+BASELINE_INVENTORY = fields('orbital_records discovery_records master_records known_discovery')
+SOURCE_INVENTORY = fields('url retrieved_at acquisition etag last_modified content_length '
+                          'sha256 bytes compression resolved_url', decoded=FILE_INVENTORY)
+SOURCES_INVENTORY = {'mpcorb': SOURCE_INVENTORY, 'numbered': SOURCE_INVENTORY}
+SOURCE_HASH_INVENTORY = fields('mpcorb numbered')
+COMPRESSION_INVENTORY = fields('format level mtime zlib')
+SELECTION_INVENTORY = fields('profile limit select sort')
+SNAPSHOT_FILES_INVENTORY = {name: FILE_INVENTORY for name in ('master.jsonl.gz', 'MPCORB-header.txt')}
+EXCLUSIONS_INVENTORY = {'master': fields('non_elliptic_orbits'),
+                        'discovery': fields('missing_discovery_date')}
+SNAPSHOT_INVENTORY = fields('snapshot_version schema_version tool_version created_at',
+    identity=fields('schema_version tool_version', sources=SOURCE_HASH_INVENTORY),
+    sources=SOURCES_INVENTORY, counts=COUNT_INVENTORY, files=SNAPSHOT_FILES_INVENTORY,
+    exclusions=EXCLUSIONS_INVENTORY, compression=COMPRESSION_INVENTORY)
+EXPORT_ARTIFACT_INVENTORY = {
+    **{name: fields('sha256 bytes profile records') for name in
+       ('master.jsonl.gz', 'catalog.json', 'catalog.json.gz')},
+    **{name: FILE_INVENTORY for name in ('MPCORB-header.txt', 'NOTICE.txt')},
+}
+MANIFEST_INVENTORIES = {
+    'snapshot': SNAPSHOT_INVENTORY,
+    'export': fields('data_version snapshot_version schema_version tool_version created_at',
+        identity=fields('snapshot_version tool_version schema_version', selection=SELECTION_INVENTORY),
+        selection=SELECTION_INVENTORY, sources=SOURCES_INVENTORY,
+        counts={**COUNT_INVENTORY, 'discovery_export': None},
+        exclusions={**EXCLUSIONS_INVENTORY, 'selection_limit': None},
+        compression={'master': COMPRESSION_INVENTORY, 'catalog': COMPRESSION_INVENTORY},
+        artifacts=EXPORT_ARTIFACT_INVENTORY),
+    'database': fields('database_version database_schema_version tool_version sqlite_version created_at '
+                       'mpcorb_header notice',
+        identity=fields('database_schema_version tool_version snapshot_version notice_sha256',
+                        files=SNAPSHOT_FILES_INVENTORY), snapshot=SNAPSHOT_INVENTORY),
+    'release': fields('release_version release_schema_version created_at database_version',
+        identity=fields('release_schema_version dataset_version snapshot_version json_schema_version '
+                         'database_schema_version selected_limits notice_sha256',
+                         producer=fields('commit tool_version')),
+        dataset_identity={'sources': SOURCE_HASH_INVENTORY}, runtime=fields('python sqlite zlib'),
+        sources=SOURCES_INVENTORY, counts=COUNT_INVENTORY,
+        profiles={'*': fields('data_version records', selection=SELECTION_INVENTORY)},
+        preparation=fields('allow_count_decrease', baseline_counts=BASELINE_INVENTORY,
+                           previous_counts=COUNT_INVENTORY), artifacts={'*': FILE_INVENTORY}),
+}
+
+
 def mutations(value, path=()):
     """Enumerate malformed structures independently of the schema implementation."""
     if isinstance(value, dict):
         yield path, 'replace', []
         yield path + ('unexpected_schema_extension',), 'replace', 1
         for key, child in value.items():
-            if key != 'resolved_url':  # The sole optional stored-source field.
+            if key != 'resolved_url' or value['acquisition'] == 'http':
                 yield path + (key,), 'delete', None
             yield from mutations(child, path + (key,))
     elif isinstance(value, list):
@@ -65,6 +121,49 @@ class ReleaseContract(unittest.TestCase):
     def fixture(self):
         result = self.prepare('--selected-limit', 1)
         return result, Path(result['path'])
+
+    def assert_inventory(self, value, expected, path=()):
+        if expected is None:
+            return
+        if value is None and path in (('preparation', 'baseline_counts'), ('preparation', 'previous_counts')):
+            return
+        self.assertIsInstance(value, dict, path)
+        if set(expected) == {'*'}:
+            self.assertTrue(value, path)
+            for key, child in value.items():
+                self.assert_inventory(child, expected['*'], path + (key,))
+            return
+        keys = set(expected)
+        if 'resolved_url' in keys and value.get('acquisition') == 'local' and 'resolved_url' not in value:
+            keys.remove('resolved_url')
+        self.assertEqual(set(value), keys, path)
+        for key, child in value.items():
+            self.assert_inventory(child, expected[key], path + (key,))
+
+    def release_variants(self, bundle):
+        original = read_json(bundle / 'release.json')
+        self.assertIsNone(original['preparation']['baseline_counts'])
+        self.assertIsNone(original['preparation']['previous_counts'])
+        populated = copy.deepcopy(original)
+        populated['preparation']['baseline_counts'] = {
+            key: original['counts'][key] for key in BASELINE_INVENTORY}
+        populated['preparation']['previous_counts'] = dict(original['counts'])
+        return [('null-preparation', original), ('populated-preparation', populated)]
+
+    def write_release_manifest(self, bundle, manifest, artifact_names):
+        # Keep deliberate metadata mutations intact, including missing/extra
+        # artifact map entries. Only reseal bytes at the transport boundary.
+        write_json(bundle / 'release.json', manifest)
+        (bundle / 'SHA256SUMS').write_text(''.join(
+            f"{file_info(bundle / name)['sha256']}  {name}\n"
+            for name in sorted([*artifact_names, 'release.json'])))
+
+    def verification_state(self, bundle):
+        # Include directories and modification times: unchanged file hashes
+        # alone would miss empty-directory creation or rewriting identical bytes.
+        return {str(path.relative_to(bundle)): (path.stat().st_mode, path.stat().st_mtime_ns,
+                                                path.read_bytes() if path.is_file() else None)
+                for path in (bundle, *bundle.rglob('*'))}
 
     def db_metadata(self, bundle):
         with sqlite3.connect(bundle / 'orrery.sqlite3') as db:
@@ -110,21 +209,90 @@ class ReleaseContract(unittest.TestCase):
 
     def test_every_manifest_field_has_explicit_shape_and_type_checks(self):
         _, bundle = self.fixture()
-        manifests = {'release': read_json(bundle / 'release.json'), 'snapshot': read_json(bundle / 'snapshot.json'),
-                     'export': read_json(bundle / 'exports/full/manifest.json'), 'database': self.db_metadata(bundle)}
+        manifests = [('release', label, value) for label, value in self.release_variants(bundle)]
+        manifests += [('snapshot', 'http', read_json(bundle / 'snapshot.json')),
+                      ('export', 'full', read_json(bundle / 'exports/full/manifest.json')),
+                      ('export', 'selected', read_json(bundle / 'exports/first-1/manifest.json')),
+                      ('database', 'http', self.db_metadata(bundle))]
         probes = 0
-        for kind, original in manifests.items():
+        for kind, label, original in manifests:
+            self.assert_inventory(original, MANIFEST_INVENTORIES[kind])
+            if kind == 'release':
+                self.assertEqual(set(original['profiles']), {'full', 'first-1', 'first-2'})
+                self.assertEqual(set(original['artifacts']),
+                    {'snapshot.json', 'NOTICE.txt', 'MPCORB-header.txt', 'orrery.sqlite3'} |
+                    {f'exports/{profile}/{name}' for profile in ('full', 'first-1', 'first-2')
+                     for name in (*EXPORT_ARTIFACT_INVENTORY, 'manifest.json', 'SHA256SUMS')})
+            if kind == 'export':
+                self.assertEqual(original['selection']['limit'], None if label == 'full' else 1)
             validate_contract(kind, original)
             for path, operation, value in mutations(original):
                 # Dynamic maps are constrained by bundle layout, not the object rule.
                 if kind == 'release' and len(path) == 2 and path[0] in ('artifacts', 'profiles'):
                     continue
-                with self.subTest(kind=kind, path=path, operation=operation, value=value):
+                with self.subTest(kind=kind, fixture=label, path=path, operation=operation, value=value):
                     with self.assertRaises(DataError):
                         validate_contract(kind, changed(original, path, operation, value))
                 probes += 1
-        self.assertGreater(probes, 1000)
-        print(f'\nManifest contract: {probes} structural/type mutations checked', flush=True)
+        print(f'\nDirect schema checks: {probes} structural/type mutations checked', flush=True)
+
+    def test_recursive_release_mutations_fail_readonly_file_verification(self):
+        _, bundle = self.fixture()
+        variants = self.release_variants(bundle)
+        artifact_names = set(variants[0][1]['artifacts'])
+        probes = 0
+        for label, original in variants:
+            self.write_release_manifest(bundle, original, artifact_names)
+            before = self.verification_state(bundle)
+            self.assertEqual(verify_release(bundle)['status'], 'verified')
+            self.assertEqual(self.verification_state(bundle), before)
+            for location, operation, value in mutations(original):
+                with self.subTest(fixture=label, path=location, operation=operation, value=value):
+                    malformed = changed(original, location, operation, value)
+                    if location and location[0] == 'identity' and 'identity' in malformed:
+                        # A stale identity hash must not conceal a missing
+                        # schema/type/relationship check inside that identity.
+                        malformed['release_version'] = 'release-v1-' + digest(malformed['identity'])
+                    self.write_release_manifest(bundle, malformed, artifact_names)
+                    before = self.verification_state(bundle)
+                    with self.assertRaises(DataError):
+                        verify_release(bundle)
+                    self.assertEqual(self.verification_state(bundle), before)
+                probes += 1
+        self.write_release_manifest(bundle, variants[0][1], artifact_names)
+        self.assertEqual(verify_release(bundle)['status'], 'verified')
+        print(f'\nRelease file boundary: {probes} resealed structural/type mutations checked', flush=True)
+
+    def test_http_requires_resolved_url_while_local_acquisition_may_omit_it(self):
+        _, bundle = self.fixture()
+        snapshot = read_json(bundle / 'snapshot.json')
+        for source in ('mpcorb', 'numbered'):
+            self.assertEqual(snapshot['sources'][source]['acquisition'], 'http')
+            self.assertIn('resolved_url', snapshot['sources'][source])
+            malformed = copy.deepcopy(snapshot)
+            del malformed['sources'][source]['resolved_url']
+            with self.assertRaisesRegex(DataError, 'requires retrieval time and resolved URL'):
+                validate_contract('snapshot', malformed)
+        local = self.cli('prepare-release', '--store', self.directory / 'local-store',
+                         '--output', self.directory / 'local-release', '--producer-commit', '1' * 40,
+                         '--mpcorb', test_releases.ROOT / 'tests/fixtures/MPCORB.DAT',
+                         '--numbered', test_releases.ROOT / 'tests/fixtures/NumberedMPs.txt')
+        local_bundle = Path(local['path'])
+        for kind, original in (
+            ('snapshot', read_json(local_bundle / 'snapshot.json')),
+            ('export', read_json(local_bundle / 'exports/full/manifest.json')),
+            ('database', self.db_metadata(local_bundle)),
+            ('release', read_json(local_bundle / 'release.json')),
+        ):
+            self.assert_inventory(original, MANIFEST_INVENTORIES[kind])
+            sources = original['snapshot']['sources'] if kind == 'database' else original['sources']
+            for source in sources.values():
+                self.assertEqual(source['acquisition'], 'local')
+                self.assertNotIn('resolved_url', source)
+            validate_contract(kind, original)
+        before = self.verification_state(local_bundle)
+        self.assertEqual(verify_release(local_bundle)['status'], 'verified')
+        self.assertEqual(self.verification_state(local_bundle), before)
 
     def test_recursive_snapshot_mutations_fail_at_snapshot_load_boundary(self):
         prepared, bundle = self.fixture()
@@ -271,7 +439,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_even_consistently_resealed_master_must_be_readable(self):
         _, original = self.fixture()
-        for case, payload in [('gzip', b'not gzip or JSON'), ('record', gzip.compress(b'{"id":"missing fields"}\n'))]:
+        for case, payload in [('gzip', b'not gzip or JSON'), ('record', gzip.compress(b'{"id":"missing fields"}\n', mtime=0))]:
             bundle = self.directory / case
             shutil.copytree(original, bundle)
             snapshot = read_json(bundle / 'snapshot.json')
@@ -334,3 +502,61 @@ class ReleaseContract(unittest.TestCase):
                     prepare_release(self.store, self.output, '1' * 40, limits=limits)
                 self.assertFalse(self.store.exists())
                 self.assertFalse(self.output.exists())
+
+    def test_http_length_reconciles_raw_bytes_while_local_provenance_is_preserved(self):
+        _, bundle = self.fixture()
+        snapshot = read_json(bundle / 'snapshot.json')
+        snapshot['sources']['mpcorb']['content_length'] = '1'
+        self.sync_snapshot(bundle, snapshot)
+        self.assertIn('Content-Length must match raw bytes', self.verify(bundle, code=1)['error'])
+        snapshot['sources']['mpcorb']['acquisition'] = 'local'
+        self.sync_snapshot(bundle, snapshot)
+        self.verify(bundle)
+
+    def test_generated_catalog_headers_match_observable_compression_metadata(self):
+        prepared, original = self.fixture()
+        for case in ('mtime', 'filename'):
+            bundle = self.directory / case
+            shutil.copytree(original, bundle)
+            root = bundle / 'exports/full'
+            plain = (root / 'catalog.json').read_bytes()
+            stream = io.BytesIO()
+            with gzip.GzipFile(fileobj=stream, mode='wb', filename='catalog.json' if case == 'filename' else '',
+                               mtime=1234567 if case == 'mtime' else 0, compresslevel=6) as gz:
+                gz.write(plain)
+            payload = stream.getvalue()
+            self.assertEqual(gzip.decompress(payload), plain)
+            (root / 'catalog.json.gz').write_bytes(payload)
+            self.reseal_export(bundle, 'full')
+            before = self.tree(bundle)
+            self.assertIn('generated gzip', self.verify(bundle, code=1)['error'])
+            self.assertEqual(self.tree(bundle), before)
+            output = self.directory / ('cached-' + case)
+            result = self.cli('export', '--store', self.store, '--output', output,
+                              '--snapshot', prepared['snapshot_version'])
+            cached = Path(result['path'])
+            (cached / 'catalog.json.gz').write_bytes(payload)
+            manifest = read_json(cached / 'manifest.json')
+            manifest['artifacts']['catalog.json.gz'].update(file_info(cached / 'catalog.json.gz'))
+            write_json(cached / 'manifest.json', manifest)
+            (cached / 'SHA256SUMS').write_text(''.join(
+                f"{file_info(cached / name)['sha256']}  {name}\n"
+                for name in sorted([*manifest['artifacts'], 'manifest.json'])))
+            before = self.tree(output)
+            self.assertIn('generated gzip', self.cli('export', '--store', self.store, '--output', output, code=1)['error'])
+            self.assertEqual(self.tree(output), before)
+
+    def test_resealed_master_and_database_cannot_disagree_with_displayed_number(self):
+        _, bundle = self.fixture()
+        master = bundle / 'exports/full/master.jsonl.gz'
+        rows = [json.loads(line) for line in gzip.decompress(master.read_bytes()).decode().splitlines()]
+        rows[0]['readable_designation'] = '(999999) Ceres'
+        payload = gzip.compress((''.join(json.dumps(row) + '\n' for row in rows)).encode(), mtime=0)
+        for root in (bundle / 'exports').iterdir():
+            (root / 'master.jsonl.gz').write_bytes(payload)
+        with sqlite3.connect(bundle / 'orrery.sqlite3') as db:
+            db.execute("UPDATE objects SET readable_designation='(999999) Ceres' WHERE source_order=1")
+        snapshot = read_json(bundle / 'snapshot.json')
+        snapshot['files']['master.jsonl.gz'] = file_info(master)
+        self.sync_snapshot(bundle, snapshot)
+        self.assertIn('Packed and readable MPC numbers disagree', self.verify(bundle, code=1)['error'])
