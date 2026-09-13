@@ -54,9 +54,9 @@ null discovery dates, remain in SQLite and in each export's master file.
 An explicit `--snapshot` must be `snapshot-v1-` followed by 64 lowercase
 hexadecimal characters. Empty or malformed pins fail before locking or reading
 snapshots; they never fall back to the current snapshot. `--snapshot` cannot be
-combined with source acquisition arguments. Invalid CLI arguments return 2;
-preparation/verification failures return 1; success
-returns 0. Structured command results/errors use the existing JSON boundary.
+combined with source acquisition arguments, including an explicit `--timeout`.
+Argparse syntax/type errors return 2. Semantic argument combinations and
+preparation/verification failures return 1 with a JSON error; success returns 0.
 
 ## Bundle layout and versions
 
@@ -97,8 +97,11 @@ paths. Preserve the MPC header, notice and matching master when redistributing
 catalogs; the software license does not relicense upstream data.
 
 Schema 1 requires the complete top-level manifest fields. Its `created_at` is a
-valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) no earlier than the contained database
-and export generation times. `runtime` contains Python, SQLite and zlib version
+valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`). Generation ordering permits up to
+five seconds of backward wall-clock movement between database/export generation
+and release assembly; larger contradictions fail with a clock diagnostic.
+Actual recorded timestamps are preserved rather than clamped or replaced with
+one shared start time. `runtime` contains Python, SQLite and zlib version
 strings; the SQLite and catalog zlib versions must match the contained metadata.
 These are the producing runtime's versions and may differ from the verifier's.
 New compression metadata uses the loaded zlib runtime version, including in
@@ -145,6 +148,13 @@ candidate directory is installed; only then does `latest.json` advance atomicall
 An already existing candidate is verified before reuse. A damaged existing
 candidate or latest pointer fails closed and is never silently overwritten.
 Prepare into a fresh output root to recover while retaining evidence of damage.
+If `latest.json` references a deleted or incompatible bundle, restore that bundle
+or use a fresh output root with `--baseline-counts` from a previously inspected
+dataset. Retain the previous manifest/count evidence when reclaiming payload space;
+do not delete the pointer to silently discard the count baseline. Web exports and
+release candidates require separate output roots because their `latest.json`
+pointers have different formats. An identical rerun reuses the previous bundle's
+verification result instead of verifying the same candidate twice.
 Interrupted `.release-*` stages can be removed after confirming no preparation
 is running. Do not remove a live `.lock`. A verified candidate left behind by
 failure to update the pointer is reusable on retry. Concurrent writers fail
@@ -167,8 +177,10 @@ orrery-data prepare-release --producer-commit "$(git rev-parse HEAD)" \
   --baseline-counts /path/baseline-counts.json
 ```
 
-The file must contain exactly four nonnegative integer counts. For the inspected
-2026-09-12 source snapshot these were:
+The file accepts the four nonnegative integer counts below or the complete
+nine-field counts object emitted by `refresh`/`prepare-release`. Complete counts
+must reconcile; preparation records only the four guarded baseline fields.
+For the inspected 2026-09-12 source snapshot these were:
 
 ```json
 {"orbital_records":1563495,"discovery_records":895910,"master_records":1563495,"known_discovery":895910}
@@ -224,9 +236,14 @@ the release version, run ID and attempt. Missing files fail the upload. Inputs
 are passed through environment variables and parsed as data by the same
 `scripts/prepare_release_workflow.py` exercised against local HTTP fixtures.
 
-The required `baseline_counts` JSON supplies the four counts above because
-GitHub-hosted runners have no persistent source store or previous candidate.
+The required `baseline_counts` JSON supplies the four counts above (or a complete
+nine-field counts object) because GitHub-hosted runners have no persistent source
+store or previous candidate.
 `selected_limits` defaults to `100000`; `allow_count_decrease` defaults to false.
+Whitespace around comma-separated limits and empty separators are ignored;
+at least one positive integer is required. Local helper execution requires
+`RELEASE_PRODUCER_COMMIT` and `RELEASE_BASELINE_COUNTS`. Missing required variables
+and invalid inputs fail before creating the work directory or output files.
 There is no schedule, release/tag creation, release asset upload, or deployment.
 A code merge does not publish data. Review artifacts expire and require GitHub
 access; they are not a durable public distribution endpoint. Future publication

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -122,7 +123,8 @@ class SavedReleaseValidation(unittest.TestCase):
                         "  if time.monotonic() > deadline: raise SystemExit('test gate timed out')\n"
                         "  time.sleep(0.02)\n")
                 entrypoint.write_text(hook + entrypoint.read_text())
-            subprocess.run(["git", "init", "--quiet", str(producer)], check=True, capture_output=True)
+            subprocess.run(["git", "init", "--template=", "--quiet", str(producer)], check=True, capture_output=True)
+            subprocess.run(["git", "config", "core.hooksPath", os.devnull], cwd=producer, check=True, capture_output=True)
             subprocess.run(["git", "add", "."], cwd=producer, check=True, capture_output=True)
             subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture"],
@@ -217,7 +219,7 @@ class SavedReleaseValidation(unittest.TestCase):
                     self.assertEqual(report.read_text(), json.dumps(result, indent=2) + "\n")
                     self.assertEqual(list(root.iterdir()), [report])
 
-    def test_changed_sources_with_identical_master_rejected_before_writes(self):
+    def test_missing_retained_snapshot_does_not_fall_back_to_identical_current_master(self):
         dates = (ROOT / "tests/fixtures/NumberedMPs.txt").read_text()
         changed = self.directory / "changed-dates.txt"
         changed.write_text(dates + dates.splitlines(keepends=True)[0].replace("(1)", "(4)"))
@@ -234,6 +236,8 @@ class SavedReleaseValidation(unittest.TestCase):
             exported = json.loads((Path(exported["path"]) / "manifest.json").read_text())
             reference = next(r for r in references if r["selection"] == exported["selection"])
             self.assertEqual(exported["artifacts"], reference["artifacts"])
+        self.producer()
+        shutil.rmtree(self.store / "snapshots" / self.snapshot["snapshot_version"])
         before = {str(p): p.read_bytes() for p in self.store.rglob("*") if p.is_file()}
         for existing in (False, True):
             with self.subTest(existing_report=existing):
@@ -243,7 +247,8 @@ class SavedReleaseValidation(unittest.TestCase):
                     report.write_bytes(previous)
                 result = self.preflight(work, report)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("requires retained validated 2026-09-12 source snapshot", result.stderr)
+                self.assertIn("Requires retained validated 2026-09-12 source snapshot", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
                 self.assertFalse(result.stdout)
                 self.assertFalse(work.exists())
                 if existing:
@@ -251,6 +256,81 @@ class SavedReleaseValidation(unittest.TestCase):
                 else:
                     self.assertFalse(report.exists())
         self.assertEqual({str(p): p.read_bytes() for p in self.store.rglob("*") if p.is_file()}, before)
+
+    def test_retained_snapshot_is_independent_of_current_pointer(self):
+        producer = self.producer(stop_before_prepare=False)
+        current = self.store / "current.json"
+        for index, value in enumerate((None, "not json", json.dumps({"snapshot_version": "snapshot-v1-" + "f" * 64}))):
+            with self.subTest(current=value):
+                current.unlink(missing_ok=True)
+                if value is not None:
+                    current.write_text(value)
+                report = self.directory / f"report-{index}.json"
+                result = subprocess.run(self.invocation(producer, self.directory / f"work-{index}", report),
+                                        cwd=ROOT, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(report.read_text())["release"]["snapshot_version"], self.snapshot["snapshot_version"])
+
+    def test_reference_preflight_rejects_missing_malformed_and_conflicting_exports(self):
+        producer = self.producer()
+        original = self.references
+        for case in ("missing-full", "missing-selected", "list", "selection", "artifact", "profile", "records", "header-fields", "conflict"):
+            with self.subTest(case=case):
+                refs = self.directory / f"refs-{case}"
+                shutil.copytree(original, refs)
+                paths = list(refs.glob("*/manifest.json"))
+                full = next(p for p in paths if json.loads(p.read_text())["selection"]["limit"] is None)
+                selected = next(p for p in paths if p != full)
+                if case.startswith("missing"):
+                    shutil.rmtree((full if case == "missing-full" else selected).parent)
+                else:
+                    value = json.loads(full.read_text())
+                    if case == "list":
+                        value = []
+                    elif case == "selection":
+                        del value["selection"]
+                    elif case == "artifact":
+                        del value["artifacts"]["catalog.json"]["bytes"]
+                    elif case == "profile":
+                        value["artifacts"]["catalog.json"]["profile"] = []
+                    elif case == "records":
+                        value["artifacts"]["catalog.json"]["records"] += 1
+                    elif case == "header-fields":
+                        value["artifacts"]["MPCORB-header.txt"]["extra"] = 1
+                    else:
+                        (refs / "conflict").mkdir()
+                        full = refs / "conflict/manifest.json"
+                        value["artifacts"]["catalog.json"]["sha256"] = "f" * 64
+                    full.write_text(json.dumps(value))
+                report, work = self.directory / f"{case}.json", self.directory / f"work-{case}"
+                report.write_text("previous report")
+                invocation = self.invocation(producer, work, report) + ["--reference-exports", str(refs)]
+                result = subprocess.run(invocation, cwd=ROOT, capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("reference export", result.stderr.lower())
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertFalse(result.stdout)
+                self.assertFalse(work.exists())
+                self.assertEqual(report.read_text(), "previous report")
+        # Identical historical reference payloads are interchangeable.
+        shutil.copytree(next(original.glob("*/manifest.json")).parent, original / "identical-copy")
+        result = self.preflight(self.directory / "valid-work", self.directory / "valid-report.json")
+        self.assertIn("release preparation reached", result.stderr)
+
+    def test_fixture_ignores_global_git_hooks_and_templates(self):
+        hooks, templates = self.directory / "hooks", self.directory / "templates"
+        hooks.mkdir()
+        (templates / "hooks").mkdir(parents=True)
+        marker = self.directory / "hook-ran"
+        for directory in (hooks, templates / "hooks"):
+            hook = directory / "pre-commit"
+            hook.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 1\n")
+            hook.chmod(0o755)
+        config = self.directory / "global-gitconfig"
+        config.write_text(f'[core]\n hooksPath = "{hooks}"\n[init]\n templateDir = "{templates}"\n')
+        with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            self.producer()
+        self.assertFalse(marker.exists())
 
     def test_retained_source_reaches_release_preparation(self):
         work, report = self.directory / "work", self.directory / "report.json"

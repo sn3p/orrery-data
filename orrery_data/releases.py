@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import platform
 import re
@@ -17,9 +17,9 @@ import zlib
 from . import SCHEMA_VERSION, __version__
 from .database import DATABASE_SCHEMA_VERSION, build_database, database_info
 from .formats import DataError, FIELDS
-from .pipeline import (export, load_snapshot, refresh, validate_snapshot_counts,
+from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
-from .storage import (atomic_json, digest, file_info, now, read_json, verify_file,
+from .storage import (URLS, atomic_json, digest, file_info, now, read_json, validate_file_info, verify_file,
                       write_json, writer_lock)
 
 RELEASE_SCHEMA_VERSION = 1
@@ -27,6 +27,7 @@ COUNT_KEYS = ("orbital_records", "discovery_records", "master_records", "known_d
 EXPORT_FILES = {"master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt"}
 SHA256 = r"[a-f0-9]{64}"
 COMMIT = r"[a-f0-9]{40}"
+CLOCK_SKEW_SECONDS = 5
 
 
 def require(condition, message):
@@ -35,6 +36,9 @@ def require(condition, message):
 
 
 def validate_baseline(counts):
+    if isinstance(counts, dict) and len(counts) == 9:
+        validate_snapshot_counts(counts)
+        counts = {key: counts[key] for key in COUNT_KEYS}
     require(isinstance(counts, dict) and set(counts) == set(COUNT_KEYS)
             and all(type(v) is int and v >= 0 for v in counts.values()),
             "Baseline counts require four nonnegative integers: " + ", ".join(COUNT_KEYS))
@@ -68,6 +72,8 @@ def validate_release_metadata(manifest):
     require(set(preparation) == {"baseline_counts", "previous_counts", "allow_count_decrease"}
             and type(preparation["allow_count_decrease"]) is bool, "Invalid release preparation fields")
     if preparation["baseline_counts"] is not None:
+        require(isinstance(preparation["baseline_counts"], dict) and set(preparation["baseline_counts"]) == set(COUNT_KEYS),
+                "Invalid release baseline fields")
         validate_baseline(preparation["baseline_counts"])
     if preparation["previous_counts"] is not None:
         validate_snapshot_counts(preparation["previous_counts"])
@@ -115,9 +121,12 @@ def checksums(directory, names):
 
 def verify_catalog(directory, manifest, expected_records):
     plain = directory / "catalog.json"
-    with gzip.open(directory / "catalog.json.gz", "rb") as stream:
-        require(hashlib.file_digest(stream, "sha256").hexdigest() == file_info(plain)["sha256"],
-                "Compressed catalog differs from JSON")
+    try:
+        with gzip.open(directory / "catalog.json.gz", "rb") as stream:
+            require(hashlib.file_digest(stream, "sha256").hexdigest() == file_info(plain)["sha256"],
+                    "Compressed catalog differs from JSON")
+    except (OSError, EOFError, zlib.error) as exc:
+        raise DataError(f"Invalid catalog.json.gz: {exc}") from exc
     rows = read_json(plain)
     require(isinstance(rows, list) and len(rows) == expected_records, "Catalog count mismatch")
     previous = -math.inf
@@ -139,13 +148,18 @@ def verify_release(directory, manifest_sha256=None):
     """Verify a standalone copy without a producer checkout, source store or network."""
     directory = Path(directory)
     actual_files = inventory(directory)
+    require({"release.json", "SHA256SUMS"} <= actual_files,
+            "Bundle file inventory mismatch: release.json and SHA256SUMS are required")
     if manifest_sha256 is not None:
         require(isinstance(manifest_sha256, str) and re.fullmatch(SHA256, manifest_sha256),
                 "Expected manifest SHA-256 must be 64 lowercase hexadecimal characters")
         require(file_info(directory / "release.json")["sha256"] == manifest_sha256,
                 "Release manifest checksum mismatch")
-    manifest = read_json(directory / "release.json")
-    created_at = validate_release_metadata(manifest)
+    try:
+        manifest = read_json(directory / "release.json")
+        created_at = validate_release_metadata(manifest)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise DataError(f"release.json: {exc}") from exc
     identity = manifest["identity"]
     require(set(identity) == {"release_schema_version", "dataset_version", "snapshot_version", "producer",
                               "json_schema_version", "database_schema_version", "selected_limits", "notice_sha256"},
@@ -176,8 +190,11 @@ def verify_release(directory, manifest_sha256=None):
         verify_file(directory / name, manifest["artifacts"][name])
     require((directory / "SHA256SUMS").read_text() == checksums(directory, expected | {"release.json"}),
             "Release SHA256SUMS mismatch")
-    snapshot = read_json(directory / "snapshot.json")
-    validate_snapshot_manifest(snapshot, identity["snapshot_version"])
+    try:
+        snapshot = read_json(directory / "snapshot.json")
+        validate_snapshot_manifest(snapshot, identity["snapshot_version"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise DataError(f"snapshot.json: {exc}") from exc
     data_identity = dataset_identity(snapshot)
     require(manifest["dataset_identity"] == data_identity
             and identity["dataset_version"] == "data-v1-" + digest(data_identity), "Dataset identity mismatch")
@@ -187,7 +204,8 @@ def verify_release(directory, manifest_sha256=None):
     require(file_info(directory / "NOTICE.txt")["sha256"] == identity["notice_sha256"], "Attribution mismatch")
     database = database_info(directory / "orrery.sqlite3", verify=True)
     require(manifest["runtime"]["sqlite"] == database["sqlite_version"], "Release SQLite runtime mismatch")
-    require(release_timestamp(database["created_at"]) <= created_at, "Release predates database generation")
+    require(release_timestamp(database["created_at"]) <= created_at + timedelta(seconds=CLOCK_SKEW_SECONDS),
+            "Release predates database generation beyond the 5-second clock tolerance; check the system clock")
     require(database["snapshot"] == snapshot and database["tool_version"] == producer["tool_version"]
             and database["database_version"] == manifest["database_version"]
             and database["mpcorb_header"] == (directory / "MPCORB-header.txt").read_text(encoding="utf-8")
@@ -196,10 +214,15 @@ def verify_release(directory, manifest_sha256=None):
     require(set(manifest["profiles"]) == set(profiles), "Release profile mismatch")
     for profile, limit in profiles.items():
         root = directory / "exports" / profile
-        exported = read_json(root / "manifest.json")
+        try:
+            exported = read_json(root / "manifest.json")
+            validate_export_manifest(exported)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise DataError(f"exports/{profile}/manifest.json: {exc}") from exc
         require(exported["compression"]["catalog"]["zlib"] == manifest["runtime"]["zlib"],
                 "Release export zlib runtime mismatch")
-        require(release_timestamp(exported["created_at"]) <= created_at, "Release predates export generation")
+        require(release_timestamp(exported["created_at"]) <= created_at + timedelta(seconds=CLOCK_SKEW_SECONDS),
+                "Release predates export generation beyond the 5-second clock tolerance; check the system clock")
         expected_identity = {"snapshot_version": snapshot["snapshot_version"],
                              "tool_version": producer["tool_version"], "schema_version": SCHEMA_VERSION,
                              "selection": selection(limit)}
@@ -226,7 +249,10 @@ def verify_release(directory, manifest_sha256=None):
                 and exported["artifacts"]["master.jsonl.gz"]["profile"] == "master", "Master metadata mismatch")
         require((root / "SHA256SUMS").read_text() == checksums(root, EXPORT_FILES | {"manifest.json"}),
                 "Export SHA256SUMS mismatch")
-        verify_catalog(root, exported, count)
+        try:
+            verify_catalog(root, exported, count)
+        except (OSError, ValueError, KeyError, TypeError, EOFError) as exc:
+            raise DataError(f"exports/{profile}: {exc}") from exc
     return {"status": "verified", "release_version": manifest["release_version"],
             "dataset_version": identity["dataset_version"], "snapshot_version": identity["snapshot_version"],
             "producer": producer, "counts": manifest["counts"], "profiles": manifest["profiles"],
@@ -242,7 +268,8 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     limits = sorted(set(limits if limits is not None else [100000]))
     profiles = selections(limits)
     if baseline_counts is not None:
-        validate_baseline(baseline_counts)
+        baseline_counts = validate_baseline(baseline_counts)
+    urls = URLS if urls is None else urls
     output = Path(output).absolute()
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
@@ -256,13 +283,26 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
             "Source store and release output must be different directories when refreshing")
     with writer_lock(output):
         previous_counts = None
+        previous_result = None
+        previous = None
         pointer = output / "latest.json"
         if pointer.exists():
             previous_pointer = read_json(pointer)
+            require(isinstance(previous_pointer, dict) and set(previous_pointer) == {"release_version", "manifest"},
+                    "Invalid latest release pointer: expected release_version and manifest; use a separate release output root")
+            require(isinstance(previous_pointer["manifest"], dict) and set(previous_pointer["manifest"]) == {"sha256", "bytes"},
+                    "Invalid latest release pointer manifest fields")
+            validate_file_info(previous_pointer["manifest"], "latest.json manifest")
             previous = previous_pointer["release_version"]
             require(isinstance(previous, str) and re.fullmatch(r"release-v1-" + SHA256, previous),
                     "Invalid latest release pointer")
-            previous_counts = verify_release(output / previous, previous_pointer["manifest"]["sha256"])["counts"]
+            try:
+                verify_file(output / previous / "release.json", previous_pointer["manifest"])
+                previous_result = verify_release(output / previous, previous_pointer["manifest"]["sha256"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise DataError(f"Previous release referenced by latest.json ({previous}): {exc}. "
+                                "Restore that bundle or use a fresh output root with inspected --baseline-counts") from exc
+            previous_counts = previous_result["counts"]
         if version is None:
             version = refresh(store, urls, local or {}, metadata or {}, timeout, allow_count_decrease)["snapshot_version"]
         source, snapshot = load_snapshot(store, version)
@@ -282,7 +322,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
         release_version = "release-v1-" + digest(identity)
         destination = output / release_version
         if destination.exists():
-            result = verify_release(destination)
+            result = previous_result if previous == release_version else verify_release(destination)
             require(read_json(destination / "release.json")["identity"] == identity, "Existing release identity mismatch")
         else:
             with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temp:

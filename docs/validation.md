@@ -145,6 +145,12 @@ build/runtime versions.
 Empty or malformed explicit snapshot pins fail before locks or snapshot reads,
 preserve existing source/candidate bytes and create no output for missing roots.
 Valid pins remain offline and independent of the mutable current pointer.
+The same empty-pin safeguard applies to `export` and `build-db`. Nested snapshot,
+export, artifact and pointer shapes produce contextual JSON errors, including
+malformed gzip streams and missing bundle inventory. Snapshot count-field errors
+are distinguished from inconsistent arithmetic. Regressions also cover clock
+reversal within the five-second tolerance, complete count baselines, explicit
+pinned timeouts, workflow preflight and reuse without duplicate verification.
 CLI regressions reject identical source/output roots and path aliases before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
@@ -176,11 +182,17 @@ temporary-file cleanup and successful retry.
 The release validator
 rejects `python -O`, `python -OO` and enabled `PYTHONOPTIMIZE` before validation
 or output writes, so disabled checks cannot produce a passing report.
-It pins the retained snapshot version recorded in the committed release result
-as well as the master hash, rejecting a different source snapshot before creating
-its work directory. Regression coverage includes an added unmatched discovery
-record that changes the source identity and counts while leaving every export
-payload unchanged; rejection preserves source files and any existing report.
+It selects the retained snapshot version recorded in the committed release result
+directly from `snapshots/`, independently of missing, changed or malformed
+`current.json`, and verifies that snapshot and its pinned master hash. A missing
+or corrupted retained snapshot fails before creating the work directory; another
+current snapshot cannot substitute even when its master/export payloads match.
+Reference export manifests are checked before preparation: full and 100k limits
+must exist, shapes must validate, and duplicate limits must describe identical
+artifact payloads. Missing, malformed or conflicting references produce a concise
+path/limit diagnostic and preserve any prior report. Fixture Git repositories
+disable external templates and hooks so developer Git settings cannot execute
+code or reject fixture commits.
 Every invocation prepares into a fresh output
 root, compares every SQLite field against all 1,563,495 master records, compares
 all full/100k export payload hashes to the retained references, repeats
@@ -195,9 +207,9 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 82 tests, installed-wheel verification from
-outside the checkout, independent review and workflow linting. The full saved
-candidate matched every SQLite field and every retained full/100k export
+The 0.3.0 milestone passed all 94 tests; installed-wheel verification from
+outside the checkout and workflow linting were completed earlier in this branch.
+The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
 host disk exhaustion while writing the latest pointer. After reclaiming space
 with identical APFS-cloned payloads (reference hashes unchanged), two real CLI
@@ -206,3 +218,12 @@ passed again, and standalone copied-bundle queries/verification and deliberate
 corruption rejection passed. This recovery is retained explicitly in the
 [machine-readable release results](release-validation-result.json). Hosted
 manual dispatch/upload/download remains unverified; no data release was published.
+
+That JSON is historical evidence for producer commit
+`d3e80458e8e1ee2cb55bccfa0e70e6453685ea62`, assembled from the original run and its
+recovery continuation. Its `recovery` section was added to document that event;
+it is not a verbatim report emitted by today's validator, which also records
+`python`. Later commits are covered by the automated CLI/HTTP/fixture suite and
+fresh verification of that retained bundle, not a new full-dataset generation
+at the current head. A fresh full run would produce its own report, producer
+identity and release version; preserve this historical report alongside it.

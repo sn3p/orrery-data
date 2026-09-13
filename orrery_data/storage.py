@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 from urllib.request import Request, urlopen
@@ -41,7 +42,15 @@ def file_info(path):
     return {"sha256": sha, "bytes": path.stat().st_size}
 
 
+def validate_file_info(info, label):
+    if (not isinstance(info, dict) or not {"sha256", "bytes"} <= info.keys()
+            or not isinstance(info["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", info["sha256"])
+            or type(info["bytes"]) is not int or info["bytes"] < 0):
+        raise DataError(f"Invalid file metadata: {label} requires sha256 and nonnegative integer bytes")
+
+
 def verify_file(path, info):
+    validate_file_info(info, path.name)
     if file_info(path) != {k: info[k] for k in ("sha256", "bytes")}:
         raise DataError(f"Checksum or size mismatch: {path.name}")
 

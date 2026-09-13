@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import unittest
 
 import test_releases
@@ -188,6 +190,199 @@ class ReleaseReview(unittest.TestCase):
                     prepare_release(self.store, self.output, test_releases.COMMIT, version=version)
                 self.assertFalse(self.store.exists())
                 self.assertFalse(self.output.exists())
+
+    def test_latest_pointer_shapes_and_foreign_export_root_have_clear_errors(self):
+        first = self.prepare()
+        pointer = self.output / "latest.json"
+        original = pointer.read_bytes()
+        invalid = [[], {}, {"data_version": "export-v1-test"}, {"release_version": first["release_version"]},
+                   {"release_version": "../bad", "manifest": first["manifest"]}]
+        invalid += [{"release_version": first["release_version"], "manifest": info}
+                    for info in ([], {}, {"sha256": "bad", "bytes": 1}, {"sha256": "f" * 64, "bytes": True},
+                                 {**first["manifest"], "extra": 1})]
+        for value in invalid:
+            with self.subTest(pointer=value):
+                pointer.write_text(json.dumps(value))
+                before = self.tree(self.output)
+                self.assertIn("latest", self.prepare(offline=first["snapshot_version"], code=1)["error"])
+                self.assertEqual(self.tree(self.output), before)
+        pointer.write_bytes(original)
+        foreign = self.directory / "web-exports"
+        self.cli("export", "--store", self.store, "--output", foreign)
+        before = self.tree(foreign)
+        self.assertIn("separate release output", self.prepare("--output", foreign, offline=first["snapshot_version"], code=1)["error"])
+        self.assertEqual(self.tree(foreign), before)
+
+    def test_repeat_verifies_once_and_missing_previous_bundle_explains_recovery(self):
+        first = self.prepare()
+        calls = self.directory / "verification-calls"
+        script = ("from pathlib import Path\nimport orrery_data.releases as releases\n"
+                  "from orrery_data.cli import main\noriginal = releases.verify_release\n"
+                  "def verify(*args, **kwargs):\n"
+                  f" with Path({str(calls)!r}).open('a') as stream: stream.write('verify\\n')\n"
+                  " return original(*args, **kwargs)\nreleases.verify_release = verify\nraise SystemExit(main())")
+        self.assertEqual(self.prepare(offline=first["snapshot_version"], script=script), first)
+        self.assertEqual(calls.read_text().splitlines(), ["verify"])
+        hidden = self.directory / "saved-candidate"
+        Path(first["path"]).rename(hidden)
+        before = self.tree(self.output)
+        error = self.prepare(offline=first["snapshot_version"], code=1)["error"]
+        self.assertIn("latest.json", error)
+        self.assertIn("--baseline-counts", error)
+        self.assertEqual(self.tree(self.output), before)
+        hidden.rename(first["path"])
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
+    def test_export_and_database_reject_empty_pins_without_output(self):
+        first = self.prepare()
+        before = self.tree(self.store)
+        output = self.directory / "empty-pin-output"
+        for command, flags in (("export", ["--output", output]), ("build-db", ["--database", output / "data.sqlite3"])):
+            for value in ("", " ", "../bad"):
+                with self.subTest(command=command, value=value):
+                    error = self.cli(command, "--store", self.store, "--snapshot", value, *flags, code=1)["error"]
+                    self.assertIn("No valid snapshot selected", error)
+                    self.assertFalse(output.exists())
+                    self.assertEqual(self.tree(self.store), before)
+            self.cli(command, "--store", self.store, "--snapshot", first["snapshot_version"], *flags)
+            shutil.rmtree(output)
+
+    def test_full_count_baselines_and_default_programmatic_urls(self):
+        first = self.prepare()
+        baseline = self.directory / "baseline.json"
+        baseline.write_text(json.dumps(first["counts"]))
+        prepared = self.prepare("--output", self.directory / "full-baseline", "--baseline-counts", baseline,
+                                offline=first["snapshot_version"])
+        manifest = json.loads((Path(prepared["path"]) / "release.json").read_text())
+        self.assertEqual(manifest["preparation"]["baseline_counts"],
+                         {key: first["counts"][key] for key in ("orbital_records", "discovery_records", "master_records", "known_discovery")})
+        # The flexible input is normalized; schema-1 manifests still record four fields.
+        manifest["preparation"]["baseline_counts"] = first["counts"]
+        (Path(prepared["path"]) / "release.json").write_text(json.dumps(manifest))
+        self.reseal(Path(prepared["path"]))
+        self.assertIn("baseline fields", self.verify(prepared["path"], code=1)["error"])
+        output = self.directory / "api-output"
+        source = self.directory / "api-store"
+        mpcorb, numbered = self.directory / "mpcorb", self.directory / "numbered"
+        mpcorb.write_text(self.orbits)
+        numbered.write_text(self.dates)
+        self.requests.clear()
+        result = prepare_release(source, output, test_releases.COMMIT, local={"mpcorb": mpcorb, "numbered": numbered})
+        self.assertEqual(result["counts"], first["counts"])
+        self.assertEqual(self.requests, [])
+
+    def test_pinned_timeout_is_rejected_even_at_default_value(self):
+        first = self.prepare()
+        before = self.tree(self.output)
+        for timeout in (5, 60):
+            self.assertIn("source acquisition", self.prepare("--timeout", timeout, offline=first["snapshot_version"], code=1)["error"])
+        self.assertEqual(self.tree(self.output), before)
+
+    def test_malformed_nested_manifests_and_gzip_have_contextual_json_errors(self):
+        first = self.prepare()
+        cases = [("snapshot.json", [], "snapshot manifest"),
+                 ("snapshot.json", ("sources", ["mpcorb", "numbered"]), "sources"),
+                 ("snapshot.json", ("files", []), "files"),
+                 ("snapshot.json", ("counts", []), "count fields"),
+                 ("snapshot.json", ("exclusions", []), "exclusions"),
+                 ("snapshot.json", ("compression", []), "compression"),
+                 ("exports/full/manifest.json", [], "manifest fields"),
+                 ("exports/full/manifest.json", ("compression", None), "manifest fields"),
+                 ("exports/full/manifest.json", ("artifacts", []), "manifest fields")]
+        for index, (name, change, diagnostic) in enumerate(cases):
+            with self.subTest(file=name, change=change):
+                copied = self.directory / f"shape-{index}"
+                shutil.copytree(first["path"], copied)
+                path = copied / name
+                value = json.loads(path.read_text())
+                if isinstance(change, tuple):
+                    value[change[0]] = change[1]
+                else:
+                    value = change
+                path.write_text(json.dumps(value))
+                self.reseal(copied)
+                before = self.tree(copied)
+                error = self.verify(copied, code=1)["error"]
+                self.assertIn(name, error)
+                self.assertIn(diagnostic, error)
+                self.assertEqual(self.tree(copied), before)
+        for case in ("missing-bytes", "bad-gzip"):
+            copied = self.directory / case
+            shutil.copytree(first["path"], copied)
+            directory = copied / "exports/full"
+            manifest = json.loads((directory / "manifest.json").read_text())
+            if case == "missing-bytes":
+                del manifest["artifacts"]["catalog.json.gz"]["bytes"]
+            else:
+                (directory / "catalog.json.gz").write_bytes(b"not gzip")
+                manifest["artifacts"]["catalog.json.gz"].update(file_info(directory / "catalog.json.gz"))
+            (directory / "manifest.json").write_text(json.dumps(manifest))
+            names = sorted([*manifest["artifacts"], "manifest.json"])
+            (directory / "SHA256SUMS").write_text("".join(f"{file_info(directory / n)['sha256']}  {n}\n" for n in names))
+            self.reseal(copied)
+            error = self.verify(copied, code=1)["error"]
+            self.assertIn("exports/full", error)
+            self.assertIn("catalog.json.gz", error)
+            self.assertIn("metadata" if case == "missing-bytes" else "Invalid catalog", error)
+        empty = self.directory / "empty-bundle"
+        empty.mkdir()
+        self.assertIn("Bundle file inventory mismatch", self.verify(empty, code=1)["error"])
+
+    def test_snapshot_source_shape_and_count_errors_remain_json_for_all_consumers(self):
+        first = self.prepare()
+        path = self.store / "snapshots" / first["snapshot_version"] / "snapshot.json"
+        original = json.loads(path.read_text())
+        for key, value, diagnostic in (("sources", ["mpcorb", "numbered"], "sources"),
+                                       ("counts", {**original["counts"], "extra": 1}, "count fields"),
+                                       ("counts", {**original["counts"], "known_discovery": 0}, "do not reconcile")):
+            path.write_text(json.dumps({**original, key: value}))
+            for command, flags in (("check", self.http_args()), ("refresh", self.http_args()),
+                                   ("export", ["--output", self.directory / "exports-invalid"]),
+                                   ("build-db", ["--database", self.directory / "invalid-db/data.sqlite3"])):
+                with self.subTest(key=key, command=command):
+                    error = self.cli(command, "--store", self.store, *flags, code=1)["error"]
+                    self.assertIn(diagnostic, error)
+            self.assertFalse((self.directory / "exports-invalid").exists())
+            self.assertFalse((self.directory / "invalid-db").exists())
+
+    def test_small_clock_reversal_preserves_actual_times_and_large_skew_rejects(self):
+        script = ("from unittest.mock import patch\nfrom orrery_data.cli import main\n"
+                  "with patch('orrery_data.database.now', return_value='2026-09-13T00:00:05Z'), "
+                  "patch('orrery_data.pipeline.now', return_value='2026-09-13T00:00:04Z'), "
+                  "patch('orrery_data.releases.now', return_value='2026-09-13T00:00:03Z'):\n"
+                  " raise SystemExit(main())")
+        first = self.prepare(script=script)
+        bundle = Path(first["path"])
+        self.verify(bundle)
+        manifest = json.loads((bundle / "release.json").read_text())
+        self.assertEqual(manifest["created_at"], "2026-09-13T00:00:03Z")
+        self.assertEqual(self.cli("db-info", "--database", bundle / "orrery.sqlite3")["created_at"], "2026-09-13T00:00:05Z")
+        manifest["created_at"] = "2026-09-12T23:59:59Z"
+        (bundle / "release.json").write_text(json.dumps(manifest))
+        self.reseal(bundle)
+        self.assertIn("5-second clock tolerance", self.verify(bundle, code=1)["error"])
+
+    def test_workflow_preflight_requires_environment_and_accepts_spaced_limits(self):
+        first = self.prepare()
+        work = self.directory / "workflow-preflight"
+        base = {**os.environ, "RELEASE_PRODUCER_COMMIT": test_releases.COMMIT,
+                "RELEASE_BASELINE_COUNTS": json.dumps(first["counts"]), "RELEASE_SELECTED_LIMITS": " 2, 4, ",
+                "GITHUB_OUTPUT": "", "GITHUB_STEP_SUMMARY": ""}
+        invocation = [sys.executable, str(ROOT / "scripts/prepare_release_workflow.py"), "--work-dir", str(work), *self.http_args()]
+        for key in ("RELEASE_PRODUCER_COMMIT", "RELEASE_BASELINE_COUNTS"):
+            env = {k: v for k, v in base.items() if k != key}
+            result = subprocess.run(invocation, cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(f"Environment variable {key} is required", result.stderr)
+            self.assertFalse(work.exists())
+        for key, value in (("RELEASE_PRODUCER_COMMIT", "master"), ("RELEASE_SELECTED_LIMITS", ", ,")):
+            result = subprocess.run(invocation, cwd=ROOT, env={**base, key: value}, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(work.exists())
+        result = subprocess.run(invocation, cwd=ROOT, env=base, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        prepared = json.loads((work / "prepared-release.json").read_text())
+        self.assertEqual(set(prepared["profiles"]), {"full", "first-2", "first-4"})
 
     def test_pinned_snapshot_preserves_original_compression_provenance(self):
         first = self.prepare()

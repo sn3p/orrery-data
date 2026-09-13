@@ -58,7 +58,8 @@ def parser():
         if name in ("check", "refresh", "prepare-release"):
             cmd.add_argument("--mpcorb-url", default=URLS["mpcorb"])
             cmd.add_argument("--numbered-url", default=URLS["numbered"])
-            cmd.add_argument("--timeout", type=positive, default=60, help="HTTP socket timeout in seconds")
+            cmd.add_argument("--timeout", type=positive, default=None if name == "prepare-release" else 60,
+                             help="HTTP socket timeout in seconds (default: 60)")
         if name in ("refresh", "prepare-release"):
             cmd.add_argument("--mpcorb", type=Path, help="import local MPCORB (plain or gzip)")
             cmd.add_argument("--numbered", type=Path, help="import local NumberedMPs (plain or gzip)")
@@ -119,7 +120,7 @@ def main(argv=None):
             if bool(args.mpcorb) != bool(args.numbered):
                 raise DataError("Provide both --mpcorb and --numbered, or neither")
             if args.snapshot is not None and (
-                    args.mpcorb or args.source_metadata
+                    args.mpcorb or args.source_metadata or args.timeout is not None
                     or args.mpcorb_url != URLS["mpcorb"] or args.numbered_url != URLS["numbered"]):
                 raise DataError("--snapshot cannot be combined with source acquisition options")
             metadata = read_json(args.source_metadata) if args.source_metadata else {}
@@ -128,7 +129,7 @@ def main(argv=None):
             result = prepare_release(args.store, args.output, args.producer_commit, version=args.snapshot,
                                      limits=args.selected_limit, urls={name: getattr(args, name + "_url") for name in URLS},
                                      local={name: getattr(args, name) for name in URLS}, metadata=metadata,
-                                     timeout=args.timeout, allow_count_decrease=args.allow_count_decrease,
+                                     timeout=args.timeout or 60, allow_count_decrease=args.allow_count_decrease,
                                      baseline_counts=baseline)
         elif args.command == "verify-release":
             result = verify_release(args.bundle, args.manifest_sha256)

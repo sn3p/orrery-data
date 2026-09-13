@@ -5,12 +5,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.releases import validate_baseline
+from orrery_data.releases import COMMIT, validate_baseline
 from orrery_data.storage import write_json
 
 
@@ -23,8 +24,14 @@ def main():
     args = parser.parse_args()
     args.work_dir = args.work_dir.resolve()
     try:
+        for key in ("RELEASE_PRODUCER_COMMIT", "RELEASE_BASELINE_COUNTS"):
+            if not os.environ.get(key, "").strip():
+                raise ValueError(f"Environment variable {key} is required")
+        commit = os.environ["RELEASE_PRODUCER_COMMIT"]
+        if not re.fullmatch(COMMIT, commit):
+            raise ValueError("RELEASE_PRODUCER_COMMIT must be a full 40-character lowercase Git SHA")
         baseline = validate_baseline(json.loads(os.environ["RELEASE_BASELINE_COUNTS"]))
-        limits = os.environ.get("RELEASE_SELECTED_LIMITS", "100000").split(",")
+        limits = [n.strip() for n in os.environ.get("RELEASE_SELECTED_LIMITS", "100000").split(",") if n.strip()]
         if not limits or not all(n.isascii() and n.isdecimal() and int(n) > 0 for n in limits):
             raise ValueError("Selected limits must be comma-separated positive integers")
         allow = os.environ.get("RELEASE_ALLOW_COUNT_DECREASE", "false")
@@ -35,7 +42,7 @@ def main():
         write_json(baseline_file, baseline)
         command = [sys.executable, "-m", "orrery_data", "prepare-release",
                    "--store", str(args.work_dir / "store"), "--output", str(args.work_dir / "releases"),
-                   "--producer-commit", os.environ["RELEASE_PRODUCER_COMMIT"],
+                   "--producer-commit", commit,
                    "--baseline-counts", str(baseline_file)]
         for limit in limits:
             command.extend(["--selected-limit", limit])

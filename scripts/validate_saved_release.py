@@ -88,20 +88,45 @@ def main():
                    "--work-dir", str(args.work_dir), "--report", str(args.report)]
         if args.clone_copy:
             options.append("--clone-copy")
-        subprocess.run([sys.executable, "-I", "-B", "-c", script, str(producer), commit, *options],
-                       cwd=producer, check=True)
+        result = subprocess.run([sys.executable, "-I", "-B", "-c", script, str(producer), commit, *options],
+                                cwd=producer)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+
+
+def reference_exports(directory):
+    from orrery_data.pipeline import validate_export_manifest
+
+    references = {}
+    for path in sorted(directory.glob("*/manifest.json")):
+        try:
+            manifest = json.loads(path.read_text())
+            validate_export_manifest(manifest)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise SystemExit(f"Invalid reference export {path}: {exc}") from exc
+        limit = manifest["selection"]["limit"]
+        if limit in references and references[limit]["artifacts"] != manifest["artifacts"]:
+            raise SystemExit(f"Conflicting reference exports for limit {limit} in {directory}")
+        references[limit] = manifest
+    for limit in (None, 100000):
+        if limit not in references:
+            raise SystemExit(f"Reference export for limit {limit} not found in {directory}")
+    return references
 
 
 def validate(args, commit):
+    sys.path.insert(0, str(ROOT))
+    from orrery_data.pipeline import load_snapshot
     from validate_saved_database import EXPECTED, MASTER_SHA256, sha, verify_rows
 
-    version = json.loads((args.store / "current.json").read_text())["snapshot_version"]
-    if version != EXPECTED_SNAPSHOT_VERSION:
-        raise SystemExit(f"requires retained validated 2026-09-12 source snapshot {EXPECTED_SNAPSHOT_VERSION}; "
-                         f"current snapshot is {version}")
-    snapshot_dir = args.store / "snapshots" / version
+    version = EXPECTED_SNAPSHOT_VERSION
+    try:
+        snapshot_dir, snapshot = load_snapshot(args.store, version)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise SystemExit(f"Requires retained validated 2026-09-12 source snapshot {version}: {exc}") from exc
     master = snapshot_dir / "master.jsonl.gz"
     assert sha(master) == MASTER_SHA256, "requires retained validated master"
+    references = reference_exports(args.reference_exports)
     args.work_dir.mkdir(parents=True, exist_ok=True)
     timings = {}
     output = Path(tempfile.mkdtemp(prefix="releases-", dir=args.work_dir))
@@ -116,10 +141,9 @@ def validate(args, commit):
     started = time.monotonic()
     verify_rows(bundle / "orrery.sqlite3", master)
     timings["compare_every_row"] = round(time.monotonic() - started, 3)
-    references = [json.loads(p.read_text()) for p in args.reference_exports.glob("*/manifest.json")]
     exports = {}
     for profile, limit in (("full", None), ("first-100000", 100000)):
-        reference = next(r for r in references if r["selection"]["limit"] == limit)
+        reference = references[limit]
         exported = json.loads((bundle / f"exports/{profile}/manifest.json").read_text())
         assert exported["artifacts"] == reference["artifacts"], "existing export artifacts changed"
         for name, info in reference["artifacts"].items():
