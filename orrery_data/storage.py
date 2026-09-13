@@ -6,6 +6,7 @@ import fcntl
 import gzip
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -64,9 +65,41 @@ def verify_file(path, info):
         raise DataError(f"Checksum or size mismatch: {path.name}")
 
 
+def verify_decoded_source(path, info):
+    sha, size = hashlib.sha256(), 0
+    opener = gzip.open if info["compression"] == "gzip" else open
+    with opener(path, "rb") as stream:
+        while chunk := stream.read(CHUNK):
+            sha.update(chunk)
+            size += len(chunk)
+    if {"sha256": sha.hexdigest(), "bytes": size} != info["decoded"]:
+        raise DataError(f"Decoded source checksum or size mismatch: {path.name}")
+
+
 def read_json(path):
     with path.open() as stream:
-        return json.load(stream)
+        return loads_json(stream.read())
+
+
+def loads_json(text):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise DataError(f"Duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def number(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise DataError("JSON numbers must be finite")
+        return parsed
+
+    def constant(value):
+        raise DataError(f"Invalid JSON constant: {value}")
+
+    return json.loads(text, object_pairs_hook=pairs, parse_float=number, parse_constant=constant)
 
 
 def write_json(path, value):

@@ -37,6 +37,25 @@ def arguments():
         setattr(args, key, getattr(args, key).resolve())
     if args.clone_copy and sys.platform != "darwin":
         parser.error("--clone-copy requires macOS APFS")
+    # Resolve all destinations before inspecting sources or creating any output.
+    # The bootstrap and committed worker both enforce this boundary.
+    sys.path.insert(0, str(ROOT))
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        from orrery_data.paths import validate_disjoint_paths, validate_writable_path
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    inputs = [args.store, args.reference_exports, *(ROOT / name for name in PRODUCER_PATHS)]
+    try:
+        validate_disjoint_paths(args.work_dir, inputs, label="Validation work directory")
+        validate_disjoint_paths(args.report, inputs, label="Validation report")
+        validate_writable_path(args.work_dir, label="Validation work directory")
+        validate_writable_path(args.report, label="Validation report")
+        if args.work_dir.is_relative_to(args.report):
+            raise ValueError("Validation report must be a file outside the work directory's ancestors")
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     return args
 
 
@@ -101,11 +120,12 @@ def main():
 
 def reference_exports(directory):
     from orrery_data.pipeline import validate_export_manifest
+    from orrery_data.storage import read_json
 
     references = {}
     for path in sorted(directory.glob("*/manifest.json")):
         try:
-            manifest = json.loads(path.read_text())
+            manifest = read_json(path)
             validate_export_manifest(manifest)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise SystemExit(f"Invalid reference export {path}: {exc}") from exc
@@ -160,35 +180,34 @@ def validate(args, commit):
     again, timings["repeat"] = cli("prepare-release", "--store", args.store, "--snapshot", version,
                                    "--output", output, "--producer-commit", commit)
     assert again == prepared, "immutable candidate changed on rerun"
-    copied = args.work_dir / "downloaded-copy"
-    # Always regenerate the copy; stale results must not bypass current transfer verification.
-    if copied.exists():
-        shutil.rmtree(copied)
-    if args.clone_copy:
-        subprocess.run(["cp", "-cR", str(bundle), str(copied)], check=True)
-    else:
-        shutil.copytree(bundle, copied)
-    print("Verifying and consuming the standalone copy...", flush=True)
-    verified, timings["verify_copy"] = cli("verify-release", "--bundle", copied,
-                                          "--manifest-sha256", prepared["manifest"]["sha256"])
-    assert verified["release_version"] == prepared["release_version"]
-    for mode, count in (("all", 1563495), ("known", 895910), ("missing", 667585)):
-        page, _ = cli("query", "--database", copied / "orrery.sqlite3", "--discovery", mode, "--limit", 2)
-        assert page["matched_records"] == count
-        if mode != "all":
-            assert all((r["disc"] is None) == (mode == "missing") for r in page["records"])
-    rounded, _ = cli("query", "--database", copied / "orrery.sqlite3", "--packed-designation", "K17S44L")
-    assert rounded["records"][0]["w"] == 360.0
-    assert rounded["records"][0]["w"] != rounded["records"][0]["W"]
-    assert sha(copied / "orrery.sqlite3") == manifest["artifacts"]["orrery.sqlite3"]["sha256"]
-    # A damaged transferred payload must fail without changing the original candidate.
-    with (copied / "exports/first-100000/catalog.json.gz").open("ab") as stream:
-        stream.write(b"damaged transfer")
-    rejected = subprocess.run(producer_command("verify-release", "--bundle", copied),
-                              cwd=ROOT, capture_output=True, text=True)
-    assert rejected.returncode == 1 and "Checksum or size mismatch" in rejected.stderr
-    assert sha(bundle / "exports/first-100000/catalog.json.gz") == exports["first-100000"]["catalog.json.gz"]["sha256"]
-    shutil.rmtree(copied)
+    # Own the entire disposable subtree. Never delete a caller-selected or
+    # predictable directory, even when the work directory is reused.
+    with tempfile.TemporaryDirectory(prefix=".transfer-", dir=args.work_dir) as transfer:
+        copied = Path(transfer) / "downloaded-copy"
+        if args.clone_copy:
+            subprocess.run(["cp", "-cR", str(bundle), str(copied)], check=True)
+        else:
+            shutil.copytree(bundle, copied)
+        print("Verifying and consuming the standalone copy...", flush=True)
+        verified, timings["verify_copy"] = cli("verify-release", "--bundle", copied,
+                                              "--manifest-sha256", prepared["manifest"]["sha256"])
+        assert verified["release_version"] == prepared["release_version"]
+        for mode, count in (("all", 1563495), ("known", 895910), ("missing", 667585)):
+            page, _ = cli("query", "--database", copied / "orrery.sqlite3", "--discovery", mode, "--limit", 2)
+            assert page["matched_records"] == count
+            if mode != "all":
+                assert all((r["disc"] is None) == (mode == "missing") for r in page["records"])
+        rounded, _ = cli("query", "--database", copied / "orrery.sqlite3", "--packed-designation", "K17S44L")
+        assert rounded["records"][0]["w"] == 360.0
+        assert rounded["records"][0]["w"] != rounded["records"][0]["W"]
+        assert sha(copied / "orrery.sqlite3") == manifest["artifacts"]["orrery.sqlite3"]["sha256"]
+        # A damaged transferred payload must fail without changing the original candidate.
+        with (copied / "exports/first-100000/catalog.json.gz").open("ab") as stream:
+            stream.write(b"damaged transfer")
+        rejected = subprocess.run(producer_command("verify-release", "--bundle", copied),
+                                  cwd=ROOT, capture_output=True, text=True)
+        assert rejected.returncode == 1 and "Checksum or size mismatch" in rejected.stderr
+        assert sha(bundle / "exports/first-100000/catalog.json.gz") == exports["first-100000"]["catalog.json.gz"]["sha256"]
     report = {"status": "passed", "producer_commit": commit, "python": platform.python_version(),
               "release": prepared, "artifact_payload_bytes": sum(v["bytes"] for v in manifest["artifacts"].values()),
               "bundle_bytes": sum(p.stat().st_size for p in bundle.rglob("*") if p.is_file()),

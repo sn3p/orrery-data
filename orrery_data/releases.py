@@ -2,7 +2,7 @@
 
 import gzip
 import hashlib
-import json
+from itertools import zip_longest
 import math
 import os
 from datetime import timedelta
@@ -15,7 +15,11 @@ import tempfile
 import zlib
 
 from . import SCHEMA_VERSION, __version__
-from .database import DATABASE_SCHEMA_VERSION, build_database, database_info
+from .database import DATABASE_SCHEMA_VERSION, build_database, database_info, open_database
+from .contracts import URL, validate_contract
+from .metadata import validate_source_metadata
+from .records import iter_master
+from .paths import validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
@@ -104,6 +108,10 @@ def inventory(directory):
     for path in directory.rglob("*"):
         require(not path.is_symlink(), "Bundle must not contain symlinks")
         if path.is_dir():
+            require(path.relative_to(directory).as_posix() == "exports"
+                    or (path.parent == directory / "exports"
+                        and (path.name == "full" or re.fullmatch(r"first-[1-9][0-9]*", path.name))),
+                    "Unexpected bundle directory")
             continue
         require(path.is_file(), "Bundle must contain only regular files")
         result.add(path.relative_to(directory).as_posix())
@@ -114,7 +122,7 @@ def checksums(directory, names):
     return "".join(f"{file_info(directory / name)['sha256']}  {name}\n" for name in sorted(names))
 
 
-def verify_catalog(directory, manifest, expected_records):
+def verify_catalog(directory, manifest, expected_records, connection, limit):
     plain = directory / "catalog.json"
     try:
         with gzip.open(directory / "catalog.json.gz", "rb") as stream:
@@ -125,7 +133,15 @@ def verify_catalog(directory, manifest, expected_records):
     rows = read_json(plain)
     require(isinstance(rows, list) and len(rows) == expected_records, "Catalog count mismatch")
     previous = -math.inf
-    for row in rows:
+    # Select in original MPCORB order BEFORE sorting. This projection is
+    # independent of the exporter's serializer and preserves ties explicitly.
+    expected = connection.execute("""SELECT disc, epoch, a, e, i, ascending_node, perihelion_argument, M, n
+        FROM (SELECT o.source_order, o.disc, r.epoch, r.a, r.e, r.i, r.ascending_node,
+                     r.perihelion_argument, r.M, r.n
+              FROM objects o JOIN orbits r USING (source_order) WHERE o.disc IS NOT NULL
+              ORDER BY o.source_order LIMIT ?)
+        ORDER BY disc, source_order""", (-1 if limit is None else limit,))
+    for index, (row, expected_row) in enumerate(zip_longest(rows, expected), 1):
         require(isinstance(row, dict) and set(row) == set(FIELDS)
                 and all(type(v) in (int, float) and math.isfinite(v) for v in row.values()),
                 "Invalid discovery catalog fields")
@@ -134,9 +150,33 @@ def verify_catalog(directory, manifest, expected_records):
                 "Invalid discovery orbital elements")
         require(row["disc"] >= previous, "Catalog discovery order mismatch")
         previous = row["disc"]
+        require(expected_row is not None and tuple(row[key] for key in FIELDS) == expected_row,
+                f"Catalog row {index} differs from selected master/SQLite data")
     for name in ("catalog.json", "catalog.json.gz"):
         require(manifest["artifacts"][name]["records"] == expected_records
                 and manifest["artifacts"][name]["profile"] == "discovery", "Catalog metadata mismatch")
+
+
+def verify_master_database(directory, snapshot, connection):
+    # Explicit SQL/JSON mapping deliberately independent of insert_master.
+    keys = ("id", "number", "packed_designation", "readable_designation", "disc", "epoch",
+            "a", "e", "i", "W", "w", "M", "n", "orbit_reference", "orbit_computer")
+    rows = connection.execute("""SELECT o.source_order, o.id, o.number, o.packed_designation,
+        o.readable_designation, o.disc, r.epoch, r.a, r.e, r.i, r.ascending_node,
+        r.perihelion_argument, r.M, r.n, r.orbit_reference, r.orbit_computer
+        FROM objects o JOIN orbits r USING (source_order) ORDER BY o.source_order""")
+    total = known = numbered = 0
+    for total, (master, sql) in enumerate(zip_longest(iter_master(directory / "exports/full/master.jsonl.gz"), rows), 1):
+        require(master is not None and sql is not None and sql[0] == total
+                and tuple(master[key] for key in keys) == sql[1:],
+                f"SQLite row {total} differs from master data/source order")
+        known += master["disc"] is not None
+        numbered += master["number"] is not None
+    counts = snapshot["counts"]
+    require((total, known, total - known) == (counts["master_records"], counts["known_discovery"], counts["missing_discovery"]),
+            "Master contents do not match snapshot counts")
+    require(numbered <= counts["numbered_orbits"] and total - numbered <= counts["unnumbered_orbits"],
+            "Snapshot numbered/unnumbered counts do not cover master records")
 
 
 def verify_release(directory, manifest_sha256=None):
@@ -181,6 +221,8 @@ def verify_release(directory, manifest_sha256=None):
     # Never follow untrusted manifest paths; the supported layout determines every filename.
     require(set(manifest["artifacts"]) == expected, "Release artifact inventory mismatch")
     require(actual_files == expected | {"release.json", "SHA256SUMS"}, "Bundle file inventory mismatch")
+    require({p.relative_to(directory).as_posix() for p in directory.rglob("*") if p.is_dir()}
+            == {"exports", *(f"exports/{profile}" for profile in profiles)}, "Bundle directory inventory mismatch")
     for name in sorted(expected):
         require(isinstance(manifest["artifacts"][name], dict) and set(manifest["artifacts"][name]) == {"sha256", "bytes"},
                 f"Invalid release artifact metadata fields: {name}")
@@ -209,6 +251,9 @@ def verify_release(directory, manifest_sha256=None):
             and database["notice"] == (directory / "NOTICE.txt").read_text(encoding="utf-8"),
             "Database release provenance/version mismatch")
     require(set(manifest["profiles"]) == set(profiles), "Release profile mismatch")
+    validate_contract("release", manifest)
+    with open_database(directory / "orrery.sqlite3") as (connection, _):
+        verify_master_database(directory, snapshot, connection)
     for profile, limit in profiles.items():
         root = directory / "exports" / profile
         try:
@@ -249,7 +294,8 @@ def verify_release(directory, manifest_sha256=None):
         require((root / "SHA256SUMS").read_text() == checksums(root, EXPORT_FILES | {"manifest.json"}),
                 "Export SHA256SUMS mismatch")
         try:
-            verify_catalog(root, exported, count)
+            with open_database(directory / "orrery.sqlite3") as (connection, _):
+                verify_catalog(root, exported, count, connection, limit)
         except (OSError, ValueError, KeyError, TypeError, EOFError) as exc:
             raise DataError(f"exports/{profile}: {exc}") from exc
     return {"status": "verified", "release_version": manifest["release_version"],
@@ -259,16 +305,35 @@ def verify_release(directory, manifest_sha256=None):
 
 
 def prepare_release(store, output, producer_commit, *, version=None, limits=None, urls=None,
-                    local=None, metadata=None, timeout=60, allow_count_decrease=False, baseline_counts=None):
+                    local=None, metadata=None, timeout=None, allow_count_decrease=False, baseline_counts=None):
+    store = Path(store)
     require(version is None or (isinstance(version, str) and re.fullmatch(r"snapshot-v1-" + SHA256, version)),
             "Snapshot pin must be snapshot-v1- followed by 64 lowercase hexadecimal characters")
     require(isinstance(producer_commit, str) and re.fullmatch(COMMIT, producer_commit),
             "Producer commit must be a full 40-character lowercase Git SHA")
+    require(limits is None or (isinstance(limits, list) and limits
+                              and all(type(value) is int and value > 0 for value in limits)),
+            "Selected limits must be positive integers")
+    require(type(allow_count_decrease) is bool, "Count decrease override must be boolean")
+    require(timeout is None or (type(timeout) is int and timeout > 0), "Timeout must be a positive integer")
+    local = {} if local is None else local
+    metadata = {} if metadata is None else metadata
+    require(isinstance(local, dict) and local.keys() <= URLS.keys(), "Local sources must contain mpcorb/numbered paths")
+    validate_source_metadata(metadata)
+    require(version is None or (not any(local.values()) and not metadata and timeout is None
+                               and (urls is None or urls == URLS)),
+            "Snapshot pin cannot be combined with source acquisition options")
+    timeout = 60 if timeout is None else timeout
     limits = sorted(set(limits if limits is not None else [100000]))
     profiles = selections(limits)
     if baseline_counts is not None:
         baseline_counts = validate_baseline(baseline_counts)
     urls = URLS if urls is None else urls
+    require(isinstance(urls, dict) and urls.keys() == URLS.keys(), "Source URLs require mpcorb and numbered")
+    for name, value in urls.items():
+        URL(value, f"Source URL {name}")
+    if version is None:
+        validate_writable_path(store, label="Source store")
     output = Path(output).absolute()
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
@@ -280,6 +345,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
             "Release output must not be at or inside an existing release candidate")
     require(version is not None or resolved_output != store.resolve(),
             "Source store and release output must be different directories when refreshing")
+    validate_writable_path(output, label="Release output", protected_roots=(store / "snapshots",))
     with writer_lock(output):
         previous_counts = None
         previous_result = None
@@ -326,7 +392,6 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
         else:
             with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temp:
                 stage = Path(temp)
-                write_json(stage / "snapshot.json", snapshot)
                 shutil.copyfile(source / "MPCORB-header.txt", stage / "MPCORB-header.txt")
                 shutil.copyfile(Path(__file__).with_name("NOTICE.txt"), stage / "NOTICE.txt")
                 built = build_database(store, stage / "orrery.sqlite3", version)
@@ -341,6 +406,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
                         profile_metadata[profile] = {"data_version": exported["data_version"],
                                                      "records": exported["counts"]["discovery_export"],
                                                      "selection": selection(limit)}
+                write_json(stage / "snapshot.json", snapshot)
                 manifest = {"release_version": release_version, "release_schema_version": RELEASE_SCHEMA_VERSION,
                             "identity": identity, "dataset_identity": data_identity, "created_at": now(),
                             "runtime": {"python": platform.python_version(), "sqlite": sqlite3.sqlite_version,
@@ -354,7 +420,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
                 (stage / "SHA256SUMS").write_text(checksums(stage, inventory(stage)), encoding="utf-8")
                 result = verify_release(stage)
                 # Recheck immutable inputs after all builders finish and before activation.
-                load_snapshot(store, version)
+                require(load_snapshot(store, version)[1] == snapshot, "Snapshot changed during preparation")
                 for name in inventory(stage):
                     with (stage / name).open("rb") as stream:
                         os.fsync(stream.fileno())

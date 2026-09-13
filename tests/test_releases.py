@@ -433,6 +433,7 @@ class ReleaseCLI(unittest.TestCase):
         output.write_text("")
         for field, value in (("RELEASE_SELECTED_LIMITS", "2;touch injected"),
                              ("RELEASE_BASELINE_COUNTS", "{}"), ("RELEASE_ALLOW_COUNT_DECREASE", "yes"),
+                             ("RELEASE_BASELINE_COUNTS", json.dumps(baseline).replace('"known_discovery":', '"known_discovery": 0, "known_discovery":')),
                              ("RELEASE_PRODUCER_COMMIT", "master")):
             self.workflow({**env, field: value}, code=1)
             self.assertEqual(output.read_text(), "")

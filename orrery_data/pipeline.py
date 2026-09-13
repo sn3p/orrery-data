@@ -2,8 +2,8 @@
 
 from collections import Counter
 import gzip
+import hashlib
 import http.client
-import json
 from pathlib import Path
 import re
 import shutil
@@ -12,14 +12,24 @@ import zlib
 
 from . import SCHEMA_VERSION, __version__
 from .formats import DataError, FIELDS, discoveries, master_rows
+from .contracts import validate_contract
+from .records import iter_master
+from .paths import validate_writable_path
 from .storage import (acquire, atomic_json, deterministic_gzip, digest, encode,
                       file_info, now, read_json, request, response_metadata,
-                      utc_timestamp, validate_file_info, verify_file, write_json, writer_lock)
+                      utc_timestamp, validate_file_info, verify_decoded_source, verify_file, write_json, writer_lock)
 
 
 def current(store):
     pointer = store / "current.json"
-    return read_json(pointer)["snapshot_version"] if pointer.exists() else None
+    if not pointer.exists():
+        return None
+    value = read_json(pointer)
+    if (not isinstance(value, dict) or set(value) != {"snapshot_version"}
+            or not isinstance(value["snapshot_version"], str)
+            or not re.fullmatch(r"snapshot-v1-[a-f0-9]{64}", value["snapshot_version"])):
+        raise DataError("Invalid current snapshot pointer")
+    return value["snapshot_version"]
 
 
 def load_snapshot(store, version=None, verify=True):
@@ -34,6 +44,7 @@ def load_snapshot(store, version=None, verify=True):
             if name not in ("mpcorb", "numbered"):
                 raise DataError("Unexpected snapshot source")
             verify_file(directory / f"{name}.input", info)
+            verify_decoded_source(directory / f"{name}.input", info)
         for name in ("master.jsonl.gz", "MPCORB-header.txt"):
             verify_file(directory / name, manifest["files"][name])
     return directory, manifest
@@ -73,6 +84,7 @@ def validate_snapshot_manifest(manifest, version):
                                   "discovery": {"missing_discovery_date": counts["missing_discovery"]}}:
         raise DataError("Invalid snapshot exclusions")
     validate_compression(manifest["compression"], "snapshot")
+    validate_contract("snapshot", manifest)
 
 
 def validate_compression(value, label):
@@ -93,7 +105,8 @@ def validate_snapshot_counts(counts):
     if (counts["master_records"] + counts["unsupported_orbits"] != counts["orbital_records"]
             or counts["known_discovery"] + counts["missing_discovery"] != counts["master_records"]
             or counts["numbered_orbits"] + counts["unnumbered_orbits"] != counts["orbital_records"]
-            or counts["known_discovery"] + counts["unmatched_discovery_records"] != counts["discovery_records"]):
+            or counts["known_discovery"] + counts["unmatched_discovery_records"] != counts["discovery_records"]
+            or counts["known_discovery"] > counts["numbered_orbits"]):
         raise DataError("Snapshot counts do not reconcile")
 
 
@@ -149,6 +162,12 @@ def validate_export_manifest(manifest):
                 raise DataError(f"Invalid export artifact record metadata: {name}")
         elif set(info) != {"sha256", "bytes"}:
             raise DataError(f"Invalid export artifact fields: {name}")
+    validate_contract("export", manifest)
+    if (manifest["identity"] != {"snapshot_version": manifest["snapshot_version"],
+                                 "tool_version": manifest["tool_version"], "schema_version": SCHEMA_VERSION,
+                                 "selection": manifest["selection"]}
+            or manifest["data_version"] != "export-v1-" + digest(manifest["identity"])):
+        raise DataError("Export identity/schema mismatch")
 
 
 def check(store, urls, timeout):
@@ -188,6 +207,7 @@ def check(store, urls, timeout):
 
 
 def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
+    validate_writable_path(store, label="Source store")
     with writer_lock(store):
         previous = load_snapshot(store)[1] if current(store) else None
         snapshots = store / "snapshots"
@@ -232,8 +252,9 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
 
 
 def export(store, output, version=None, limit=None):
-    if limit is not None and limit <= 0:
+    if limit is not None and (type(limit) is not int or limit <= 0):
         raise DataError("--limit must be a positive integer")
+    validate_writable_path(output, label="Export output", protected_roots=(store / "snapshots",))
     source, snapshot = load_snapshot(store, version)
     selection = {"profile": "discovery", "limit": limit,
                  "select": "first-known-dates-in-mpcorb-order", "sort": "disc-ascending-stable"}
@@ -244,13 +265,31 @@ def export(store, output, version=None, limit=None):
         destination = output / export_version
         if destination.exists():
             manifest = read_json(destination / "manifest.json")
+            validate_export_manifest(manifest)
             if manifest["identity"] != identity or manifest["data_version"] != export_version:
                 raise DataError("Existing export identity mismatch")
+            if (manifest["sources"] != snapshot["sources"]
+                    or manifest["compression"]["master"] != snapshot["compression"]
+                    or {key: value for key, value in manifest["counts"].items() if key != "discovery_export"} != snapshot["counts"]):
+                raise DataError("Existing export snapshot provenance mismatch")
             names = {"master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt"}
             if set(manifest["artifacts"]) != names:
                 raise DataError("Existing export is missing required artifacts")
             for name, info in manifest["artifacts"].items():
                 verify_file(destination / name, info)
+            for name, info in snapshot["files"].items():
+                verify_file(destination / name, info)
+            verify_file(destination / "NOTICE.txt", file_info(Path(__file__).with_name("NOTICE.txt")))
+            selected = []
+            for row in iter_master(source / "master.jsonl.gz"):
+                if row["disc"] is not None and (limit is None or len(selected) < limit):
+                    selected.append({key: row[key] for key in FIELDS})
+            selected.sort(key=lambda row: row["disc"])
+            if read_json(destination / "catalog.json") != selected:
+                raise DataError("Existing export catalog differs from selected master data")
+            with gzip.open(destination / "catalog.json.gz", "rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != file_info(destination / "catalog.json")["sha256"]:
+                    raise DataError("Existing compressed catalog differs from JSON")
             expected_sums = "".join(f"{file_info(destination / name)['sha256']}  {name}\n"
                                     for name in sorted([*names, "manifest.json"]))
             if (destination / "SHA256SUMS").read_text() != expected_sums:
@@ -263,13 +302,11 @@ def export(store, output, version=None, limit=None):
                 shutil.copyfile(Path(__file__).with_name("NOTICE.txt"), stage / "NOTICE.txt")
                 selected = []
                 master_count, known_count = 0, 0
-                with gzip.open(source / "master.jsonl.gz", "rt", encoding="utf-8") as stream:
-                    for line in stream:
-                        row = json.loads(line)
-                        master_count += 1
-                        known_count += row["disc"] is not None
-                        if row["disc"] is not None and (limit is None or len(selected) < limit):
-                            selected.append(tuple(row[key] for key in FIELDS))
+                for row in iter_master(source / "master.jsonl.gz"):
+                    master_count += 1
+                    known_count += row["disc"] is not None
+                    if row["disc"] is not None and (limit is None or len(selected) < limit):
+                        selected.append(tuple(row[key] for key in FIELDS))
                 if (master_count != snapshot["counts"]["master_records"]
                         or known_count != snapshot["counts"]["known_discovery"]):
                     raise DataError("Master contents do not match snapshot counts")
@@ -301,6 +338,9 @@ def export(store, output, version=None, limit=None):
                 # Convenient release-side checksum list includes the manifest itself.
                 lines = [f"{file_info(stage / name)['sha256']}  {name}\n" for name in sorted([*artifacts, "manifest.json"])]
                 (stage / "SHA256SUMS").write_text("".join(lines))
+                for name, info in snapshot["files"].items():
+                    verify_file(source / name, info)
+                    verify_file(stage / name, info)
                 stage.rename(destination)
         atomic_json(output / "latest.json", {"data_version": export_version})
     return {"data_version": export_version, "path": str(destination), "counts": manifest["counts"],

@@ -129,7 +129,7 @@ def main(argv=None):
             result = prepare_release(args.store, args.output, args.producer_commit, version=args.snapshot,
                                      limits=args.selected_limit, urls={name: getattr(args, name + "_url") for name in URLS},
                                      local={name: getattr(args, name) for name in URLS}, metadata=metadata,
-                                     timeout=args.timeout or 60, allow_count_decrease=args.allow_count_decrease,
+                                     timeout=args.timeout, allow_count_decrease=args.allow_count_decrease,
                                      baseline_counts=baseline)
         elif args.command == "verify-release":
             result = verify_release(args.bundle, args.manifest_sha256)

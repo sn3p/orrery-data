@@ -123,17 +123,22 @@ class ReleaseReview(unittest.TestCase):
                     self.assertIn("Invalid discovery orbital elements", self.verify(copied, code=1)["error"])
                     self.assertEqual(self.tree(copied), before)
 
-    def test_resealed_catalog_accepts_supported_orbital_boundaries(self):
-        first = self.prepare()
+    def test_supported_orbital_boundaries_match_across_all_representations(self):
         for index, values in enumerate((
             {"a": 1e-10, "e": 0, "n": 1e-10, "i": 0, "W": 0, "w": 0, "M": 0},
             {"a": 1, "e": 0.999999, "n": 1, "i": 180, "W": 360, "w": 360, "M": 360},
         )):
-            copied = self.directory / f"boundary-{index}"
-            shutil.copytree(first["path"], copied)
-            for profile in ("full", "first-2"):
-                self.change_catalog(copied, profile, values)
-            self.verify(copied)
+            # Produce a consistent master/SQLite/catalog fixture. A catalog-only
+            # mutation no longer represents an internally valid bundle.
+            script = ("import orrery_data.pipeline as pipeline\nfrom orrery_data.cli import main\n"
+                      "original = pipeline.master_rows\n"
+                      "def rows(*args, **kwargs):\n"
+                      " for row in original(*args, **kwargs):\n"
+                      f"  row.update({values!r})\n  yield row\n"
+                      "pipeline.master_rows = rows\nraise SystemExit(main())")
+            prepared = self.prepare("--store", self.directory / f"boundary-store-{index}",
+                                    "--output", self.directory / f"boundary-output-{index}", script=script)
+            self.verify(prepared["path"])
 
     def test_resealed_identity_schema_versions_require_integers(self):
         first = self.prepare()

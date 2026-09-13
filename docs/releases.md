@@ -218,14 +218,18 @@ The verifier checks the exact file inventory, disallows symlinks and unexpected
 paths, verifies all hashes/sizes and checksum lists, checks schema/version/count
 and source/credit consistency across SQLite and every export, runs SQLite
 integrity/FK checks, and checks catalog fields, finite values, date order,
-counts and gzip/plain equivalence. It does not fetch upstream sources or rerun
+counts and gzip/plain equivalence. It streams the complete master, validates each
+record, compares every SQLite field and source order, and checks every catalog
+against the corresponding first-N selection and stable sort from those records.
+The stored SQLite schema, constraints and indexes must match schema 1.
+It does not fetch upstream sources or rerun
 the original importer. Catalog validation enforces schema 1's supported elliptic
 orbital ranges, including the valid printed 360-degree endpoint. Release identity
 schema versions must be integers; boolean and floating-point values are rejected.
 The identity and its nested producer object must have exactly the schema-1
 fields; missing or additional fields are rejected before identity hashing.
-The full saved-data validator separately compares every
-SQLite field and the reference JSON payload hashes. Run verification before
+The full saved-data validator independently repeats the every-field comparison
+and checks the historical reference JSON payload hashes. Run verification before
 consuming downloaded data and keep the directory read-only during verification
 and use. Hashes detect damage; they are not authenticity signatures. Obtain the
 expected manifest hash from a trusted channel; omitting it checks internal
@@ -266,3 +270,9 @@ per-file limit; no release is created by this milestone.
 Provider references inspected 2026-09-12: [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow),
 [Actions artifact behavior and retention](https://github.com/actions/upload-artifact),
 [release assets](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
+
+The complete acceptance contract and its verification boundaries are recorded in
+[release-contract.md](release-contract.md). All writers, including the refresh
+store and workflow work directory, reject destinations inside immutable
+snapshot/export/release candidates before locking or writing. The local workflow
+helper locks its work directory across baseline preparation, build and verification.

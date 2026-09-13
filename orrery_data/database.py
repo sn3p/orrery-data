@@ -1,27 +1,24 @@
 """Complete local SQLite artifacts derived from validated, immutable snapshots."""
 
 from contextlib import closing, contextmanager
-import gzip
 import hashlib
-import json
-import math
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
 
 from . import __version__
-from .formats import DataError, FIELDS, identity
-from .pipeline import load_snapshot
-from .storage import digest, encode, file_info, now, verify_file, writer_lock
+from .formats import DataError, FIELDS
+from .contracts import validate_contract
+from .records import MASTER_FIELDS, OBJECT_FIELDS, ORBIT_FIELDS, iter_master, validate_record
+from .paths import validate_writable_path
+from .pipeline import load_snapshot, validate_snapshot_manifest
+from .storage import digest, encode, file_info, loads_json, now, verify_file, writer_lock
 
 
 DATABASE_SCHEMA_VERSION = 1
 APPLICATION_ID = 0x4F525259  # ORRY
 DEFAULT_DATABASE = Path("artifacts/orrery.sqlite3")
-OBJECT_FIELDS = ("id", "number", "packed_designation", "readable_designation", "disc")
-ORBIT_FIELDS = (*FIELDS[1:], "orbit_reference", "orbit_computer")
-MASTER_FIELDS = (*OBJECT_FIELDS, *ORBIT_FIELDS)
 # SQLite identifiers are case insensitive: JSON W and w MUST use distinct SQL names.
 SQL_ORBIT_FIELDS = ("epoch", "a", "e", "i", "ascending_node", "perihelion_argument",
                     "M", "n", "orbit_reference", "orbit_computer")
@@ -55,28 +52,6 @@ CREATE INDEX objects_discovery ON objects(disc, source_order);
 """
 
 
-def validate_record(row):
-    if not isinstance(row, dict) or row.keys() != set(MASTER_FIELDS):
-        raise DataError("Invalid master fields")
-    for key in ("id", "packed_designation", "readable_designation", "orbit_reference", "orbit_computer"):
-        if row[key] is None and key not in ("id", "packed_designation"):
-            continue
-        if not isinstance(row[key], str) or not row[key]:
-            raise DataError(f"Invalid master {key}")
-    if row["number"] is not None and type(row["number"]) is not int:
-        raise DataError("Invalid master number")
-    if identity(row["packed_designation"]) != (row["id"], row["number"]):
-        raise DataError("Master MPC identity mismatch")
-    for key in FIELDS:
-        if key == "disc" and row[key] is None:
-            continue
-        if type(row[key]) not in (int, float) or not math.isfinite(row[key]):
-            raise DataError(f"Invalid master numeric field: {key}")
-    if (row["a"] <= 0 or row["n"] <= 0 or not 0 <= row["e"] < 1
-            or not 0 <= row["i"] <= 180 or not all(0 <= row[k] <= 360 for k in ("W", "w", "M"))):
-        raise DataError("Invalid master elliptic orbit")
-
-
 def insert_master(connection, path):
     objects, orbits = [], []
     total, known = 0, 0
@@ -87,20 +62,25 @@ def insert_master(connection, path):
         objects.clear()
         orbits.clear()
 
-    with gzip.open(path, "rt", encoding="utf-8") as stream:
-        for total, line in enumerate(stream, 1):
-            try:
-                row = json.loads(line)
-                validate_record(row)
-            except (ValueError, TypeError) as exc:
-                raise DataError(f"Master row {total}: {exc}") from exc
-            known += row["disc"] is not None
-            objects.append((total, *(row[k] for k in OBJECT_FIELDS)))
-            orbits.append((total, *(row[k] for k in ORBIT_FIELDS)))
-            if len(objects) == 2000:
-                flush()
-        flush()
+    for total, row in enumerate(iter_master(path), 1):
+        known += row["disc"] is not None
+        objects.append((total, *(row[k] for k in OBJECT_FIELDS)))
+        orbits.append((total, *(row[k] for k in ORBIT_FIELDS)))
+        if len(objects) == 2000:
+            flush()
+    flush()
     return {"master_records": total, "known_discovery": known, "missing_discovery": total - known}
+
+
+def verify_schema(connection):
+    # Compare the persisted schema, including constraints/indexes and absence of
+    # triggers/views, with schema 1. Integrity checks only enforce constraints
+    # that actually exist in the file being inspected.
+    query = "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
+    with closing(sqlite3.connect(":memory:")) as expected:
+        expected.executescript(SCHEMA)
+        if connection.execute(query).fetchall() != expected.execute(query).fetchall():
+            raise DataError("Database schema does not match SQLite schema 1")
 
 
 def verify_integrity(connection):
@@ -121,6 +101,7 @@ def build_database(store, database=DEFAULT_DATABASE, version=None):
         raise DataError("Database output must end in .sqlite, .sqlite3 or .db")
     if database.is_symlink() or database.resolve().is_relative_to((store / "snapshots").resolve()):
         raise DataError("Database output must not be a symlink or be inside immutable snapshots")
+    validate_writable_path(database, label="Database output")
     # Resolve current exactly once; a concurrent refresh cannot mix snapshot versions.
     source, snapshot = load_snapshot(store, version)
     header = (source / "MPCORB-header.txt").read_text(encoding="utf-8")
@@ -174,7 +155,13 @@ def open_database(database):
         if (connection.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID
                 or connection.execute("PRAGMA user_version").fetchone()[0] != DATABASE_SCHEMA_VERSION):
             raise DataError("Unsupported OrreryData database/schema; rebuild with a compatible tool")
-        metadata = {key: json.loads(value) for key, value in connection.execute("SELECT key, value FROM metadata")}
+        verify_schema(connection)
+        metadata = {key: loads_json(value) for key, value in connection.execute("SELECT key, value FROM metadata")}
+        try:
+            validate_contract("database", metadata)
+        except DataError as exc:
+            raise DataError(f"Database provenance/identity: {exc}") from exc
+        validate_snapshot_manifest(metadata["snapshot"], metadata["identity"]["snapshot_version"])
         if (metadata["database_schema_version"] != DATABASE_SCHEMA_VERSION
                 or metadata["identity"]["database_schema_version"] != DATABASE_SCHEMA_VERSION
                 or metadata["identity"]["tool_version"] != metadata["tool_version"]

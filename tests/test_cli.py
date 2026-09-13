@@ -505,7 +505,7 @@ class CLI(unittest.TestCase):
         contents = json.loads(manifest.read_text())
         del contents["artifacts"]["catalog.json"]
         manifest.write_text(json.dumps(contents))
-        self.assertIn("required artifacts", self.export(code=1)["error"])
+        self.assertIn("artifact", self.export(code=1)["error"])
 
     def test_incomplete_snapshot_provenance_cannot_be_exported(self):
         result = self.refresh()

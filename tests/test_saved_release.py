@@ -277,7 +277,7 @@ class SavedReleaseValidation(unittest.TestCase):
         original = json.loads(path.read_text())
         # Each mutation still satisfies the schema's arithmetic invariants.
         changes = [
-            {"numbered_orbits": -1, "unnumbered_orbits": 1},
+            {"numbered_orbits": 1, "unnumbered_orbits": -1},
             {"orbital_records": 1, "unsupported_orbits": 1, "unnumbered_orbits": 1},
             {"discovery_records": 1, "unmatched_discovery_records": 1},
             {"master_records": -1, "unsupported_orbits": 1, "missing_discovery": -1},
@@ -369,7 +369,7 @@ class SavedReleaseValidation(unittest.TestCase):
     def test_reference_preflight_rejects_missing_malformed_and_conflicting_exports(self):
         producer = self.producer()
         original = self.references
-        for case in ("missing-full", "missing-selected", "list", "selection", "artifact", "profile", "records", "header-fields", "conflict"):
+        for case in ("missing-full", "missing-selected", "list", "selection", "artifact", "profile", "records", "header-fields", "conflict", "duplicate"):
             with self.subTest(case=case):
                 refs = self.directory / f"refs-{case}"
                 shutil.copytree(original, refs)
@@ -392,11 +392,14 @@ class SavedReleaseValidation(unittest.TestCase):
                         value["artifacts"]["catalog.json"]["records"] += 1
                     elif case == "header-fields":
                         value["artifacts"]["MPCORB-header.txt"]["extra"] = 1
-                    else:
+                    elif case == "conflict":
                         (refs / "conflict").mkdir()
                         full = refs / "conflict/manifest.json"
                         value["artifacts"]["catalog.json"]["sha256"] = "f" * 64
-                    full.write_text(json.dumps(value))
+                    payload = json.dumps(value)
+                    if case == "duplicate":
+                        payload = payload.replace('"data_version":', '"data_version": "ignored", "data_version":', 1)
+                    full.write_text(payload)
                 report, work = self.directory / f"{case}.json", self.directory / f"work-{case}"
                 report.write_text("previous report")
                 invocation = self.invocation(producer, work, report) + ["--reference-exports", str(refs)]

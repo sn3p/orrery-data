@@ -214,7 +214,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 102 tests; installed-wheel verification from
+The 0.3.0 milestone passed all 122 tests; installed-wheel verification from
 outside the checkout and workflow linting were completed earlier in this branch.
 The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
@@ -234,3 +234,22 @@ it is not a verbatim report emitted by today's validator, which also records
 fresh verification of that retained bundle, not a new full-dataset generation
 at the current head. A fresh full run would produce its own report, producer
 identity and release version; preserve this historical report alongside it.
+
+
+## Systematic release assurance
+
+The acceptance matrix is [release-contract.md](release-contract.md). The suite
+includes 1,131 generated structural/type mutations over all four manifest kinds,
+recursive snapshot/export/SQLite reader mutations, independently resealed payload
+inconsistencies, strict JSON failures, first-N selection and stable discovery ties.
+It covers 60 writer/candidate/path-alias combinations, retained-input/report
+isolation, per-run transfer ownership and concurrent local workflow baselines.
+The stored source loader also checks decoded bytes against the decoded-source
+identity; bundled releases cannot repeat this check without raw source files.
+These checks establish the listed invariants; test/review counts are not a proof
+that every possible defect is absent.
+
+The saved validator rejects work/report destinations that overlap retained inputs,
+producer code or immutable candidates. Reports may live inside a dedicated work
+directory. Transfer verification owns a unique temporary subtree, so retrying a
+run never deletes an unrelated `downloaded-copy` directory.
