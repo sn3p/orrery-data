@@ -106,14 +106,18 @@ def make_index(directory, manifest, rows, limit, producer_version, *, write=Fals
             (directory / name).write_bytes(payload)
             with deterministic_gzip(directory / (name + ".gz")) as compressed:
                 compressed.write(payload)
-        else:
-            decoded = {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
-            verify_file(directory / name, decoded)
-            verify_compressed(directory / (name + ".gz"), decoded)
         chunks.append({"start": start, "end": end, "first_disc": rows[start]["disc"],
-                       "last_disc": rows[end - 1]["disc"], **descriptor(directory, name)})
+                       "last_disc": rows[end - 1]["disc"], "url": name,
+                       "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)})
     if names or (directory / "chunks").exists() or (directory / "chunks").is_symlink():
         validate_flat_inventory(directory / "chunks", names, label="Indexed chunks")
+    # Inspect the complete inventory before reading any chunk. Retain only
+    # expected descriptors, not all decoded payloads, between these passes.
+    for chunk in chunks:
+        if not write:
+            verify_file(directory / chunk["url"], chunk)
+            verify_compressed(directory / (chunk["url"] + ".gz"), chunk)
+        chunk["gzip"] = reference(directory, chunk["url"] + ".gz")
     return {"contract_version": CONTRACT_VERSION, "schema_version": 1, "encoding": "json-array",
             "catalog_id": manifest["data_version"], "snapshot_version": manifest["snapshot_version"],
             "producer": {"tool_version": producer_version},
@@ -127,7 +131,7 @@ def make_index(directory, manifest, rows, limit, producer_version, *, write=Fals
 
 def verify_indexed(directory, index_sha256=None):
     directory = Path(directory)
-    if not stat.S_ISDIR(directory.lstat().st_mode):
+    if directory.is_symlink() or not directory.is_dir():
         raise DataError("Indexed bundle must be a real directory")
     if {p.name for p in directory.iterdir()} not in ({"index.json", "full"}, {"index.json", "full", "chunks"}):
         raise DataError("Indexed bundle inventory mismatch")
@@ -143,6 +147,10 @@ def verify_indexed(directory, index_sha256=None):
             or type(index.get("schema_version")) is not int or index["schema_version"] != 1
             or index.get("encoding") != "json-array"):
         raise DataError("Unsupported indexed contract, schema or encoding")
+    if set(index) != {"contract_version", "schema_version", "encoding", "catalog_id", "snapshot_version",
+                      "producer", "selection", "counts", "exclusions", "sources", "full", "provenance",
+                      "chunk_bytes", "date_counts", "chunks"}:
+        raise DataError("Invalid indexed fields")
     limit = chunk_limit(index.get("chunk_bytes"))
     producer = index.get("producer")
     if not isinstance(producer, dict) or set(producer) != {"tool_version"}:

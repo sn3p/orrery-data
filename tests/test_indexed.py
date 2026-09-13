@@ -12,7 +12,7 @@ import unittest
 
 from orrery_data.formats import DataError
 from orrery_data.indexed import export_indexed, MAX_CHUNK_BYTES
-from orrery_data.storage import file_info, read_json, write_json
+from orrery_data.storage import encode, file_info, read_json, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures"
@@ -125,8 +125,17 @@ class IndexedCLI(unittest.TestCase):
                 result = self.cli("verify-indexed", "--bundle", root / bundle["path"],
                                   "--index-sha256", bundle["pin"]["sha256"])
                 self.assertEqual(result["catalog_id"], bundle["catalog_id"])
+                regenerated = self.indexed(root / bundle["path"] / "full")
                 rows = read_json(root / bundle["path"] / "full/catalog.json")
                 index = read_json(root / bundle["path"] / "index.json")
+                actual = read_json(Path(regenerated["path"]) / "index.json")
+                expected = copy.deepcopy(index)
+                # Preserve the existing serialized format while allowing a newer
+                # producer or different zlib runtime to change its gzip bytes.
+                expected["producer"]["tool_version"] = actual["producer"]["tool_version"]
+                for old, new in zip(expected["chunks"], actual["chunks"]):
+                    old["gzip"].update({key: new["gzip"][key] for key in ("sha256", "bytes")})
+                self.assertEqual(encode(actual), encode(expected))
                 for query in cases["queries"]:
                     if query["bundle"] == name:
                         self.assertEqual(sum(row["disc"] <= query["through"] for row in rows), query["requiredEnd"])
@@ -150,7 +159,9 @@ class IndexedCLI(unittest.TestCase):
                 else:
                     first.write_bytes(corruption)
                 before = self.tree(self.output)
-                self.verify(result, code=1)
+                error = self.verify(result, code=1)
+                if corruption is None:
+                    self.assertIn("Indexed chunks file inventory mismatch", error["error"])
                 self.indexed(source, code=1)
                 self.assertEqual(self.tree(self.output), before)
                 self.assertFalse(list(self.output.glob(".indexed-*")))
@@ -184,6 +195,33 @@ class IndexedCLI(unittest.TestCase):
         result = self.indexed(self.prepare())
         error = self.cli("verify-indexed", "--bundle", result["path"], "--index-sha256", "0" * 64, code=1)
         self.assertIn("trusted pin", error["error"])
+
+    def test_missing_or_non_directory_bundle_has_clear_error(self):
+        ordinary = self.root / "ordinary-file"
+        ordinary.write_text("not a bundle")
+        linked = self.root / "dangling-link"
+        linked.symlink_to(self.root / "absent-target")
+        for path in (self.root / "missing", ordinary, ordinary / "nested", linked):
+            with self.subTest(path=path):
+                result = self.cli("verify-indexed", "--bundle", path, code=1)
+                self.assertEqual(result["error"], "Indexed bundle must be a real directory")
+
+    def test_index_field_errors_precede_full_payload_verification(self):
+        result = self.indexed(self.prepare())
+        bundle = Path(result["path"])
+        index = read_json(bundle / "index.json")
+        (bundle / "full/catalog.json").write_bytes(b"corrupt payload must not be read first")
+        for missing in (False, True):
+            broken = copy.deepcopy(index)
+            if missing:
+                del broken["date_counts"]
+            else:
+                broken["unknown"] = 1
+            write_json(bundle / "index.json", broken)
+            error = self.cli("verify-indexed", "--bundle", bundle, code=1)
+            self.assertEqual(error["error"], "Invalid indexed fields")
+        write_json(bundle / "index.json", index)
+        self.assertIn("Checksum or size mismatch", self.verify(result, code=1)["error"])
 
     def test_invalid_caps_and_oversize_record_leave_previous_output(self):
         source = self.prepare()
@@ -223,13 +261,18 @@ class IndexedCLI(unittest.TestCase):
         bundle = Path(result["path"])
         extra = bundle / "chunks/extra.json"
         extra.write_text("[]")
-        self.verify(result, code=1)
-        extra.unlink()
         path = bundle / "chunks/000000.json"
+        original = path.read_bytes()
+        path.write_bytes(b"corrupt payload must not be read before inventory")
+        self.assertIn("Indexed chunks file inventory mismatch", self.verify(result, code=1)["error"])
+        extra.unlink()
         saved = self.root / "saved.json"
         shutil.move(path, saved)
         path.symlink_to(saved)
-        self.verify(result, code=1)
+        self.assertIn("regular non-symlink files", self.verify(result, code=1)["error"])
+        path.unlink()
+        path.write_bytes(original)
+        self.verify(result)
 
 
 if __name__ == "__main__":
