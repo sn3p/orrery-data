@@ -64,12 +64,49 @@ def verify_checksums(directory):
             assert hashlib.file_digest(stream, "sha256").hexdigest() == expected, name
 
 
-def main():
+def arguments():
+    if not __debug__:
+        raise SystemExit("Saved snapshot validation requires assertions; run Python without "
+                         "-O/-OO or PYTHONOPTIMIZE.")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sources", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    sys.path.insert(0, str(ROOT))
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        from orrery_data.paths import (paths_overlap, validate_append_path,
+                                       validate_disjoint_paths, validate_writable_path)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    try:
+        for key in ("sources", "work_dir", "report"):
+            setattr(args, key, getattr(args, key).resolve())
+        inputs = [args.sources, *(args.sources / name for name in (
+            "MPCORB.DAT.gz", "NumberedMPs.txt.gz", "MPCORB.headers", "NumberedMPs.headers")),
+                  *(ROOT / name for name in ("orrery_data", "scripts", "pyproject.toml"))]
+        writers = [args.work_dir / name for name in
+                   ("source-metadata.json", "store", "store/snapshots", "releases", ".lock")]
+        for path in (args.work_dir, args.report, *writers):
+            validate_disjoint_paths(path, inputs, label="Validation destination")
+            validate_writable_path(path, label="Validation destination")
+        if (paths_overlap(args.work_dir, args.report)
+                and (args.report == args.work_dir or not args.report.is_relative_to(args.work_dir))):
+            raise ValueError("Validation report must be a file outside the work directory's ancestors")
+        validate_disjoint_paths(args.report, writers, label="Validation report")
+        for root in (args.work_dir / "store", args.work_dir / "releases"):
+            validate_append_path(root / ".lock", label="Validation writer lock")
+    except (OSError, ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
+    return args
+
+
+def main():
+    args = arguments()
+    from orrery_data.storage import atomic_json
+
     args.work_dir.mkdir(parents=True, exist_ok=True)
     metadata = {}
     for name, filename in (("mpcorb", "MPCORB"), ("numbered", "NumberedMPs")):
@@ -83,7 +120,7 @@ def main():
                           "retrieved_at": "2026-09-12T14:57:32Z"}
     metadata["numbered"]["decoded_sha256"] = "56229cf0f045beb62180a62f4b9a9351af9955e7e88aab5976256fa62347a705"
     metadata_path = args.work_dir / "source-metadata.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+    atomic_json(metadata_path, metadata)
     store = args.work_dir / "store"
     output = args.work_dir / "releases"
     inputs = ["--mpcorb", args.sources / "MPCORB.DAT.gz", "--numbered", args.sources / "NumberedMPs.txt.gz",
@@ -137,7 +174,7 @@ def main():
               "timings_seconds": {"refresh": refresh_seconds, "export_all": export_seconds, "export_100k": limited_seconds},
               "limits": "No browser/GPU rendering, transfer, preparation or playback performance validation."}
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(result, indent=2) + "\n")
+    atomic_json(args.report, result)
     print(json.dumps({"status": "passed", "report": str(args.report), "counts": snapshot["counts"]}), flush=True)
 
 

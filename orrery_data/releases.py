@@ -16,14 +16,14 @@ import zlib
 
 from . import SCHEMA_VERSION, __version__
 from .database import DATABASE_SCHEMA_VERSION, build_database, database_info, open_database
-from .contracts import URL, validate_contract
+from .contracts import URL, identity_digest, validate_contract
 from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
 from .paths import validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
-from .storage import (URLS, atomic_json, digest, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
+from .storage import (URLS, atomic_json, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
                       verify_generated_gzip,
                       write_json, writer_lock)
 
@@ -205,7 +205,7 @@ def verify_release(directory, manifest_sha256=None):
     require(manifest["release_schema_version"] == RELEASE_SCHEMA_VERSION
             and identity["release_schema_version"] == RELEASE_SCHEMA_VERSION,
             "Unsupported release schema")
-    require(manifest["release_version"] == "release-v1-" + digest(identity), "Release identity mismatch")
+    require(manifest["release_version"] == "release-v1-" + identity_digest("release", identity), "Release identity mismatch")
     require(isinstance(producer["commit"], str) and re.fullmatch(COMMIT, producer["commit"])
             and isinstance(producer["tool_version"], str) and bool(producer["tool_version"]),
             "Invalid producer identity")
@@ -233,7 +233,7 @@ def verify_release(directory, manifest_sha256=None):
         raise DataError(f"snapshot.json: {exc}") from exc
     data_identity = dataset_identity(snapshot)
     require(manifest["dataset_identity"] == data_identity
-            and identity["dataset_version"] == "data-v1-" + digest(data_identity), "Dataset identity mismatch")
+            and identity["dataset_version"] == "data-v1-" + identity_digest("dataset", data_identity), "Dataset identity mismatch")
     require(manifest["counts"] == snapshot["counts"] and manifest["sources"] == snapshot["sources"],
             "Release source/count mismatch")
     verify_file(directory / "MPCORB-header.txt", snapshot["files"]["MPCORB-header.txt"])
@@ -269,7 +269,7 @@ def verify_release(directory, manifest_sha256=None):
                              "selection": selection(limit)}
         count = min(limit, snapshot["counts"]["known_discovery"]) if limit else snapshot["counts"]["known_discovery"]
         require(exported["identity"] == expected_identity
-                and exported["data_version"] == "export-v1-" + digest(expected_identity)
+                and exported["data_version"] == "export-v1-" + identity_digest("export", expected_identity)
                 and exported["snapshot_version"] == snapshot["snapshot_version"]
                 and exported["tool_version"] == producer["tool_version"]
                 and exported["schema_version"] == SCHEMA_VERSION
@@ -349,7 +349,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
         previous_result = None
         previous = None
         pointer = output / "latest.json"
-        if pointer.exists():
+        if pointer.exists() or pointer.is_symlink():
             previous_pointer = read_json(pointer)
             require(isinstance(previous_pointer, dict) and set(previous_pointer) == {"release_version", "manifest"},
                     "Invalid latest release pointer: expected release_version and manifest; use a separate release output root")
@@ -362,6 +362,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
             try:
                 verify_file(output / previous / "release.json", previous_pointer["manifest"])
                 previous_result = verify_release(output / previous, previous_pointer["manifest"]["sha256"])
+                require(previous_result["release_version"] == previous, "Previous release identity differs from its pointer")
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise DataError(f"Previous release referenced by latest.json ({previous}): {exc}. "
                                 "Restore that bundle or use a fresh output root with inspected --baseline-counts") from exc
@@ -378,15 +379,16 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
                                 "inspect sources, then explicitly use --allow-count-decrease if intentional")
         data_identity = dataset_identity(snapshot)
         identity = {"release_schema_version": RELEASE_SCHEMA_VERSION,
-                    "dataset_version": "data-v1-" + digest(data_identity), "snapshot_version": version,
+                    "dataset_version": "data-v1-" + identity_digest("dataset", data_identity), "snapshot_version": version,
                     "producer": {"commit": producer_commit, "tool_version": __version__},
                     "json_schema_version": SCHEMA_VERSION, "database_schema_version": DATABASE_SCHEMA_VERSION,
                     "selected_limits": limits, "notice_sha256": file_info(Path(__file__).with_name("NOTICE.txt"))["sha256"]}
-        release_version = "release-v1-" + digest(identity)
+        release_version = "release-v1-" + identity_digest("release", identity)
         destination = output / release_version
         if destination.exists():
             result = previous_result if previous == release_version else verify_release(destination)
-            require(read_json(destination / "release.json")["identity"] == identity, "Existing release identity mismatch")
+            require(result["release_version"] == release_version
+                    and read_json(destination / "release.json")["identity"] == identity, "Existing release identity mismatch")
         else:
             with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temp:
                 stage = Path(temp)

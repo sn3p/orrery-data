@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import unittest
 from unittest.mock import patch
 
@@ -148,6 +149,64 @@ class SavedReleaseValidation(unittest.TestCase):
         return subprocess.run(self.invocation(self.producer(), work, report),
                               cwd=ROOT, env={**os.environ, "PYTHONOPTIMIZE": "0"},
                               capture_output=True, text=True, timeout=30)
+
+    def test_saved_destinations_reject_case_and_unicode_input_aliases_before_writes(self):
+        # Keep every real path and portable alias inside this disposable tree.
+        # NFC/NFD and case-only aliases must reject on case-sensitive CI too.
+        for field in ("store", "references"):
+            source = getattr(self, field)
+            renamed = source.with_name("caf\u00e9-" + source.name)
+            source.rename(renamed)
+            setattr(self, field, renamed)
+        producer = self.producer(stop_before_prepare=False)
+        renamed = producer.with_name("caf\u00e9-producer")
+        producer.rename(renamed)
+        producer = renamed
+        work, report = self.directory / "safe-work", self.directory / "report.json"
+        report.write_text("previous evidence")
+        protected = [(self.store, "current.json"), (self.references, "latest.json"),
+                     (producer / "orrery_data", "releases.py"),
+                     (producer / "scripts", "validate_saved_database.py"),
+                     (producer / "pyproject.toml", None)]
+        cases = []
+        for root, existing in protected:
+            for spelling in ("case", "unicode"):
+                relative = root.relative_to(self.directory).as_posix()
+                relative = relative.upper() if spelling == "case" else unicodedata.normalize("NFD", relative)
+                alias = self.directory / relative
+                cases.append((work, alias / existing if existing else alias))
+                if existing:
+                    cases.extend([(work, alias / "future/report.json"),
+                                  (alias, report), (alias / "future/work", report)])
+        alias = self.directory / "input-link"
+        alias.symlink_to(self.store, target_is_directory=True)
+        cases.extend([(work, alias / "current.json"), (alias / "future/work", report)])
+
+        def tree():
+            return {str(path.relative_to(self.directory)):
+                    (path.lstat().st_mtime_ns, path.read_bytes() if path.is_file() else None)
+                    for path in self.directory.rglob("*")}
+
+        before = tree()
+        for bad_work, bad_report in cases:
+            with self.subTest(work=bad_work, report=bad_report):
+                result = subprocess.run(self.invocation(producer, bad_work, bad_report), cwd=ROOT,
+                                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("must not overlap retained inputs or producer code", result.stderr)
+                self.assertFalse(result.stdout, "must reject before preparation")
+                self.assertEqual(tree(), before, "preflight must leave every fixture input and report unchanged")
+        self.assertFalse(work.exists())
+        self.assertEqual(report.read_text(), "previous evidence")
+        # The same committed fixture still completes after invalid placement,
+        # including a subsequent report inside its dedicated work directory.
+        for valid_report in (report, work / "report.json"):
+            result = subprocess.run(self.invocation(producer, work, valid_report), cwd=ROOT,
+                                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(valid_report.read_text())["status"], "passed")
 
     def test_committed_producer_survives_changed_and_restored_source_and_head(self):
         producer = self.producer(stop_before_prepare=False, pause=True)

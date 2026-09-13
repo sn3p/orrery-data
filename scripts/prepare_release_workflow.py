@@ -8,30 +8,12 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import unicodedata
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from orrery_data.releases import COMMIT, validate_baseline
-from orrery_data.paths import validate_append_path, validate_writable_path
+from orrery_data.paths import paths_overlap, validate_append_path, validate_writable_path
 from orrery_data.storage import atomic_json, loads_json, writer_lock
-
-
-def paths_overlap(first, second):
-    # Reserve a portable namespace, including paths that do not exist yet.
-    # Deliberately reject case/Unicode-normalization-only distinctions even on
-    # case-sensitive filesystems; those destinations overlap on other runners.
-    names = [Path(unicodedata.normalize("NFC", str(path).casefold())) for path in (first, second)]
-    if names[0].is_relative_to(names[1]) or names[1].is_relative_to(names[0]):
-        return True
-    for path, root in ((first, second), (second, first)):
-        # resolve() follows symlinks but can retain different spelling for the
-        # same existing path on a case-insensitive filesystem.
-        if root.exists():
-            for ancestor in (path, *path.parents):
-                if ancestor.exists() and ancestor.samefile(root):
-                    return True
-    return False
 
 
 def main():

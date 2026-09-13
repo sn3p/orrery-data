@@ -9,11 +9,11 @@ import tempfile
 
 from . import __version__
 from .formats import DataError, FIELDS
-from .contracts import validate_contract
+from .contracts import identity_digest, validate_contract
 from .records import MASTER_FIELDS, OBJECT_FIELDS, ORBIT_FIELDS, iter_master, validate_record
 from .paths import validate_writable_path
 from .pipeline import load_snapshot, validate_snapshot_manifest
-from .storage import digest, encode, file_info, loads_json, now, verify_file, writer_lock
+from .storage import encode, file_info, loads_json, now, verify_file, writer_lock
 
 
 DATABASE_SCHEMA_VERSION = 1
@@ -90,9 +90,26 @@ def verify_integrity(connection):
         raise DataError("Database foreign key check failed")
 
 
-def reject_sidecars(database):
-    if any(Path(str(database) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
-        raise DataError("Database has SQLite sidecars; close external writers and recover them before rebuilding")
+def reject_sidecars(database, *, operation="rebuilding"):
+    if any(path.exists() or path.is_symlink()
+           for path in (Path(str(database) + suffix) for suffix in ("-wal", "-shm", "-journal"))):
+        raise DataError(f"Database has SQLite sidecars; close external writers and recover them before {operation}")
+
+
+def validate_readonly_database(database):
+    # mode=ro can still create WAL/SHM files. Generated artifacts use rollback
+    # journalling, identified by read/write format bytes 18 and 19 in the SQLite
+    # header. Reject other formats before SQLite opens the file; immutable=1
+    # would instead risk silently ignoring uncheckpointed WAL contents.
+    if not database.is_file():
+        raise DataError("Database must be an existing regular file")
+    reject_sidecars(database, operation="reading")
+    with database.open("rb") as stream:
+        header = stream.read(20)
+    if len(header) != 20 or header[:16] != b"SQLite format 3\x00":
+        raise DataError("Invalid SQLite database header")
+    if header[18:20] != b"\x01\x01":
+        raise DataError("Database must use rollback journal format; recover or rebuild WAL/unsupported artifacts before reading")
 
 
 def build_database(store, database=DEFAULT_DATABASE, version=None):
@@ -101,7 +118,7 @@ def build_database(store, database=DEFAULT_DATABASE, version=None):
         raise DataError("Database output must end in .sqlite, .sqlite3 or .db")
     if database.is_symlink() or database.resolve().is_relative_to((store / "snapshots").resolve()):
         raise DataError("Database output must not be a symlink or be inside immutable snapshots")
-    validate_writable_path(database, label="Database output")
+    validate_writable_path(database, label="Database output", protected_roots=(store / "snapshots",))
     # Resolve current exactly once; a concurrent refresh cannot mix snapshot versions.
     source, snapshot = load_snapshot(store, version)
     header = (source / "MPCORB-header.txt").read_text(encoding="utf-8")
@@ -109,7 +126,7 @@ def build_database(store, database=DEFAULT_DATABASE, version=None):
     build_identity = {"database_schema_version": DATABASE_SCHEMA_VERSION, "tool_version": __version__,
                       "snapshot_version": snapshot["snapshot_version"], "files": snapshot["files"],
                       "notice_sha256": hashlib.sha256(notice.encode("utf-8")).hexdigest()}
-    metadata = {"database_version": "sqlite-v1-" + digest(build_identity), "identity": build_identity,
+    metadata = {"database_version": "sqlite-v1-" + identity_digest("database", build_identity), "identity": build_identity,
                 "database_schema_version": DATABASE_SCHEMA_VERSION, "tool_version": __version__,
                 "sqlite_version": sqlite3.sqlite_version, "created_at": now(),
                 "snapshot": snapshot, "mpcorb_header": header, "notice": notice}
@@ -146,8 +163,10 @@ def build_database(store, database=DEFAULT_DATABASE, version=None):
 
 @contextmanager
 def open_database(database):
+    database = Path(database).resolve()
+    validate_readonly_database(database)
     # URI escaping is essential for filenames containing ?, #, spaces or percent signs.
-    uri = Path(database).resolve().as_uri() + "?mode=ro"
+    uri = database.as_uri() + "?mode=ro"
     with closing(sqlite3.connect(uri, uri=True)) as connection:
         connection.execute("PRAGMA query_only = ON")
         connection.execute("PRAGMA trusted_schema = OFF")
@@ -166,7 +185,7 @@ def open_database(database):
                 or metadata["identity"]["database_schema_version"] != DATABASE_SCHEMA_VERSION
                 or metadata["identity"]["tool_version"] != metadata["tool_version"]
                 or metadata["identity"]["snapshot_version"] != metadata["snapshot"]["snapshot_version"]
-                or metadata["database_version"] != "sqlite-v1-" + digest(metadata["identity"])):
+                or metadata["database_version"] != "sqlite-v1-" + identity_digest("database", metadata["identity"])):
             raise DataError("Database metadata identity mismatch")
         if not all(isinstance(metadata[key], str) for key in ("mpcorb_header", "notice")):
             raise DataError("Invalid database provenance text")

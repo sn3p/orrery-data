@@ -66,6 +66,9 @@ and payload cases supplement structural mutations.
 | Pointers | Exactly the supported version key; release pointer also has exact manifest file information; export and release roots reject each other's pointer types |
 
 Every content-derived ID must equal its documented ordered-JSON identity hash.
+Readers reconstruct that schema-defined order, including nested identity objects,
+before hashing. Reordering JSON object keys preserves the canonical ID; hashing
+an alternative key order cannot introduce a second ID for the same identity.
 Repeated metadata must agree with the authoritative object, with exact JSON
 types. Export selection/counts, copied source/master/header/notice provenance,
 database files and release profiles must describe the same snapshot. Generation
@@ -88,12 +91,12 @@ actual producing runtime remain recorded claims.
 | Fixed layout | Bundle contains exactly the supported files and directories; no symlinks or special files; manifest paths cannot choose files to open |
 | Transport | Every byte count/hash and checksum list agrees; trusted manifest pin rejects resealing |
 | Master | Strict schema-v1 records, valid MPC identities and consistent displayed numbers, finite supported orbits, exact master/known/missing counts |
-| SQLite | Read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
+| SQLite | Complete rollback-journal artifact without sidecars, checked before SQLite opens; read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
 | Discovery catalogs | Full/selected rows equal the corresponding source-order selection from SQLite/master, then stable discovery sort; exact nine fields and gzip/plain equality |
-| Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers |
+| Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers; dangling pointers fail instead of discarding baselines |
 | Inputs and outputs | Writers reject destinations at/below immutable snapshots, exports or release candidates, including aliases; source refresh cannot use a candidate as its writable store; workflow append paths must be outside every resolved writer root and distinct from each other |
 | Activation | Validate API source values/pairs before writes; build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
-| Existing artifacts | Reuse validates structure, content and provenance before changing a pointer |
+| Existing artifacts | Snapshot and export candidates must be real directories with exactly their documented regular, non-symlink files, checked before content reads; reuse validates content and provenance before changing a pointer |
 | Saved evidence | Report/output paths cannot overwrite inputs or candidates; copied data uses a private per-run path; report replacement is atomic and previous evidence survives failures |
 | Code provenance | Saved validator reads raw committed blobs with replacements disabled and runs helpers/subprocesses in isolation; a dirty producer is rejected |
 
@@ -106,3 +109,15 @@ by case or Unicode NFC normalization count as overlaps even on a case-sensitive
 filesystem. Their parent directories must already exist. Checks cover both
 command orders for export/release roots and both framework append destinations
 against workflow metadata, including resolved child roots outside the work tree.
+
+The same case/NFC and filesystem-identity comparisons protect saved-validation
+inputs and reserved snapshot roots. All three saved-validation scripts preflight
+their work/report destinations and writer children before writes, require Python
+assertions, and publish reports atomically. Malformed URL ports fail source-option
+preflight before stores, locks or release outputs are created.
+
+SQLite readers reject WAL-format headers and existing journal/WAL/SHM sidecars
+before opening the database. A WAL file can contain data absent from the main
+file; recover or rebuild that database before supplying a standalone artifact.
+Readers retain ordinary read transactions and do not ignore journals via SQLite's
+immutable-file mode.

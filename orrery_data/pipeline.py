@@ -12,19 +12,22 @@ import zlib
 
 from . import SCHEMA_VERSION, __version__
 from .formats import DataError, FIELDS, discoveries, master_rows
-from .contracts import URL, validate_contract
+from .contracts import URL, identity_digest, validate_contract
 from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
-from .paths import validate_writable_path
-from .storage import (URLS, acquire, atomic_json, deterministic_gzip, digest, encode,
+from .paths import validate_flat_inventory, validate_writable_path
+from .storage import (URLS, acquire, atomic_json, deterministic_gzip, encode,
                       file_info, now, read_json, request, response_metadata,
                       utc_timestamp, validate_file_info, verify_decoded_source, verify_file,
                       verify_generated_gzip, write_json, writer_lock)
 
+SNAPSHOT_FILES = {"snapshot.json", "mpcorb.input", "numbered.input", "master.jsonl.gz", "MPCORB-header.txt"}
+EXPORT_FILES = {"master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt"}
+
 
 def current(store):
     pointer = store / "current.json"
-    if not pointer.exists():
+    if not pointer.exists() and not pointer.is_symlink():
         return None
     value = read_json(pointer)
     if (not isinstance(value, dict) or set(value) != {"snapshot_version"}
@@ -39,6 +42,7 @@ def load_snapshot(store, version=None, verify=True):
     if not isinstance(version, str) or not re.fullmatch(r"snapshot-v1-[a-f0-9]{64}", version):
         raise DataError("No valid snapshot selected; run refresh first")
     directory = store / "snapshots" / version
+    validate_flat_inventory(directory, SNAPSHOT_FILES, label="Snapshot")
     manifest = read_json(directory / "snapshot.json")
     validate_snapshot_manifest(manifest, version)
     if verify:
@@ -65,7 +69,7 @@ def validate_snapshot_manifest(manifest, version):
             or type(identity["schema_version"]) is not int or type(manifest["schema_version"]) is not int):
         raise DataError("Invalid snapshot identity fields")
     if (manifest["snapshot_version"] != version
-            or "snapshot-v1-" + digest(manifest["identity"]) != version
+            or "snapshot-v1-" + identity_digest("snapshot", manifest["identity"]) != version
             or manifest["schema_version"] != SCHEMA_VERSION
             or manifest["identity"]["schema_version"] != manifest["schema_version"]
             or manifest["identity"]["tool_version"] != manifest["tool_version"]):
@@ -169,7 +173,7 @@ def validate_export_manifest(manifest):
     if (manifest["identity"] != {"snapshot_version": manifest["snapshot_version"],
                                  "tool_version": manifest["tool_version"], "schema_version": SCHEMA_VERSION,
                                  "selection": manifest["selection"]}
-            or manifest["data_version"] != "export-v1-" + digest(manifest["identity"])):
+            or manifest["data_version"] != "export-v1-" + identity_digest("export", manifest["identity"])):
         raise DataError("Export identity/schema mismatch")
 
 
@@ -244,7 +248,7 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
                                         "inspect sources, then explicitly use --allow-count-decrease if intentional")
             identity = {"schema_version": SCHEMA_VERSION, "tool_version": __version__,
                         "sources": {name: info["decoded"]["sha256"] for name, info in sources.items()}}
-            version = "snapshot-v1-" + digest(identity)
+            version = "snapshot-v1-" + identity_digest("snapshot", identity)
             manifest = {"snapshot_version": version, "identity": identity,
                         "schema_version": SCHEMA_VERSION, "tool_version": __version__,
                         "created_at": now(), "sources": sources, "counts": dict(counts),
@@ -257,7 +261,7 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
             for name in urls:
                 (stage / f"{name}.txt").unlink()
             destination = snapshots / version
-            if destination.exists():
+            if destination.exists() or destination.is_symlink():
                 # First acquisition wins; retries cannot rewrite immutable provenance.
                 _, manifest = load_snapshot(store, version)
             else:
@@ -302,11 +306,12 @@ def export(store, output, version=None, limit=None):
                  "select": "first-known-dates-in-mpcorb-order", "sort": "disc-ascending-stable"}
     identity = {"snapshot_version": snapshot["snapshot_version"], "tool_version": __version__,
                 "schema_version": SCHEMA_VERSION, "selection": selection}
-    export_version = "export-v1-" + digest(identity)
+    export_version = "export-v1-" + identity_digest("export", identity)
     with writer_lock(output):
         validate_export_pointer(output)  # Recheck after excluding cooperating writers.
         destination = output / export_version
-        if destination.exists():
+        if destination.exists() or destination.is_symlink():
+            validate_flat_inventory(destination, EXPORT_FILES | {"manifest.json", "SHA256SUMS"}, label="Export")
             manifest = read_json(destination / "manifest.json")
             validate_export_manifest(manifest)
             if manifest["identity"] != identity or manifest["data_version"] != export_version:
@@ -315,7 +320,7 @@ def export(store, output, version=None, limit=None):
                     or manifest["compression"]["master"] != snapshot["compression"]
                     or {key: value for key, value in manifest["counts"].items() if key != "discovery_export"} != snapshot["counts"]):
                 raise DataError("Existing export snapshot provenance mismatch")
-            names = {"master.jsonl.gz", "catalog.json", "catalog.json.gz", "MPCORB-header.txt", "NOTICE.txt"}
+            names = EXPORT_FILES
             if set(manifest["artifacts"]) != names:
                 raise DataError("Existing export is missing required artifacts")
             for name, info in manifest["artifacts"].items():

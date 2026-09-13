@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from .formats import DataError
 from .metadata import timestamp
-from .storage import utc_timestamp
+from .storage import digest, utc_timestamp
 
 
 def rule(predicate, description):
@@ -64,9 +64,37 @@ def http_url(value):
         return False
     try:
         url = urlsplit(value)
+        url.port  # Validate the optional port; hostname alone does not check it.
         return url.scheme in ('http', 'https') and bool(url.hostname)
     except ValueError:
         return False
+
+
+def identity_digest(kind, value):
+    """Hash schema-defined field order, independent of JSON object key order."""
+    file_fields = dict.fromkeys(('sha256', 'bytes'))
+    source_fields = dict.fromkeys(('mpcorb', 'numbered'))
+    selection_fields = dict.fromkeys(('profile', 'limit', 'select', 'sort'))
+    layouts = {
+        'snapshot': {'schema_version': None, 'tool_version': None, 'sources': source_fields},
+        'export': {'snapshot_version': None, 'tool_version': None, 'schema_version': None,
+                   'selection': selection_fields},
+        'database': {'database_schema_version': None, 'tool_version': None, 'snapshot_version': None,
+                     'files': {'master.jsonl.gz': file_fields, 'MPCORB-header.txt': file_fields},
+                     'notice_sha256': None},
+        'release': {'release_schema_version': None, 'dataset_version': None, 'snapshot_version': None,
+                    'producer': {'commit': None, 'tool_version': None}, 'json_schema_version': None,
+                    'database_schema_version': None, 'selected_limits': None, 'notice_sha256': None},
+        'dataset': {'sources': source_fields},
+    }
+
+    def ordered(item, fields):
+        if not isinstance(item, dict) or item.keys() != fields.keys():
+            raise DataError(f'Invalid {kind} identity fields')
+        return {key: item[key] if nested is None else ordered(item[key], nested)
+                for key, nested in fields.items()}
+
+    return digest(ordered(value, layouts[kind]))
 
 
 TEXT = rule(lambda v: isinstance(v, str), 'string')
