@@ -201,6 +201,8 @@ counts and gzip/plain equivalence. It does not fetch upstream sources or rerun
 the original importer. Catalog validation enforces schema 1's supported elliptic
 orbital ranges, including the valid printed 360-degree endpoint. Release identity
 schema versions must be integers; boolean and floating-point values are rejected.
+The identity and its nested producer object must have exactly the schema-1
+fields; missing or additional fields are rejected before identity hashing.
 The full saved-data validator separately compares every
 SQLite field and the reference JSON payload hashes. Run verification before
 consuming downloaded data and keep the directory read-only during verification

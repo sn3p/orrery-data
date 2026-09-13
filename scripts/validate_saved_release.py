@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -167,7 +168,19 @@ def validate(args, commit):
               "limits": ["No GitHub-hosted manual workflow run or artifact upload/download",
                          "No release publication, hosting or app/browser/GPU integration"]}
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    payload = json.dumps(report, indent=2) + "\n"
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".report-",
+                                         dir=args.report.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, args.report)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     print(json.dumps(report, indent=2), flush=True)
 
 

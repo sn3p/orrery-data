@@ -13,6 +13,45 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Inject I/O failures only at the final report boundary in the committed worker.
+# Both the old direct write and temporary-file publication use io.open.
+REPORT_IO_HOOK = '''
+import io
+import os
+report_target = Path(os.environ["ORRERY_TEST_REPORT"]).resolve()
+report_fault = os.environ.get("ORRERY_TEST_REPORT_FAULT")
+report_fds = set()
+real_open, real_fsync, real_replace = io.open, os.fsync, os.replace
+class ReportStream:
+    def __init__(self, stream): self.stream = stream
+    def __getattr__(self, name): return getattr(self.stream, name)
+    def __enter__(self): return self
+    def __exit__(self, *args): return self.stream.__exit__(*args)
+    def write(self, payload):
+        if report_fault == "write":
+            self.stream.write(payload[:20])
+            self.stream.flush()
+            raise OSError("injected report write failure")
+        return self.stream.write(payload)
+    def flush(self):
+        if report_fault == "flush": raise OSError("injected report flush failure")
+        return self.stream.flush()
+def report_open(file, *args, **kwargs):
+    stream = real_open(file, *args, **kwargs)
+    if isinstance(file, (str, bytes, os.PathLike)) and Path(file) in (report_target, report_target.parent):
+        report_fds.add(stream.fileno())
+        return ReportStream(stream)
+    return stream
+def report_fsync(fd):
+    if fd in report_fds and report_fault == "fsync": raise OSError("injected report fsync failure")
+    return real_fsync(fd)
+def report_replace(source, target):
+    if Path(target) == report_target and report_fault == "replace":
+        raise OSError("injected report replace failure")
+    return real_replace(source, target)
+io.open, os.fsync, os.replace = report_open, report_fsync, report_replace
+'''
+
 
 class SavedReleaseValidation(unittest.TestCase):
     def setUp(self):
@@ -35,7 +74,7 @@ class SavedReleaseValidation(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True, check=True, timeout=30)
         return json.loads(result.stdout)
 
-    def producer(self, stop_before_prepare=True, pause=False):
+    def producer(self, stop_before_prepare=True, pause=False, report_io=False):
         # Commit the real producer/validator with only retained fixture values
         # substituted. The bootstrap must read these committed Git objects.
         producer = self.directory / "producer"
@@ -55,6 +94,8 @@ class SavedReleaseValidation(unittest.TestCase):
                     source = "\n".join(f"{key} = {value!r}" if line.startswith(key + " = ") else line
                                        for line in source.split("\n"))
                 if name == "validate_saved_release.py":
+                    if report_io:
+                        source = source.replace("def arguments():", REPORT_IO_HOOK + "\ndef arguments():")
                     if stop_before_prepare:
                         source = source.replace('    prepared, timings["prepare"] = cli(',
                                                 "    raise SystemExit('release preparation reached')\n"
@@ -144,6 +185,37 @@ class SavedReleaseValidation(unittest.TestCase):
         self.assertEqual(len(roots), 1)
         self.assertNotIn(str(producer), roots)
         self.assertFalse(Path(roots.pop()).exists(), "private producer snapshot should be removed")
+
+    def test_report_publication_failures_preserve_evidence_and_allow_retry(self):
+        producer = self.producer(stop_before_prepare=False, report_io=True)
+        previous = b'{"previous_evidence":"keep"}\n'
+        for existing in (False, True):
+            for fault in ("write", "flush", "fsync", "replace"):
+                with self.subTest(existing=existing, fault=fault):
+                    root = self.directory / f"report-{existing}-{fault}"
+                    root.mkdir()
+                    report = root / "report.json"
+                    if existing:
+                        report.write_bytes(previous)
+                    work = self.directory / f"work-{existing}-{fault}"
+                    env = {**os.environ, "PYTHONOPTIMIZE": "0", "ORRERY_TEST_REPORT": str(report),
+                           "ORRERY_TEST_REPORT_FAULT": fault}
+                    failed = subprocess.run(self.invocation(producer, work, report), cwd=ROOT,
+                                            env=env, capture_output=True, text=True, timeout=30)
+                    self.assertNotEqual(failed.returncode, 0, failed.stdout)
+                    self.assertIn(f"injected report {fault} failure", failed.stderr)
+                    self.assertNotIn('"status": "passed"', failed.stdout)
+                    self.assertEqual(list(root.iterdir()), [report] if existing else [])
+                    if existing:
+                        self.assertEqual(report.read_bytes(), previous)
+                    env.pop("ORRERY_TEST_REPORT_FAULT")
+                    passed = subprocess.run(self.invocation(producer, work, report), cwd=ROOT,
+                                            env=env, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+                    result = json.loads(report.read_text())
+                    self.assertEqual(result["status"], "passed")
+                    self.assertEqual(report.read_text(), json.dumps(result, indent=2) + "\n")
+                    self.assertEqual(list(root.iterdir()), [report])
 
     def test_changed_sources_with_identical_master_rejected_before_writes(self):
         dates = (ROOT / "tests/fixtures/NumberedMPs.txt").read_text()

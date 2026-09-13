@@ -80,6 +80,46 @@ class ReleaseReview(unittest.TestCase):
                     self.reseal(copied)
                     self.assertIn("schema version", self.verify(copied, code=1)["error"])
 
+    def test_resealed_identity_requires_exact_schema_one_fields(self):
+        first = self.prepare()
+        bundle = Path(first["path"])
+        original = json.loads((bundle / "release.json").read_text())
+        cases = [("identity", "future", 1), ("producer", "future", 1)]
+        for target in ("identity", "producer"):
+            value = original["identity"] if target == "identity" else original["identity"]["producer"]
+            cases.extend((target, key, None) for key in value)
+        cases.extend(("producer-value", "producer", value) for value in (None, [], "producer", 1, True))
+        for index, (target, key, value) in enumerate(cases):
+            with self.subTest(target=target, key=key, value=value):
+                copied = self.directory / f"identity-{index}"
+                shutil.copytree(bundle, copied)
+                manifest = json.loads(json.dumps(original))
+                obj = manifest["identity"]["producer"] if target == "producer" else manifest["identity"]
+                if value is None and target != "producer-value":
+                    del obj[key]
+                else:
+                    obj[key] = value
+                manifest["release_version"] = "release-v1-" + digest(manifest["identity"])
+                (copied / "release.json").write_text(json.dumps(manifest))
+                self.reseal(copied)
+                before = self.tree(copied)
+                self.assertIn("fields", self.verify(copied, code=1)["error"])
+                self.assertEqual(self.tree(copied), before)
+        # Preparation uses the same verifier before reusing/activating a candidate.
+        original_bytes = (bundle / "release.json").read_bytes()
+        original_checksums = (bundle / "SHA256SUMS").read_bytes()
+        (self.output / "latest.json").unlink()
+        original["identity"]["producer"]["future"] = 1
+        original["release_version"] = "release-v1-" + digest(original["identity"])
+        (bundle / "release.json").write_text(json.dumps(original))
+        self.reseal(bundle)
+        before = self.tree(self.output)
+        self.assertIn("fields", self.prepare(offline=first["snapshot_version"], code=1)["error"])
+        self.assertEqual(self.tree(self.output), before)
+        (bundle / "release.json").write_bytes(original_bytes)
+        (bundle / "SHA256SUMS").write_bytes(original_checksums)
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
     def test_preparation_cannot_write_inside_existing_candidates(self):
         first = self.prepare()
         bundle = Path(first["path"])

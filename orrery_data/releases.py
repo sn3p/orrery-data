@@ -147,6 +147,12 @@ def verify_release(directory, manifest_sha256=None):
     manifest = read_json(directory / "release.json")
     created_at = validate_release_metadata(manifest)
     identity = manifest["identity"]
+    require(set(identity) == {"release_schema_version", "dataset_version", "snapshot_version", "producer",
+                              "json_schema_version", "database_schema_version", "selected_limits", "notice_sha256"},
+            "Invalid release identity fields")
+    producer = identity["producer"]
+    require(isinstance(producer, dict) and set(producer) == {"commit", "tool_version"},
+            "Invalid release producer fields")
     require(all(type(identity[key]) is int for key in
                 ("release_schema_version", "json_schema_version", "database_schema_version")),
             "Invalid identity schema version types")
@@ -154,7 +160,6 @@ def verify_release(directory, manifest_sha256=None):
             and identity["release_schema_version"] == RELEASE_SCHEMA_VERSION,
             "Unsupported release schema")
     require(manifest["release_version"] == "release-v1-" + digest(identity), "Release identity mismatch")
-    producer = identity["producer"]
     require(isinstance(producer["commit"], str) and re.fullmatch(COMMIT, producer["commit"])
             and isinstance(producer["tool_version"], str) and bool(producer["tool_version"]),
             "Invalid producer identity")
