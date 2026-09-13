@@ -15,6 +15,7 @@ from .formats import DataError, julian_day
 from .metadata import validate_source_metadata
 from .pipeline import check, export, refresh
 from .storage import URLS, encode, read_json
+from .releases import prepare_release, verify_release
 
 
 def positive(value):
@@ -51,20 +52,28 @@ def parser():
     root = argparse.ArgumentParser(description="Validated MPC snapshots and Orrery catalogs")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("check", "refresh", "export", "build-db"):
+    for name in ("check", "refresh", "export", "build-db", "prepare-release"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--store", type=Path, default=Path(".data"), help="local snapshot store (default: .data)")
-        if name in ("check", "refresh"):
+        if name in ("check", "refresh", "prepare-release"):
             cmd.add_argument("--mpcorb-url", default=URLS["mpcorb"])
             cmd.add_argument("--numbered-url", default=URLS["numbered"])
-            cmd.add_argument("--timeout", type=positive, default=60, help="HTTP socket timeout in seconds")
-        if name == "refresh":
+            cmd.add_argument("--timeout", type=positive, default=None if name == "prepare-release" else 60,
+                             help="HTTP socket timeout in seconds (default: 60)")
+        if name in ("refresh", "prepare-release"):
             cmd.add_argument("--mpcorb", type=Path, help="import local MPCORB (plain or gzip)")
             cmd.add_argument("--numbered", type=Path, help="import local NumberedMPs (plain or gzip)")
             cmd.add_argument("--source-metadata", type=Path, help="optional per-source JSON provenance and expected hashes")
             cmd.add_argument("--allow-count-decrease", action="store_true", help="accept an inspected reduction in source/eligible counts")
-        if name in ("export", "build-db"):
-            cmd.add_argument("--snapshot", help="pin a snapshot version (default: current)")
+        if name in ("export", "build-db", "prepare-release"):
+            cmd.add_argument("--snapshot", help=("pin a snapshot for offline preparation; otherwise refresh sources"
+                                                if name == "prepare-release" else "pin a snapshot version (default: current)"))
+        if name == "prepare-release":
+            cmd.add_argument("--output", type=Path, default=Path("artifacts/releases"))
+            cmd.add_argument("--producer-commit", required=True, help="full Git commit of the producing code")
+            cmd.add_argument("--selected-limit", type=positive, action="append",
+                             help="include first N eligible rows; repeat for multiple profiles (default: 100000)")
+            cmd.add_argument("--baseline-counts", type=Path, help="JSON counts from a previously inspected dataset")
         if name == "build-db":
             cmd.add_argument("--database", type=Path, default=DEFAULT_DATABASE,
                              help="database to atomically replace (default: artifacts/orrery.sqlite3)")
@@ -89,6 +98,9 @@ def parser():
                              help="source order, or discovery date with nulls last and source-order ties")
             cmd.add_argument("--limit", type=query_limit, default=20, help="page size 1–10000 (default: 20)")
             cmd.add_argument("--offset", type=nonnegative, default=0, help="skip matching rows (default: 0)")
+    verify = commands.add_parser("verify-release")
+    verify.add_argument("--bundle", type=Path, required=True)
+    verify.add_argument("--manifest-sha256", help="expected release.json hash from a trusted channel")
     return root
 
 
@@ -104,6 +116,23 @@ def main(argv=None):
             validate_source_metadata(metadata)
             result = refresh(args.store, {name: getattr(args, name + "_url") for name in URLS},
                              {name: getattr(args, name) for name in URLS}, metadata, args.timeout, args.allow_count_decrease)
+        elif args.command == "prepare-release":
+            if bool(args.mpcorb) != bool(args.numbered):
+                raise DataError("Provide both --mpcorb and --numbered, or neither")
+            if args.snapshot is not None and (
+                    args.mpcorb or args.source_metadata or args.timeout is not None
+                    or args.mpcorb_url != URLS["mpcorb"] or args.numbered_url != URLS["numbered"]):
+                raise DataError("--snapshot cannot be combined with source acquisition options")
+            metadata = read_json(args.source_metadata) if args.source_metadata else {}
+            validate_source_metadata(metadata)
+            baseline = read_json(args.baseline_counts) if args.baseline_counts else None
+            result = prepare_release(args.store, args.output, args.producer_commit, version=args.snapshot,
+                                     limits=args.selected_limit, urls={name: getattr(args, name + "_url") for name in URLS},
+                                     local={name: getattr(args, name) for name in URLS}, metadata=metadata,
+                                     timeout=args.timeout, allow_count_decrease=args.allow_count_decrease,
+                                     baseline_counts=baseline)
+        elif args.command == "verify-release":
+            result = verify_release(args.bundle, args.manifest_sha256)
         elif args.command == "export":
             result = export(args.store, args.output, args.snapshot, args.limit)
         elif args.command == "build-db":

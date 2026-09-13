@@ -1,0 +1,132 @@
+{
+  "status": "passed",
+  "producer_commit": "d3e80458e8e1ee2cb55bccfa0e70e6453685ea62",
+  "release": {
+    "status": "verified",
+    "release_version": "release-v1-7a21784f66f1566060bc1ac25bed31b0cb12bb2e711af4b06879ed25304f16e2",
+    "dataset_version": "data-v1-e2b630e5da0b92b2045a5dd2205020ba7f02c15680203f482cebd44d28b67adf",
+    "snapshot_version": "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5",
+    "producer": {
+      "commit": "d3e80458e8e1ee2cb55bccfa0e70e6453685ea62",
+      "tool_version": "0.3.0"
+    },
+    "counts": {
+      "orbital_records": 1563495,
+      "master_records": 1563495,
+      "known_discovery": 895910,
+      "missing_discovery": 667585,
+      "numbered_orbits": 895910,
+      "unnumbered_orbits": 667585,
+      "unsupported_orbits": 0,
+      "discovery_records": 895910,
+      "unmatched_discovery_records": 0
+    },
+    "profiles": {
+      "full": {
+        "data_version": "export-v1-b0d9911194ffdc6d14bdc2e90565f83ffe2740a0b72b0297ee997569716316bd",
+        "records": 895910,
+        "selection": {
+          "profile": "discovery",
+          "limit": null,
+          "select": "first-known-dates-in-mpcorb-order",
+          "sort": "disc-ascending-stable"
+        }
+      },
+      "first-100000": {
+        "data_version": "export-v1-d595e82d531c84bb3826f819772bd0c5e98e89dedab042edfef4481487528de7",
+        "records": 100000,
+        "selection": {
+          "profile": "discovery",
+          "limit": 100000,
+          "select": "first-known-dates-in-mpcorb-order",
+          "sort": "disc-ascending-stable"
+        }
+      }
+    },
+    "manifest": {
+      "sha256": "7fe81c085fd02829be801cb96df478ad3ee2a7b62b0bb04620156d1ae333a1ea",
+      "bytes": 4989
+    },
+    "path": "release-v1-7a21784f66f1566060bc1ac25bed31b0cb12bb2e711af4b06879ed25304f16e2"
+  },
+  "every_sqlite_field_matches_master": true,
+  "unchanged_export_artifacts": {
+    "full": {
+      "master.jsonl.gz": {
+        "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+        "bytes": 92289968,
+        "profile": "master",
+        "records": 1563495
+      },
+      "catalog.json": {
+        "sha256": "0fb42d148878ea3270ee81a6bd501ba65b50b78dd558a24abab45f0af084199b",
+        "bytes": 118824557,
+        "profile": "discovery",
+        "records": 895910
+      },
+      "catalog.json.gz": {
+        "sha256": "f915e083b1f18dff745d9130a215bb7b69588ec904c6ccf38e512463d14b0a4b",
+        "bytes": 34197622,
+        "profile": "discovery",
+        "records": 895910
+      },
+      "MPCORB-header.txt": {
+        "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+        "bytes": 2349
+      },
+      "NOTICE.txt": {
+        "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+        "bytes": 2446
+      }
+    },
+    "first-100000": {
+      "master.jsonl.gz": {
+        "sha256": "822b409ff3bf5d4086f21d027fbcff58e7632f320806071ea97b7d9eba10a2ee",
+        "bytes": 92289968,
+        "profile": "master",
+        "records": 1563495
+      },
+      "catalog.json": {
+        "sha256": "cbfc1ddb8f7ec3e0dae227ee6c4afb10582b60e43b1d9308c33362bdc617d28c",
+        "bytes": 13258794,
+        "profile": "discovery",
+        "records": 100000
+      },
+      "catalog.json.gz": {
+        "sha256": "3acef88eed47f2fb816de2b31b59adef319424c45a8d83af33021fdc0d1180f7",
+        "bytes": 3867423,
+        "profile": "discovery",
+        "records": 100000
+      },
+      "MPCORB-header.txt": {
+        "sha256": "364f645e6ad237676f4d763b836cd46a28370884f6b9d27fc386873941ac7786",
+        "bytes": 2349
+      },
+      "NOTICE.txt": {
+        "sha256": "1474207afddf1e6e7f2b773e21105a25dd95a2e429f415eae820bcb96e2a9339",
+        "bytes": 2446
+      }
+    }
+  },
+  "repeat_same_directory_immutable": true,
+  "standalone_copy_verified_and_queried": true,
+  "copy_method": "APFS clone",
+  "damaged_copy_rejected": true,
+  "seconds": {
+    "retry": 14.567,
+    "repeat": 12.333,
+    "compare_every_row": 9.866,
+    "verify_copy": 6.427
+  },
+  "recovery": {
+    "initial_run": "fresh preparation, every-field comparison and reference exports passed; repeated pointer write failed with ENOSPC",
+    "action": "cloned identical generated export bytes from retained references to recover disk space; reference hashes unchanged",
+    "continuation": "real CLI repeated twice, every-field/reference checks repeated, copied bundle verified/queried and damage rejected; manifest hash unchanged"
+  },
+  "limits": [
+    "No GitHub-hosted manual workflow run or artifact upload/download",
+    "No release publication, hosting or app/browser/GPU integration"
+  ],
+  "artifact_payload_bytes": 731812716,
+  "bundle_bytes": 731819466
+}

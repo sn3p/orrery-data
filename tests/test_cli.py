@@ -133,6 +133,17 @@ class CLI(unittest.TestCase):
             self.assertEqual(hashlib.sha256((directory / name).read_bytes()).hexdigest(), sha)
         self.assertIn("proper attribution", (directory / "MPCORB-header.txt").read_text())
 
+    def test_unrelated_parent_manifest_allows_refresh_and_export(self):
+        marker = self.directory / "manifest.json"
+        contents = '{"name":"unrelated-project"}\n'
+        marker.write_text(contents)
+        snapshot = self.cli("refresh", "--mpcorb", FIXTURES / "MPCORB.DAT",
+                            "--numbered", FIXTURES / "NumberedMPs.txt")
+        exported = self.export()
+        self.assertEqual(snapshot["counts"]["master_records"], 9)
+        self.assertEqual(exported["counts"]["discovery_export"], 6)
+        self.assertEqual(marker.read_text(), contents)
+
     def test_limit_before_date_sort_and_tie_order(self):
         # Make the third MPC object earlier than the selected first two.
         dates = self.dates.replace("1804 09 01", "1799 01 01").replace("1802 03 28", "1801 01 01")
@@ -505,7 +516,7 @@ class CLI(unittest.TestCase):
         contents = json.loads(manifest.read_text())
         del contents["artifacts"]["catalog.json"]
         manifest.write_text(json.dumps(contents))
-        self.assertIn("required artifacts", self.export(code=1)["error"])
+        self.assertIn("artifact", self.export(code=1)["error"])
 
     def test_incomplete_snapshot_provenance_cannot_be_exported(self):
         result = self.refresh()

@@ -76,16 +76,50 @@ def verify_exports(store, version, reference_exports, work_dir, timings):
     return exports, output
 
 
-def main():
+def arguments():
+    if not __debug__:
+        raise SystemExit("Saved database validation requires assertions; run Python without "
+                         "-O/-OO or PYTHONOPTIMIZE.")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--reference-exports", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    sys.path.insert(0, str(ROOT))
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        from orrery_data.paths import (path_within, validate_append_path,
+                                       validate_disjoint_paths, validate_writable_path)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    try:
+        for key in ("store", "reference_exports", "work_dir", "report"):
+            setattr(args, key, getattr(args, key).resolve())
+        inputs = [args.store, args.store / "current.json", args.store / "snapshots", args.reference_exports,
+                  *args.reference_exports.glob("*/manifest.json"),
+                  *(ROOT / name for name in ("orrery_data", "scripts", "pyproject.toml"))]
+        database = args.work_dir / "orrery.sqlite3"
+        for path in (args.work_dir, args.report, database):
+            validate_disjoint_paths(path, inputs, label="Validation destination")
+            validate_writable_path(path, label="Validation destination")
+        if path_within(args.work_dir, args.report):
+            raise ValueError("Validation report must be a file outside the work directory's ancestors")
+        validate_disjoint_paths(args.report, [database, args.work_dir / ".lock"], label="Validation report")
+        validate_append_path(args.work_dir / ".lock", label="Validation writer lock")
+    except (OSError, ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
+    return args
+
+
+def main():
+    args = arguments()
+    from orrery_data.storage import atomic_json, read_pointer
+
+    pointer = read_pointer(args.store / "current.json")
     args.work_dir.mkdir(parents=True, exist_ok=True)
     database = args.work_dir / "orrery.sqlite3"
-    pointer = json.loads((args.store / "current.json").read_text())
     version = pointer["snapshot_version"]
     snapshot = args.store / "snapshots" / version
     master = snapshot / "master.jsonl.gz"
@@ -134,7 +168,7 @@ def main():
                          "full and 100k JSON exports equal retained artifact hashes"],
               "limits": "Local producer only; no HTTP hosting, release publication, browser or app integration verification."}
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    atomic_json(args.report, report)
     print(json.dumps({"status": "passed", "report": str(args.report), "counts": EXPECTED}), flush=True)
 
 

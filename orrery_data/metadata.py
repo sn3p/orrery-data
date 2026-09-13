@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+import os
 import re
 
 from .formats import DataError
@@ -63,3 +64,13 @@ def validate_source_metadata(metadata):
             valid, description = rules[field]
             if not valid(value):
                 raise DataError(f"{name}.{field}: expected {description}")
+
+
+def validate_local_sources(local):
+    if not isinstance(local, dict) or not local.keys() <= URLS.keys():
+        raise DataError("Local sources must contain mpcorb/numbered paths")
+    for name, path in local.items():
+        if path is not None and (not isinstance(path, (str, os.PathLike)) or not os.fspath(path)):
+            raise DataError(f"Local source {name} must be a nonempty path or null")
+    if sum(path is not None for path in local.values()) not in (0, 2):
+        raise DataError("Provide both local mpcorb and numbered paths, or neither")

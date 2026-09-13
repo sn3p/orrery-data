@@ -6,14 +6,18 @@ import fcntl
 import gzip
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
+import zlib
 from urllib.request import Request, urlopen
 
 from . import __version__
 from .formats import DataError
+from .paths import validate_append_path
 
 
 URLS = {
@@ -25,6 +29,15 @@ CHUNK = 1024 * 1024
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def utc_timestamp(value, label):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value):
+        raise DataError(f"{label} timestamps must be UTC YYYY-MM-DDTHH:MM:SSZ")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise DataError(f"Invalid {label.lower()} timestamp") from exc
 
 
 def encode(value):
@@ -41,14 +54,85 @@ def file_info(path):
     return {"sha256": sha, "bytes": path.stat().st_size}
 
 
+def validate_file_info(info, label):
+    if (not isinstance(info, dict) or not {"sha256", "bytes"} <= info.keys()
+            or not isinstance(info["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", info["sha256"])
+            or type(info["bytes"]) is not int or info["bytes"] < 0):
+        raise DataError(f"Invalid file metadata: {label} requires sha256 and nonnegative integer bytes")
+
+
 def verify_file(path, info):
+    validate_file_info(info, path.name)
     if file_info(path) != {k: info[k] for k in ("sha256", "bytes")}:
         raise DataError(f"Checksum or size mismatch: {path.name}")
 
 
+def verify_generated_gzip(path):
+    # Producers write exactly one member, without optional fields or filename,
+    # and with mtime=0. Check the entire frame, including CRC/trailer and EOF:
+    # gzip.open would transparently accept further members or zero padding.
+    # Bound both compressed input and discarded decompressed output memory.
+    try:
+        with path.open("rb") as stream:
+            header = stream.read(10)
+            if len(header) != 10 or header[:8] != b"\x1f\x8b\x08\x00\x00\x00\x00\x00":
+                raise DataError(f"Invalid {path.name}: generated gzip requires zero mtime and no optional header fields")
+            stream.seek(0)
+            decoder = zlib.decompressobj(wbits=31)
+            while not decoder.eof:
+                chunk = decoder.unconsumed_tail or stream.read(CHUNK)
+                if not chunk:
+                    raise DataError(f"Invalid {path.name}: incomplete generated gzip member")
+                decoder.decompress(chunk, CHUNK)
+            if decoder.unused_data or stream.read(1):
+                raise DataError(f"Invalid {path.name}: generated gzip requires exactly one member and no trailing bytes")
+    except zlib.error as exc:
+        raise DataError(f"Invalid {path.name}: {exc}") from exc
+
+
+def verify_decoded_source(path, info):
+    sha, size = hashlib.sha256(), 0
+    opener = gzip.open if info["compression"] == "gzip" else open
+    with opener(path, "rb") as stream:
+        while chunk := stream.read(CHUNK):
+            sha.update(chunk)
+            size += len(chunk)
+    if {"sha256": sha.hexdigest(), "bytes": size} != info["decoded"]:
+        raise DataError(f"Decoded source checksum or size mismatch: {path.name}")
+
+
 def read_json(path):
     with path.open() as stream:
-        return json.load(stream)
+        return loads_json(stream.read())
+
+
+def read_pointer(path):
+    # A mutable pointer may refer to a regular file, but never a stream/device.
+    # Writers replace the pointer atomically, preserving any healthy link target.
+    if not path.is_file():
+        raise DataError(f"Pointer must refer to an existing regular file: {path.name}")
+    return read_json(path)
+
+
+def loads_json(text):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise DataError(f"Duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def number(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise DataError("JSON numbers must be finite")
+        return parsed
+
+    def constant(value):
+        raise DataError(f"Invalid JSON constant: {value}")
+
+    return json.loads(text, object_pairs_hook=pairs, parse_float=number, parse_constant=constant)
 
 
 def write_json(path, value):
@@ -69,6 +153,7 @@ def atomic_json(path, value):
 
 @contextmanager
 def writer_lock(root):
+    validate_append_path(root / ".lock", label="Writer lock")
     root.mkdir(parents=True, exist_ok=True)
     with (root / ".lock").open("a") as lock:
         try:

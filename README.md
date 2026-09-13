@@ -1,7 +1,7 @@
 # Orrery Data
 
 Validated, versioned minor-planet snapshots, local SQLite queries and static
-exports for Orrery and Orrery3D. Python 3.11+ on macOS/Linux with its standard
+exports and release candidates for Orrery and Orrery3D. Python 3.11+ on macOS/Linux with its standard
 `sqlite3` module; no third-party runtime dependencies or server.
 
 The orbital elements and discovery circumstances used by this project are
@@ -80,6 +80,13 @@ builder to pin an existing snapshot. `db-info` returns embedded provenance and
 credits; `--verify` adds integrity checks. `query` returns bounded pages with
 the master JSON fields and a total matching count. Reads never create a missing
 database. See [SQLite commands, schema and recovery](docs/sqlite.md).
+
+`prepare-release --producer-commit "$(git rev-parse HEAD)"` refreshes sources and
+assembles a verified SQLite/full/selected JSON bundle. Use `--snapshot` with a
+retained store for offline preparation. `verify-release --bundle /path/candidate`
+checks a standalone copy. The manual Actions workflow retains a short-lived
+review artifact; it does not publish a release. See [release preparation,
+versions and verification](docs/releases.md).
 
 Raw inputs, local stores, generated databases and large exports are ignored by Git.
 This repository does not automatically publish releases or update either app.
