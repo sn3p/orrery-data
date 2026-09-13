@@ -404,6 +404,33 @@ class ReleaseCLI(unittest.TestCase):
         self.assertEqual({name: after_store[name] for name in before_store}, before_store)
         self.assertEqual(self.requests, [])
 
+    def test_refresh_rejects_equivalent_store_output_spellings_before_writes(self):
+        spellings = (("source-store", "SOURCE-STORE"), ("caf\u00e9-store", "cafe\u0301-store"))
+        for existing in (False, True):
+            for index, (store_name, output_name) in enumerate(spellings):
+                with self.subTest(existing=existing, spelling=index):
+                    root = self.directory / f"same-root-{existing}-{index}"
+                    root.mkdir()
+                    store, output = root / store_name, root / output_name
+                    if existing:
+                        store.mkdir()
+                        (store / "keep.txt").write_text("existing operator data")
+                    before = self.tree(root)
+                    entries = set(root.rglob("*"))
+                    self.requests.clear()
+                    error = self.prepare("--store", store, "--output", output, code=1)["error"]
+                    self.assertIn("must be different directories when refreshing", error)
+                    self.assertEqual(self.tree(root), before)
+                    self.assertEqual(set(root.rglob("*")), entries)
+                    self.assertEqual(self.requests, [])
+                    # Strictly nested roots are distinct, in either direction.
+                    # Reusing a parent path helper must not forbid these retries.
+                    if existing:
+                        result = self.prepare("--store", store, "--output", store / "releases")
+                    else:
+                        result = self.prepare("--store", output / "store", "--output", output)
+                    self.assertEqual(result["counts"]["master_records"], 9)
+
     def test_locks_partial_downloads_and_output_placement(self):
         first = self.prepare()
         before = self.tree(self.output)

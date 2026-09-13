@@ -19,7 +19,7 @@ from .database import DATABASE_SCHEMA_VERSION, build_database, database_info, op
 from .contracts import URL, identity_digest, validate_contract
 from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
-from .paths import validate_writable_path
+from .paths import path_within, validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
@@ -336,7 +336,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
             "Release output must not be a symlink or be inside immutable snapshots")
-    require(version is not None or resolved_output != store.resolve(),
+    require(version is not None or not (path_within(resolved_output, store) and path_within(store, resolved_output)),
             "Source store and release output must be different directories when refreshing")
     validate_writable_path(output, label="Release output", protected_roots=(store / "snapshots",))
     with writer_lock(output):
