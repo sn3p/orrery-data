@@ -17,7 +17,7 @@ from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
 from .paths import validate_flat_inventory, validate_writable_path
 from .storage import (URLS, acquire, atomic_json, deterministic_gzip, encode,
-                      file_info, now, read_json, request, response_metadata,
+                      file_info, now, read_json, read_pointer, request, response_metadata,
                       utc_timestamp, validate_file_info, verify_decoded_source, verify_file,
                       verify_generated_gzip, write_json, writer_lock)
 
@@ -29,7 +29,7 @@ def current(store):
     pointer = store / "current.json"
     if not pointer.exists() and not pointer.is_symlink():
         return None
-    value = read_json(pointer)
+    value = read_pointer(pointer)
     if (not isinstance(value, dict) or set(value) != {"snapshot_version"}
             or not isinstance(value["snapshot_version"], str)
             or not re.fullmatch(r"snapshot-v1-[a-f0-9]{64}", value["snapshot_version"])):
@@ -289,7 +289,7 @@ def selected_master(path, counts, limit):
 def validate_export_pointer(output):
     pointer = output / "latest.json"
     if pointer.exists() or pointer.is_symlink():
-        value = read_json(pointer)
+        value = read_pointer(pointer)
         if (not isinstance(value, dict) or set(value) != {"data_version"}
                 or not isinstance(value["data_version"], str)
                 or not re.fullmatch(r"export-v1-[a-f0-9]{64}", value["data_version"])):

@@ -23,7 +23,7 @@ from .paths import validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
-from .storage import (URLS, atomic_json, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
+from .storage import (URLS, atomic_json, file_info, now, read_json, read_pointer, utc_timestamp, validate_file_info, verify_file,
                       verify_generated_gzip,
                       write_json, writer_lock)
 
@@ -336,7 +336,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
             "Release output must not be a symlink or be inside immutable snapshots")
-    require(not any(parent.is_dir() and (re.fullmatch(r"release-v1-" + SHA256, parent.name)
+    require(not any(parent.is_dir() and (re.fullmatch(r"release-v1-" + SHA256, parent.name.casefold())
                                         or (parent / "release.json").exists()
                                         or (parent / "release.json").is_symlink())
                     for parent in (resolved_output, *resolved_output.parents)),
@@ -350,7 +350,7 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
         previous = None
         pointer = output / "latest.json"
         if pointer.exists() or pointer.is_symlink():
-            previous_pointer = read_json(pointer)
+            previous_pointer = read_pointer(pointer)
             require(isinstance(previous_pointer, dict) and set(previous_pointer) == {"release_version", "manifest"},
                     "Invalid latest release pointer: expected release_version and manifest; use a separate release output root")
             require(isinstance(previous_pointer["manifest"], dict) and set(previous_pointer["manifest"]) == {"sha256", "bytes"},
@@ -360,8 +360,8 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
             require(isinstance(previous, str) and re.fullmatch(r"release-v1-" + SHA256, previous),
                     "Invalid latest release pointer")
             try:
-                verify_file(output / previous / "release.json", previous_pointer["manifest"])
                 previous_result = verify_release(output / previous, previous_pointer["manifest"]["sha256"])
+                require(previous_result["manifest"] == previous_pointer["manifest"], "Checksum or size mismatch: release.json")
                 require(previous_result["release_version"] == previous, "Previous release identity differs from its pointer")
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise DataError(f"Previous release referenced by latest.json ({previous}): {exc}. "

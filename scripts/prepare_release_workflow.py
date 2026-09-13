@@ -11,6 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from orrery_data.contracts import URL
 from orrery_data.releases import COMMIT, validate_baseline
 from orrery_data.paths import paths_overlap, validate_append_path, validate_writable_path
 from orrery_data.storage import atomic_json, loads_json, writer_lock
@@ -38,6 +39,10 @@ def main():
         allow = os.environ.get("RELEASE_ALLOW_COUNT_DECREASE", "false")
         if allow not in ("true", "false"):
             raise ValueError("Count decrease input must be true or false")
+        for name in ("mpcorb", "numbered"):
+            url = getattr(args, name + "_url")
+            if url is not None:
+                URL(url, f"Source URL {name}")
         writer_roots = []
         for root in (args.work_dir, args.work_dir / "store", args.work_dir / "releases"):
             writer_roots.append(validate_writable_path(root, label="Workflow writer directory"))

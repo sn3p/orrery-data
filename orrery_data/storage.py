@@ -106,6 +106,14 @@ def read_json(path):
         return loads_json(stream.read())
 
 
+def read_pointer(path):
+    # A mutable pointer may refer to a regular file, but never a stream/device.
+    # Writers replace the pointer atomically, preserving any healthy link target.
+    if not path.is_file():
+        raise DataError(f"Pointer must refer to an existing regular file: {path.name}")
+    return read_json(path)
+
+
 def loads_json(text):
     def pairs(items):
         result = {}

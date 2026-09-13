@@ -43,16 +43,19 @@ def arguments():
     previous_bytecode = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
-        from orrery_data.paths import validate_disjoint_paths, validate_writable_path
+        from orrery_data.paths import path_within, validate_disjoint_paths, validate_writable_path
     finally:
         sys.dont_write_bytecode = previous_bytecode
-    inputs = [args.store, args.reference_exports, *(ROOT / name for name in PRODUCER_PATHS)]
     try:
+        # References may point to retained files outside their containing root.
+        # Protect exactly the manifest leaves consumed by reference_exports().
+        inputs = [args.store, args.store / "current.json", args.store / "snapshots", args.reference_exports,
+                  *args.reference_exports.glob("*/manifest.json"), *(ROOT / name for name in PRODUCER_PATHS)]
         validate_disjoint_paths(args.work_dir, inputs, label="Validation work directory")
         validate_disjoint_paths(args.report, inputs, label="Validation report")
         validate_writable_path(args.work_dir, label="Validation work directory")
         validate_writable_path(args.report, label="Validation report")
-        if args.work_dir.is_relative_to(args.report):
+        if path_within(args.work_dir, args.report):
             raise ValueError("Validation report must be a file outside the work directory's ancestors")
     except (OSError, ValueError) as exc:
         parser.error(str(exc))

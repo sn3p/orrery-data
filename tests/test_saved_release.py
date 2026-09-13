@@ -150,6 +150,56 @@ class SavedReleaseValidation(unittest.TestCase):
                               cwd=ROOT, env={**os.environ, "PYTHONOPTIMIZE": "0"},
                               capture_output=True, text=True, timeout=30)
 
+    def test_external_reference_and_store_aliases_are_protected_and_supported_on_retry(self):
+        producer = self.producer(stop_before_prepare=False)
+        external_root = self.directory / "external-inputs"
+        external_root.mkdir()
+        external_files = []
+        for index, manifest in enumerate(sorted(self.references.glob("*/manifest.json"))):
+            external = external_root / f"reference-{index}.json"
+            manifest.rename(external)
+            manifest.symlink_to(external)
+            external_files.append(external)
+        pointer = self.store / "current.json"
+        external_pointer = external_root / "current-pointer.json"
+        pointer.rename(external_pointer)
+        pointer.symlink_to(external_pointer)
+        external_files.append(external_pointer)
+        snapshots = self.store / "snapshots"
+        external_snapshots = external_root / "retained-snapshots"
+        snapshots.rename(external_snapshots)
+        snapshots.symlink_to(external_snapshots, target_is_directory=True)
+        original = {path: path.read_bytes() for path in external_root.rglob("*") if path.is_file()}
+        work, report = self.directory / "work", self.directory / "report.json"
+        report.write_text("previous validation evidence")
+        cases = [(work, target) for target in (*external_files, external_snapshots / "future/report.json")]
+        cases += [(target, report) for target in (*external_files, external_root,
+                                                  external_snapshots / "future-work")]
+        cases += [(work, self.directory / "WORK"),
+                  (self.directory / "parent/work", self.directory / "PARENT")]
+        for bad_work, bad_report in cases:
+            with self.subTest(work=bad_work, report=bad_report):
+                before = {path: path.read_bytes() for root in (self.store, self.references, producer, external_root)
+                          for path in root.rglob("*") if path.is_file()}
+                entries = set(self.directory.rglob("*"))
+                result = subprocess.run(self.invocation(producer, bad_work, bad_report), cwd=ROOT,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertRegex(result.stderr, "overlap|ancestors")
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(work.exists())
+                self.assertEqual(report.read_text(), "previous validation evidence")
+                self.assertEqual(set(self.directory.rglob("*")), entries)
+                for path, payload in before.items():
+                    self.assertEqual(path.read_bytes(), payload)
+        for valid_report in (report, work / "report.json", work.with_name("WORK") / "report-alias.json"):
+            result = subprocess.run(self.invocation(producer, work, valid_report), cwd=ROOT,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(valid_report.read_text())["status"], "passed")
+            for path, payload in original.items():
+                self.assertEqual(path.read_bytes(), payload)
+
     def test_saved_destinations_reject_case_and_unicode_input_aliases_before_writes(self):
         # Keep every real path and portable alias inside this disposable tree.
         # NFC/NFD and case-only aliases must reject on case-sensitive CI too.

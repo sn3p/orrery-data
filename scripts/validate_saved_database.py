@@ -90,7 +90,7 @@ def arguments():
     previous_bytecode = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
-        from orrery_data.paths import (paths_overlap, validate_append_path,
+        from orrery_data.paths import (path_within, validate_append_path,
                                        validate_disjoint_paths, validate_writable_path)
     finally:
         sys.dont_write_bytecode = previous_bytecode
@@ -98,13 +98,13 @@ def arguments():
         for key in ("store", "reference_exports", "work_dir", "report"):
             setattr(args, key, getattr(args, key).resolve())
         inputs = [args.store, args.store / "current.json", args.store / "snapshots", args.reference_exports,
+                  *args.reference_exports.glob("*/manifest.json"),
                   *(ROOT / name for name in ("orrery_data", "scripts", "pyproject.toml"))]
         database = args.work_dir / "orrery.sqlite3"
         for path in (args.work_dir, args.report, database):
             validate_disjoint_paths(path, inputs, label="Validation destination")
             validate_writable_path(path, label="Validation destination")
-        if (paths_overlap(args.work_dir, args.report)
-                and (args.report == args.work_dir or not args.report.is_relative_to(args.work_dir))):
+        if path_within(args.work_dir, args.report):
             raise ValueError("Validation report must be a file outside the work directory's ancestors")
         validate_disjoint_paths(args.report, [database, args.work_dir / ".lock"], label="Validation report")
         validate_append_path(args.work_dir / ".lock", label="Validation writer lock")
@@ -115,11 +115,11 @@ def arguments():
 
 def main():
     args = arguments()
-    from orrery_data.storage import atomic_json
+    from orrery_data.storage import atomic_json, read_pointer
 
+    pointer = read_pointer(args.store / "current.json")
     args.work_dir.mkdir(parents=True, exist_ok=True)
     database = args.work_dir / "orrery.sqlite3"
-    pointer = json.loads((args.store / "current.json").read_text())
     version = pointer["snapshot_version"]
     snapshot = args.store / "snapshots" / version
     master = snapshot / "master.jsonl.gz"

@@ -18,7 +18,9 @@ def validate_flat_inventory(directory, names, *, label):
         raise DataError(f"{label} must be a real directory")
     entries = {path.name: path for path in directory.iterdir()}
     if entries.keys() != set(names):
-        raise DataError(f"{label} file inventory mismatch")
+        missing = ', '.join(sorted(set(names) - entries.keys())) or 'none'
+        unexpected = ', '.join(sorted(entries.keys() - set(names))) or 'none'
+        raise DataError(f"{label} file inventory mismatch (missing: {missing}; unexpected: {unexpected})")
     for path in entries.values():
         if not stat.S_ISREG(path.lstat().st_mode):
             raise DataError(f"{label} must contain only regular non-symlink files: {path.name}")
@@ -59,7 +61,7 @@ def validate_writable_path(path, *, label="Output", protected_roots=()):
         if path_within(resolved, root):
             raise DataError(f"{label} must be outside immutable inputs: {root}")
     for ancestor in (resolved, *resolved.parents):
-        if CANDIDATE_NAME.fullmatch(ancestor.name) or (ancestor.is_dir() and any(
+        if CANDIDATE_NAME.fullmatch(ancestor.name.casefold()) or (ancestor.is_dir() and any(
                 (ancestor / marker).exists() or (ancestor / marker).is_symlink()
                 for marker in CANDIDATE_MARKERS)):
             raise DataError(f"{label} must not be at or inside an existing immutable snapshot, export or release candidate: {ancestor}")

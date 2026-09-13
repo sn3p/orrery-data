@@ -93,7 +93,7 @@ actual producing runtime remain recorded claims.
 | Master | Strict schema-v1 records, valid MPC identities and consistent displayed numbers, finite supported orbits, exact master/known/missing counts |
 | SQLite | Complete rollback-journal artifact without sidecars, checked before SQLite opens; read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
 | Discovery catalogs | Full/selected rows equal the corresponding source-order selection from SQLite/master, then stable discovery sort; exact nine fields and gzip/plain equality |
-| Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers; dangling pointers fail instead of discarding baselines |
+| Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers; dangling pointers fail instead of discarding baselines; pointer targets must be regular files before reads |
 | Inputs and outputs | Writers reject destinations at/below immutable snapshots, exports or release candidates, including aliases; source refresh cannot use a candidate as its writable store; workflow append paths must be outside every resolved writer root and distinct from each other |
 | Activation | Validate API source values/pairs before writes; build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
 | Existing artifacts | Snapshot and export candidates must be real directories with exactly their documented regular, non-symlink files, checked before content reads; reuse validates content and provenance before changing a pointer |
@@ -111,10 +111,13 @@ command orders for export/release roots and both framework append destinations
 against workflow metadata, including resolved child roots outside the work tree.
 
 The same case/NFC and filesystem-identity comparisons protect saved-validation
-inputs and reserved snapshot roots. All three saved-validation scripts preflight
+inputs, reserved snapshot roots and incomplete candidate names. Reference
+manifest leaves and linked store roots are included as inputs. All three saved-validation scripts preflight
 their work/report destinations and writer children before writes, require Python
 assertions, and publish reports atomically. Malformed URL ports fail source-option
-preflight before stores, locks or release outputs are created.
+preflight in the CLI, API and workflow helper before stores, locks, baselines or
+release outputs are created. Active release candidates receive the same inventory
+check as standalone verification before their manifests are opened.
 
 SQLite readers reject WAL-format headers and existing journal/WAL/SHM sidecars
 before opening the database. A WAL file can contain data absent from the main

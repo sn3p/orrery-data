@@ -2,9 +2,12 @@
 
 from contextlib import contextmanager
 import hashlib
+import json
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import unittest
 
 import test_releases
@@ -155,6 +158,44 @@ class CandidateInventory(unittest.TestCase):
         self.assertEqual(self.cli('prepare-release', '--store', self.store, '--snapshot', snapshot['snapshot_version'],
                                  '--output', self.output, '--producer-commit', test_releases.COMMIT), prepared)
 
+    def test_previous_release_inventory_precedes_any_manifest_read(self):
+        snapshot = self.refresh()
+        options = ['--store', self.store, '--snapshot', snapshot['snapshot_version'],
+                   '--output', self.output, '--producer-commit', test_releases.COMMIT]
+        prepared = self.cli('prepare-release', *options)
+        bundle = Path(prepared['path'])
+        for kind in ('fifo', 'symlink', 'dangling', 'directory'):
+            with self.subTest(kind=kind), self.replace(bundle / 'release.json', kind):
+                before = state(self.directory)
+                for command in [('verify-release', '--bundle', bundle), ('prepare-release', *options)]:
+                    self.cli(*command, code=1)
+                    self.assertEqual(state(self.directory), before)
+        self.assertEqual(self.cli('prepare-release', *options), prepared)
+
+    def test_mutable_pointers_reject_special_files_and_keep_healthy_link_targets(self):
+        snapshot = self.refresh()
+        exports = self.directory / 'standalone-exports'
+        self.cli('export', '--store', self.store, '--output', exports)
+        options = ['--store', self.store, '--snapshot', snapshot['snapshot_version'],
+                   '--output', self.output, '--producer-commit', test_releases.COMMIT]
+        self.cli('prepare-release', *options)
+        cases = [(self.store / 'current.json', ['refresh', '--store', self.store, *self.local_args()]),
+                 (exports / 'latest.json', ['export', '--store', self.store, '--output', exports]),
+                 (self.output / 'latest.json', ['prepare-release', *options])]
+        for pointer, command in cases:
+            for kind in ('fifo', 'directory'):
+                with self.subTest(pointer=pointer, kind=kind), self.replace(pointer, kind):
+                    before = state(self.directory)
+                    self.assertIn('regular file', self.cli(*command, code=1)['error'])
+                    self.assertEqual(state(self.directory), before)
+            self.cli(*command)
+            with self.replace(pointer, 'symlink'):
+                saved = self.directory / 'saved-entry'
+                previous = saved.read_bytes()
+                self.cli(*command)
+                self.assertFalse(pointer.is_symlink())
+                self.assertEqual(saved.read_bytes(), previous)
+
     def test_invalid_url_ports_reject_before_source_or_release_writes(self):
         invalid = ('http://example.test:not-a-port', 'http://example.test:99999',
                    'https://example.test:-1', 'http://[::1]:65536')
@@ -191,3 +232,43 @@ class CandidateInventory(unittest.TestCase):
         # Direction matters: pinned preparation at the store root remains supported.
         self.cli('prepare-release', '--store', self.store, '--snapshot', snapshot['snapshot_version'],
                  '--output', self.store, '--producer-commit', test_releases.COMMIT)
+
+    def test_reserved_candidate_names_protect_incomplete_case_aliases(self):
+        snapshot = self.refresh()
+        for prefix in ('snapshot', 'export', 'release'):
+            candidate = self.directory / (prefix + '-v1-' + 'a' * 64)
+            candidate.mkdir()
+            (candidate / 'orrery.sqlite3').write_text('retained incomplete candidate evidence')
+            alias = candidate.with_name(candidate.name.upper())
+            before = state(self.directory)
+            commands = [('build-db', '--store', self.store, '--database', alias / 'orrery.sqlite3'),
+                        ('export', '--store', self.store, '--output', alias),
+                        ('prepare-release', '--store', self.store, '--snapshot', snapshot['snapshot_version'],
+                         '--output', alias, '--producer-commit', test_releases.COMMIT),
+                        ('refresh', '--store', alias, *self.local_args())]
+            for command in commands:
+                with self.subTest(prefix=prefix, command=command[0]):
+                    self.cli(*command, code=1)
+                    self.assertEqual(state(self.directory), before)
+
+    def test_workflow_url_preflight_preserves_baseline_before_build(self):
+        env = {key: value for key, value in os.environ.items()
+               if key not in ('GITHUB_OUTPUT', 'GITHUB_STEP_SUMMARY')}
+        env.update(RELEASE_PRODUCER_COMMIT=test_releases.COMMIT,
+                   RELEASE_BASELINE_COUNTS=json.dumps(dict.fromkeys(
+                       ('orbital_records', 'discovery_records', 'master_records', 'known_discovery'), 0)),
+                   RELEASE_SELECTED_LIMITS='2', RELEASE_ALLOW_COUNT_DECREASE='false')
+        work = self.directory / 'workflow'
+        for existing in (False, True):
+            if existing:
+                work.mkdir()
+                (work / 'baseline-counts.json').write_text('previous baseline')
+            for name in ('mpcorb', 'numbered'):
+                before = state(self.directory)
+                result = subprocess.run([sys.executable, '-B', str(test_releases.ROOT / 'scripts/prepare_release_workflow.py'),
+                                         '--work-dir', str(work), '--' + name + '-url', 'http://example.test:99999'],
+                                        cwd=test_releases.ROOT, env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('HTTP(S) URL', result.stderr)
+                self.assertFalse(result.stdout)
+                self.assertEqual(state(self.directory), before)

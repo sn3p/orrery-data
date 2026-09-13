@@ -114,7 +114,7 @@ class SavedInputPaths(unittest.TestCase):
                                 cwd=ROOT, capture_output=True, text=True, check=True, timeout=30)
         return json.loads(result.stdout)
 
-    def invoke(self, name, work, report, *, flags=(), optimization="0", fault=None):
+    def invoke(self, name, work, report, *, flags=(), optimization="0", fault=None, timeout=30):
         script = self.producer / "scripts" / name
         args = (["--sources", self.sources] if "snapshot" in name else
                 ["--store", self.store, "--reference-exports", self.references])
@@ -123,7 +123,7 @@ class SavedInputPaths(unittest.TestCase):
         if fault:
             command = [sys.executable, "-B", "-c", REPORT_FAULT, script, report, fault, *args]
         return subprocess.run(list(map(str, command)), cwd=self.directory, text=True, capture_output=True,
-                              timeout=30, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONOPTIMIZE": optimization})
+                              timeout=timeout, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONOPTIMIZE": optimization})
 
     def assert_rejected(self, name, work, report):
         before = {root: tree(root) for root in (self.sources, self.store, self.references, self.producer)}
@@ -241,6 +241,83 @@ class SavedInputPaths(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertFalse(work.exists())
                 self.assertEqual(report.read_text(), "previous evidence")
+
+    def test_external_reference_manifests_are_protected_and_supported_on_retry(self):
+        name = "validate_saved_database.py"
+        external_root = self.directory / "external-references"
+        external_root.mkdir()
+        original_inputs = {}
+        for index, manifest in enumerate(sorted(self.references.glob("*/manifest.json"))):
+            external = external_root / f"reference-{index}.json"
+            manifest.rename(external)
+            manifest.symlink_to(external)
+            original_inputs[external] = external.read_bytes()
+        work, report = self.directory / "work", self.directory / "report.json"
+        report.write_text("previous validation evidence")
+        for external in original_inputs:
+            for bad_work, bad_report in ((work, external), (external, report), (external.parent, report)):
+                with self.subTest(work=bad_work, report=bad_report):
+                    before = {root: tree(root) for root in (self.store, self.references, self.producer, external_root)}
+                    result = self.invoke(name, bad_work, bad_report)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn("overlap", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertFalse(work.exists())
+                    self.assertEqual(report.read_text(), "previous validation evidence")
+                    for root, expected in before.items():
+                        self.assertEqual(tree(root), expected)
+        # External reference links remain valid inputs with ordinary destinations.
+        for valid_report in (report, work / "report.json", work.with_name("WORK") / "report-alias.json"):
+            result = self.invoke(name, work, valid_report)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(valid_report.read_text())["status"], "passed")
+            for external, payload in original_inputs.items():
+                self.assertEqual(external.read_bytes(), payload)
+
+    def test_database_report_rejects_portable_work_ancestors_before_output(self):
+        name = "validate_saved_database.py"
+        cases = [(self.directory / "work", self.directory / "WORK"),
+                 (self.directory / "parent/work", self.directory / "PARENT")]
+        before = tree(self.directory)
+        entries = set(self.directory.rglob("*"))
+        for work, report in cases:
+            with self.subTest(work=work, report=report):
+                result = self.invoke(name, work, report)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("ancestors", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(tree(self.directory), before)
+                self.assertEqual(set(self.directory.rglob("*")), entries)
+
+    def test_database_fifo_current_pointer_rejects_without_output_and_can_retry(self):
+        pointer = self.store / "current.json"
+        original = pointer.read_bytes()
+        work, report = self.directory / "work", self.directory / "report.json"
+        report.write_text("previous validation evidence")
+        for linked in (False, True):
+            with self.subTest(linked=linked):
+                pointer.unlink()
+                fifo = self.directory / "current-fifo" if linked else pointer
+                os.mkfifo(fifo)
+                if linked:
+                    pointer.symlink_to(fifo)
+                before, entries = tree(self.directory), set(self.directory.rglob("*"))
+                result = self.invoke("validate_saved_database.py", work, report, timeout=5)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("regular file", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(work.exists())
+                self.assertEqual(tree(self.directory), before)
+                self.assertEqual(set(self.directory.rglob("*")), entries)
+                self.assertEqual(report.read_text(), "previous validation evidence")
+                pointer.unlink()
+                if linked:
+                    fifo.unlink()
+                pointer.write_bytes(original)
+        result = self.invoke("validate_saved_database.py", work, report)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(report.read_text())["status"], "passed")
+        self.assertEqual(pointer.read_bytes(), original)
 
     def test_complete_runs_allow_report_inside_work_and_keep_inputs(self):
         before = {root: tree(root) for root in (self.sources, self.store, self.references)}

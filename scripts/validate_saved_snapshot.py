@@ -77,7 +77,7 @@ def arguments():
     previous_bytecode = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
-        from orrery_data.paths import (paths_overlap, validate_append_path,
+        from orrery_data.paths import (path_within, validate_append_path,
                                        validate_disjoint_paths, validate_writable_path)
     finally:
         sys.dont_write_bytecode = previous_bytecode
@@ -92,8 +92,7 @@ def arguments():
         for path in (args.work_dir, args.report, *writers):
             validate_disjoint_paths(path, inputs, label="Validation destination")
             validate_writable_path(path, label="Validation destination")
-        if (paths_overlap(args.work_dir, args.report)
-                and (args.report == args.work_dir or not args.report.is_relative_to(args.work_dir))):
+        if path_within(args.work_dir, args.report):
             raise ValueError("Validation report must be a file outside the work directory's ancestors")
         validate_disjoint_paths(args.report, writers, label="Validation report")
         for root in (args.work_dir / "store", args.work_dir / "releases"):
