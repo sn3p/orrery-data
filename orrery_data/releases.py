@@ -336,11 +336,6 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     resolved_output = output.resolve()
     require(not output.is_symlink() and not resolved_output.is_relative_to((store / "snapshots").resolve()),
             "Release output must not be a symlink or be inside immutable snapshots")
-    require(not any(parent.is_dir() and (re.fullmatch(r"release-v1-" + SHA256, parent.name.casefold())
-                                        or (parent / "release.json").exists()
-                                        or (parent / "release.json").is_symlink())
-                    for parent in (resolved_output, *resolved_output.parents)),
-            "Release output must not be at or inside an existing release candidate")
     require(version is not None or resolved_output != store.resolve(),
             "Source store and release output must be different directories when refreshing")
     validate_writable_path(output, label="Release output", protected_roots=(store / "snapshots",))

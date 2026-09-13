@@ -163,12 +163,14 @@ class SavedInputPaths(unittest.TestCase):
         shutil.copytree(bundle, renamed)
         alias = self.directory / "candidate-alias"
         alias.symlink_to(bundle, target_is_directory=True)
-        candidates = [bundle, renamed, alias, Path(self.snapshot["path"]),
+        candidates = [bundle, alias, Path(self.snapshot["path"]),
                       next(self.references.glob("export-*")), bundle / "exports/full"]
         previous = self.directory / "previous-report.json"
         previous.write_text("retained evidence")
         before = {root: tree(root) for root in (bundle, renamed, self.store, self.references)}
         for name in SCRIPTS:
+            # A renamed copy is recognized only when it is the writer target.
+            self.assert_rejected(name, renamed, previous)
             for candidate in candidates:
                 for path in (candidate, candidate / "new/deep"):
                     with self.subTest(script=name, candidate=path):

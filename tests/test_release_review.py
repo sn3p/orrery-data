@@ -208,11 +208,11 @@ class ReleaseReview(unittest.TestCase):
         self.requests.clear()
         for target in (bundle, bundle / "exports/full", bundle / "new/deep",
                        Path(os.path.relpath(bundle, ROOT)), bundle / ".." / bundle.name,
-                       alias / bundle.name / "new", copied, copied / "new", incomplete / "new"):
+                       alias / bundle.name / "new", copied, incomplete / "new"):
             for offline in (None, first["snapshot_version"]):
                 with self.subTest(target=target, offline=offline):
                     error = self.prepare("--output", target, offline=offline, code=1)["error"]
-                    self.assertIn("existing release candidate", error)
+                    self.assertIn("candidate", error)
                     self.assertEqual(self.requests, [])
                     for root, tree in before.items():
                         self.assertEqual(self.tree(root), tree)

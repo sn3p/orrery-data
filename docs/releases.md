@@ -146,9 +146,11 @@ Preparation uses an advisory output lock and a private stage on the destination
 filesystem. Without `--snapshot`, `--store` and `--output` must resolve to different
 directories; preparation rejects identical roots before locking or refreshing.
 Pinned offline preparation may use the same directory for both.
-The output must also be outside existing release candidates, including renamed
-copies and their subdirectories. Use the containing release root as `--output`,
-rather than a prior result's candidate path; invalid placements fail before locking.
+The output must also be outside named release candidates and their subdirectories.
+A marker file (`snapshot.json`, `manifest.json` or `release.json`) in the exact
+output directory also prevents writing there. An unrelated marker in a parent
+directory does not prevent using its children. Use the containing release root
+as `--output`; invalid placements fail before locking.
 Every artifact and cross-file identity is verified before the
 candidate directory is installed; only then does `latest.json` advance atomically.
 An already existing candidate is verified before reuse. A damaged existing
@@ -214,8 +216,8 @@ cd /path/downloaded-candidate
 shasum -a 256 -c SHA256SUMS
 ```
 
-The verifier checks the exact file inventory, disallows symlinks and unexpected
-paths, verifies all hashes/sizes and checksum lists, checks schema/version/count
+The verifier checks the bundle inventory, verifies hashes/sizes and checksum
+lists, checks schema/version/count
 and source/credit consistency across SQLite and every export, runs SQLite
 integrity/FK checks, and checks catalog fields, finite values, date order,
 counts and gzip/plain equivalence. It streams the complete master, validates each
@@ -231,9 +233,13 @@ fields; missing or additional fields are rejected before identity hashing.
 The full saved-data validator independently repeats the every-field comparison
 and checks the historical reference JSON payload hashes. Run verification before
 consuming downloaded data and keep the directory read-only during verification
-and use. Hashes detect damage; they are not authenticity signatures. Obtain the
-expected manifest hash from a trusted channel; omitting it checks internal
-consistency only.
+and use. Integrity checks detect accidental damage, truncation and transfer
+corruption; they do not establish authenticity. A party able to write inside the
+bundle, source store or output root and regenerate hashes can produce a bundle
+that verifies; that is out of scope. Obtain the `release.json` SHA-256 from a
+trusted channel and pass it as `--manifest-sha256` to establish authenticity.
+Omitting that pin checks internal consistency only. See the
+[trust statement](release-contract.md#trust-and-evidence).
 
 ## Manual GitHub Actions workflow
 
@@ -273,6 +279,7 @@ Provider references inspected 2026-09-12: [manual dispatch](https://docs.github.
 
 The complete acceptance contract and its verification boundaries are recorded in
 [release-contract.md](release-contract.md). All writers, including the refresh
-store and workflow work directory, reject destinations inside immutable
-snapshot/export/release candidates before locking or writing. The local workflow
+store and workflow work directory, reject destinations inside named
+snapshot/export/release candidates or at marker-bearing target directories
+before locking or writing. The local workflow
 helper locks its work directory across baseline preparation, build and verification.

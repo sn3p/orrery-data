@@ -81,10 +81,8 @@ class ReleaseWriterPaths(unittest.TestCase):
     def test_all_writer_entries_preserve_existing_candidates_and_aliases(self):
         prepared = self.prepare()
         bundle = Path(prepared["path"])
-        renamed = self.directory / "renamed-bundle"
-        shutil.copytree(bundle, renamed)
         snapshot = self.store / "snapshots" / prepared["snapshot_version"]
-        roots = (bundle, renamed, snapshot, bundle / "exports/full")
+        roots = (bundle, snapshot, bundle / "exports/full")
         for index, root in enumerate(roots):
             alias = self.directory / f"alias-{index}"
             alias.symlink_to(root, target_is_directory=True)

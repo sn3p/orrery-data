@@ -1,27 +1,18 @@
 # Release verification contract
 
-This is the acceptance checklist for release schema 1. Changes to producers,
-readers or validation scripts must preserve these guarantees and their boundary
-tests. A review result applies to a specific commit and the checks performed.
+This describes release schema 1, integrity verification and safeguards against
+operator mistakes. A review result applies to a specific commit and the checks
+performed, within the trust scope below.
 
 ## Trust and evidence
 
-`verify-release` checks internal consistency of a stable, read-only directory.
-It rejects malformed manifests and inconsistent representations even when their
-checksum lists have been regenerated. An independently obtained manifest SHA-256
-also pins the exact bundle bytes. Neither self-hashes nor schema checks establish
-upstream authenticity, truthful acquisition times, the actual producer commit,
-or the real runtime used. Source URLs, HTTP headers, generation times and runtime
-versions are recorded claims with validated types and internal relationships.
-The raw upstream files are absent from the bundle; source parsing/completeness
-requires retained-source validation or trusted source hashes and inspected counts.
-
-The saved-data validator separately pins the retained source identity, master
-hash and all nine counts, runs exact committed code, compares every SQLite field
-and the historical full/100k export hashes, and exercises retries and transfer.
-Local Git/Python executables and system libraries are trusted. This does not
-promise protection from a hostile user rewriting files during verification,
-hardware failure, resource exhaustion, or a compromised operating system.
+Integrity checks detect accidental damage, truncation, and transfer corruption.
+They do not establish authenticity. A party who can write inside the bundle,
+the source store, or the output root and regenerate hashes can produce a bundle
+that verifies; that is out of scope. Authenticity comes from obtaining the
+`release.json` SHA-256 from a trusted channel and passing it as
+`--manifest-sha256`. Verification without that pin checks internal consistency
+only.
 
 ## Manifest structure
 
@@ -31,18 +22,6 @@ and required for HTTP acquisition. Integers exclude booleans and floating point.
 Numeric payload values must be finite; JSON NaN and infinity are rejected.
 Schema definitions live in `orrery_data/contracts.py`; serialization stays in
 the producer.
-
-The tests maintain an independent field inventory for all four manifest kinds.
-Fixtures include full and selected exports, null and populated preparation
-baselines/previous counts, and HTTP/local acquisition. Recursive missing-field,
-extra-field and wrong-type mutations exercise the schema checker directly;
-those probe counts describe direct checks, not total boundary coverage or proof
-of completeness. Release metadata mutations also run through `verify_release`
-on resealed files, including supported dynamic map entries and populated
-preparation objects, and assert that verification writes nothing. Snapshot,
-SQLite and cached-export mutations exercise their respective readers/activation
-boundaries. Positive compatibility cases and independently resealed relational
-and payload cases supplement structural mutations.
 
 | Object | Required fields / rules |
 | --- | --- |
@@ -84,40 +63,28 @@ The complete frame (including its trailer) is checked; upstream source gzip is
 not subject to this generated-artifact framing rule. Compression level and the
 actual producing runtime remain recorded claims.
 
-## Payload and state guarantees
+## Payload checks and operator safeguards
 
 | Invariant | Boundary / acceptance |
 | --- | --- |
-| Fixed layout | Bundle contains exactly the supported files and directories; no symlinks or special files; manifest paths cannot choose files to open |
-| Transport | Every byte count/hash and checksum list agrees; trusted manifest pin rejects resealing |
+| Fixed layout | Bundle contains the supported files and directories listed in the release layout |
+| Transport | Byte counts, hashes and checksum lists detect damage; the manifest pin comes from a trusted channel |
 | Master | Strict schema-v1 records, valid MPC identities and consistent displayed numbers, finite supported orbits, exact master/known/missing counts |
 | SQLite | Complete rollback-journal artifact without sidecars, checked before SQLite opens; read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
 | Discovery catalogs | Full/selected rows equal the corresponding source-order selection from SQLite/master, then stable discovery sort; exact nine fields and gzip/plain equality |
 | Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers; dangling pointers fail instead of discarding baselines; pointer targets must be regular files before reads |
-| Inputs and outputs | Writers reject destinations at/below immutable snapshots, exports or release candidates, including aliases; source refresh cannot use a candidate as its writable store; workflow append paths must be outside every resolved writer root and distinct from each other |
+| Inputs and outputs | Writers reject destinations at/below named snapshot, export or release candidates, and marker-bearing target directories; source refresh cannot use a candidate as its writable store; refreshing preparation requires different store and output roots |
 | Activation | Validate API source values/pairs before writes; build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
-| Existing artifacts | Snapshot and export candidates must be real directories with exactly their documented regular, non-symlink files, checked before content reads; reuse validates content and provenance before changing a pointer |
 | Saved evidence | Report/output paths cannot overwrite inputs or candidates; copied data uses a private per-run path; report replacement is atomic and previous evidence survives failures |
-| Code provenance | Saved validator reads raw committed blobs with replacements disabled and runs helpers/subprocesses in isolation; a dirty producer is rejected |
+
+A named candidate matches `(snapshot|export|release)-v1-<64 hex>`.
+`snapshot.json`, `manifest.json` or `release.json` identifies a candidate only
+when it is in the exact writable target directory. An unrelated marker in a
+parent directory does not reserve that parent's descendants.
 
 Hosted workflow dispatch, runner MPC access and artifact upload/download require
 separate post-merge verification. Release publication, HTTP hosting and app
 integration remain outside this milestone.
-
-Workflow append destinations reserve a portable namespace: paths differing only
-by case or Unicode NFC normalization count as overlaps even on a case-sensitive
-filesystem. Their parent directories must already exist. Checks cover both
-command orders for export/release roots and both framework append destinations
-against workflow metadata, including resolved child roots outside the work tree.
-
-The same case/NFC and filesystem-identity comparisons protect saved-validation
-inputs, reserved snapshot roots and incomplete candidate names. Reference
-manifest leaves and linked store roots are included as inputs. All three saved-validation scripts preflight
-their work/report destinations and writer children before writes, require Python
-assertions, and publish reports atomically. Malformed URL ports fail source-option
-preflight in the CLI, API and workflow helper before stores, locks, baselines or
-release outputs are created. Active release candidates receive the same inventory
-check as standalone verification before their manifests are opened.
 
 SQLite readers reject WAL-format headers and existing journal/WAL/SHM sidecars
 before opening the database. A WAL file can contain data absent from the main

@@ -55,13 +55,13 @@ def paths_overlap(first, second):
 
 
 def validate_writable_path(path, *, label="Output", protected_roots=()):
-    """Reject immutable ancestors, including renamed copies and path aliases."""
+    """Reject named candidate ancestors and marker-bearing target directories."""
     resolved = resolved_path(path)
     for root in protected_roots:
         if path_within(resolved, root):
             raise DataError(f"{label} must be outside immutable inputs: {root}")
     for ancestor in (resolved, *resolved.parents):
-        if CANDIDATE_NAME.fullmatch(ancestor.name.casefold()) or (ancestor.is_dir() and any(
+        if CANDIDATE_NAME.fullmatch(ancestor.name.casefold()) or (ancestor == resolved and ancestor.is_dir() and any(
                 (ancestor / marker).exists() or (ancestor / marker).is_symlink()
                 for marker in CANDIDATE_MARKERS)):
             raise DataError(f"{label} must not be at or inside an existing immutable snapshot, export or release candidate: {ancestor}")

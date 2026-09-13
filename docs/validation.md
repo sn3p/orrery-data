@@ -134,14 +134,11 @@ Tool 0.3.0 adds CLI coverage for complete/copyable bundles, exact unchanged
 JSON profiles, local/HTTP provenance, code/data identity separation, pinned
 snapshots, immutable reruns, count decreases, removals/corrections, input and
 output damage, mixed versions/metadata, interruption, failure/retry and locks.
-Resealed manifest regressions cover required fields, generation timestamps,
-runtime consistency, preparation/count policy and rejection of invalid orphan
-candidates before activation. Valid recorded runtimes (including zlib `1.3`)
-and explicit count-decrease overrides remain accepted.
-Additional release CLI regressions cover orbital ranges in full/selected catalogs,
-strict integer identity schemas and exact identity/producer fields, preservation
-of bundles when an output path is at or beneath a candidate, and differing zlib
-build/runtime versions.
+Additional CLI regressions cover schema-1 records and manifests, count-decrease
+overrides, preservation of bundles when an output path is at or beneath a named
+candidate, and differing zlib build/runtime versions. An unrelated `manifest.json`
+in a parent directory permits fixture refresh/export; a marker in the exact
+writable target directory still prevents writing there.
 Empty or malformed explicit snapshot pins fail before locks or snapshot reads,
 preserve existing source/candidate bytes and create no output for missing roots.
 Valid pins remain offline and independent of the mutable current pointer.
@@ -151,10 +148,7 @@ malformed gzip streams and missing bundle inventory. Snapshot count-field errors
 are distinguished from inconsistent arithmetic. Regressions also cover clock
 reversal within the five-second tolerance, complete count baselines, explicit
 pinned timeouts, workflow preflight and reuse without duplicate verification.
-Resealed bundles with extra root artifact fields or inconsistent copied-master
-compression provenance fail both standalone verification and orphan reuse;
-restoring valid metadata allows retry, including pinned older zlib provenance.
-CLI regressions reject identical source/output roots and path aliases before
+CLI regressions reject identical source/output roots before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
 The actual manual-workflow helper runs against a local HTTP server, including
@@ -173,14 +167,8 @@ python3 scripts/validate_saved_release.py \
 
 Run from committed producer code with assertions enabled. The release validator
 captures that commit's exact Git blobs into a private temporary directory, then
-runs its validator, comparison helper and every producer subprocess from that
-snapshot. All provenance-sensitive Git reads disable replacement objects,
-including tree/blob extraction and the clean-checkout comparison. Concurrent
-checkout/HEAD changes and local commit/tree/blob replacement refs cannot change
-the code used or its reported commit. Python and system libraries remain those of the invoking machine.
-Regressions cover a complete fixture run while the original checkout and HEAD
-change and are restored, commit/tree/blob replacement refs, dirty-checkout report
-preservation, and relative paths.
+runs its validator, comparison helper and producer subprocesses from that
+snapshot. Python and system libraries remain those of the invoking machine.
 The final report is written to a temporary file in the report directory, flushed
 and synced before atomic replacement. Complete fixture runs inject partial-write,
 flush, sync and replacement failures, checking preservation of prior evidence,
@@ -191,15 +179,13 @@ or output writes, so disabled checks cannot produce a passing report.
 It selects the retained snapshot version recorded in the committed release result
 directly from `snapshots/`, independently of missing, changed or malformed
 `current.json`, and verifies that snapshot, all nine pinned counts and its pinned
-master hash. Arithmetically consistent count mutations also fail preflight. A missing
+master hash. A missing
 or corrupted retained snapshot fails before creating the work directory; another
 current snapshot cannot substitute even when its master/export payloads match.
 Reference export manifests are checked before preparation: full and 100k limits
 must exist, shapes must validate, and duplicate limits must describe identical
 artifact payloads. Missing, malformed or conflicting references produce a concise
-path/limit diagnostic and preserve any prior report. Fixture Git repositories
-disable external templates and hooks so developer Git settings cannot execute
-code or reject fixture commits.
+path/limit diagnostic and preserve any prior report.
 Every invocation prepares into a fresh output
 root, compares every SQLite field against all 1,563,495 master records, compares
 all full/100k export payload hashes to the retained references, repeats
@@ -214,8 +200,6 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The automated fixture suite, installed-wheel verification from outside the
-checkout and workflow linting are part of the release assurance gate below.
 The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
 host disk exhaustion while writing the latest pointer. After reclaiming space
@@ -231,43 +215,27 @@ That JSON is historical evidence for producer commit
 recovery continuation. Its `recovery` section was added to document that event;
 it is not a verbatim report emitted by today's validator, which also records
 `python`. This historical result does not establish validation of later producer commits.
-Each accepted producer commit needs a fresh full run with its own report,
-producer identity and release version; preserve this historical report alongside it.
+Keep later saved-data reports with their own producer identity and release
+version; preserve this historical report alongside them.
 
 
-## Systematic release assurance
+## Integrity and review scope
 
-The acceptance matrix is [release-contract.md](release-contract.md). The suite
-includes generated structural/type mutations over all four manifest kinds,
-recursive snapshot/export/SQLite reader mutations, independently resealed payload
-inconsistencies, strict JSON failures, first-N selection and stable discovery ties.
-It covers 60 writer/candidate/path-alias combinations, retained-input/report
-isolation, per-run transfer ownership and concurrent local workflow baselines.
-The stored source loader also checks decoded bytes against the decoded-source
-identity; bundled releases cannot repeat this check without raw source files.
-These checks provide evidence for the listed invariants; test/review counts are
-not a proof that every possible defect is absent.
+Validation follows the [trust statement](release-contract.md#trust-and-evidence).
+Integrity checks detect accidental damage, truncation and transfer corruption.
+They do not establish authenticity. A party able to write inside the bundle,
+source store or output root and regenerate hashes can produce a bundle that
+verifies; that is out of scope. Obtain the `release.json` SHA-256 from a trusted
+channel and pass it as `--manifest-sha256` to establish authenticity. Without
+that pin, verification checks internal consistency only.
 
 The saved validator rejects work/report destinations that overlap retained inputs,
 producer code or immutable candidates. Reports may live inside a dedicated work
 directory. Transfer verification owns a unique temporary subtree, so retrying a
 run never deletes an unrelated `downloaded-copy` directory.
 
-Before accepting a release-producing change:
-
-1. Map every changed invariant to producer, existing-artifact reuse, reader and
-   failure/retry boundaries in the contract. Preserve positive compatibility cases.
-2. Reproduce each valid review finding at its actual boundary and add a regression
-   test. Apply shared rules to all affected entry points, then run the broader suite.
-3. Commit and freeze the executable code. Review the complete change independently
-   against the contract; record the reviewed SHA, evidence and remaining limits.
-   Any resulting code fix invalidates that freeze and needs affected-path checks.
-4. Run `scripts/validate_saved_release.py` from the final committed producer. Keep
-   its machine-readable report and artifact hashes with that commit's review evidence.
-   Historical full-data evidence cannot substitute for this run.
-5. Check CI at the published SHA and reconcile each acceptance item as verified,
-   intentionally outside scope or unverified. Keep hosted workflow evidence separate
-   from local helper execution and data verification.
-
-A resolved review thread records that finding's disposition. A passing review
-records its scope and commit; neither is a blanket correctness guarantee.
+Classify review findings against this scope before changing validation. A
+resealed bundle or an attacker writing into the local tree does not call for
+additional validation layers. Real operability bugs receive a regression at the
+failing entry point and a fix. Test results and saved-data reports record the
+commit and checks performed; hosted workflow execution remains separate evidence.
