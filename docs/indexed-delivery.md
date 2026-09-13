@@ -5,6 +5,8 @@ release schemas retain their existing behavior; indexed delivery is a separate
 offline derivative of an explicitly selected export. The concrete descriptor,
 adapter operations and common fixtures are in [consumer contract v1](consumer-contract.md).
 
+Next-agent instructions: [consumer adapter trial handoff](consumer-handoff.md).
+
 ## Measured producer result
 
 A local run on 13 September 2026 used the retained full known-date export from
