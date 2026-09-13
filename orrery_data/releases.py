@@ -187,6 +187,8 @@ def verify_release(directory, manifest_sha256=None):
     require(set(manifest["artifacts"]) == expected, "Release artifact inventory mismatch")
     require(actual_files == expected | {"release.json", "SHA256SUMS"}, "Bundle file inventory mismatch")
     for name in sorted(expected):
+        require(isinstance(manifest["artifacts"][name], dict) and set(manifest["artifacts"][name]) == {"sha256", "bytes"},
+                f"Invalid release artifact metadata fields: {name}")
         verify_file(directory / name, manifest["artifacts"][name])
     require((directory / "SHA256SUMS").read_text() == checksums(directory, expected | {"release.json"}),
             "Release SHA256SUMS mismatch")
@@ -219,6 +221,8 @@ def verify_release(directory, manifest_sha256=None):
             validate_export_manifest(exported)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise DataError(f"exports/{profile}/manifest.json: {exc}") from exc
+        require(exported["compression"]["master"] == snapshot["compression"],
+                f"exports/{profile}: master compression differs from snapshot")
         require(exported["compression"]["catalog"]["zlib"] == manifest["runtime"]["zlib"],
                 "Release export zlib runtime mismatch")
         require(release_timestamp(exported["created_at"]) <= created_at + timedelta(seconds=CLOCK_SKEW_SECONDS),

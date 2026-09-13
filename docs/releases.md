@@ -88,8 +88,9 @@ files are retained in the source store, not shipped inside the candidate.
 The snapshot manifest carries their raw/decoded hashes, sizes, URLs, timestamps
 and HTTP validators. SQLite embeds the same snapshot and per-orbit provenance.
 
-`release.json` lists every payload file with relative path, SHA-256 and bytes,
-and records counts, exclusions through the snapshot/export manifests,
+`release.json` lists every payload under a relative path. Each root artifact
+record contains exactly `sha256` and `bytes`. The manifest also records counts,
+exclusions through the snapshot/export manifests,
 profile selections, generation time, producer/runtime versions and the baseline
 used during first preparation. The root `SHA256SUMS` also covers `release.json`
 and each nested manifest/checksum file. Neither contains private local source
@@ -106,6 +107,8 @@ strings; the SQLite and catalog zlib versions must match the contained metadata.
 These are the producing runtime's versions and may differ from the verifier's.
 New compression metadata uses the loaded zlib runtime version, including in
 snapshot and export manifests; pinned snapshots retain their original metadata.
+Each export's copied master compression object must match the snapshot exactly,
+even when newly generated catalogs use a different zlib runtime.
 `preparation` records a boolean `allow_count_decrease`, the four explicit
 `baseline_counts` or null, and the complete prior snapshot `previous_counts` or
 null. Counts must be nonnegative integers, prior snapshot counts must reconcile,

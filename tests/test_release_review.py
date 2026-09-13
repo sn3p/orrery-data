@@ -28,6 +28,71 @@ class ReleaseReview(unittest.TestCase):
     http_args = test_releases.ReleaseCLI.http_args
     reseal = test_releases.ReleaseCLI.reseal
 
+    def write_root_manifest(self, bundle, manifest):
+        # Preserve deliberately malformed root metadata while resealing transport hashes.
+        (bundle / "release.json").write_text(json.dumps(manifest))
+        names = sorted([*manifest["artifacts"], "release.json"])
+        (bundle / "SHA256SUMS").write_text("".join(f"{file_info(bundle / n)['sha256']}  {n}\n" for n in names))
+
+    def change_master_compression(self, bundle, profile):
+        directory = bundle / "exports" / profile
+        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest["compression"]["master"]["zlib"] = "9.9.9"
+        (directory / "manifest.json").write_text(json.dumps(manifest))
+        names = sorted([*manifest["artifacts"], "manifest.json"])
+        (directory / "SHA256SUMS").write_text("".join(f"{file_info(directory / n)['sha256']}  {n}\n" for n in names))
+        self.reseal(bundle)
+
+    def test_root_artifact_metadata_rejects_unknown_fields_and_orphan_reuse(self):
+        first = self.prepare()
+        bundle = Path(first["path"])
+        original = json.loads((bundle / "release.json").read_text())
+        for index, name in enumerate(original["artifacts"]):
+            with self.subTest(artifact=name):
+                copied = self.directory / f"root-artifact-{index}"
+                shutil.copytree(bundle, copied)
+                manifest = json.loads(json.dumps(original))
+                manifest["artifacts"][name]["future"] = "unsupported extension"
+                self.write_root_manifest(copied, manifest)
+                before = self.tree(copied)
+                error = self.verify(copied, code=1)["error"]
+                self.assertIn("Invalid release artifact metadata fields", error)
+                self.assertIn(name, error)
+                self.assertEqual(self.tree(copied), before)
+        saved = {name: (bundle / name).read_bytes() for name in ("release.json", "SHA256SUMS")}
+        (self.output / "latest.json").unlink()
+        original["artifacts"]["orrery.sqlite3"]["future"] = 1
+        self.write_root_manifest(bundle, original)
+        before = self.tree(self.output)
+        self.assertIn("Invalid release artifact metadata fields", self.prepare(offline=first["snapshot_version"], code=1)["error"])
+        self.assertEqual(self.tree(self.output), before)
+        for name, payload in saved.items():
+            (bundle / name).write_bytes(payload)
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
+    def test_master_compression_must_match_snapshot_for_every_profile_and_reuse(self):
+        first = self.prepare()
+        bundle = Path(first["path"])
+        for profile in ("full", "first-2"):
+            with self.subTest(profile=profile):
+                copied = self.directory / f"master-compression-{profile}"
+                shutil.copytree(bundle, copied)
+                self.change_master_compression(copied, profile)
+                before = self.tree(copied)
+                error = self.verify(copied, code=1)["error"]
+                self.assertIn(f"exports/{profile}: master compression differs from snapshot", error)
+                self.assertEqual(self.tree(copied), before)
+        saved = {name: (bundle / name).read_bytes() for name in
+                 ("release.json", "SHA256SUMS", "exports/full/manifest.json", "exports/full/SHA256SUMS")}
+        (self.output / "latest.json").unlink()
+        self.change_master_compression(bundle, "full")
+        before = self.tree(self.output)
+        self.assertIn("master compression differs from snapshot", self.prepare(offline=first["snapshot_version"], code=1)["error"])
+        self.assertEqual(self.tree(self.output), before)
+        for name, payload in saved.items():
+            (bundle / name).write_bytes(payload)
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
     def change_catalog(self, bundle, profile, values):
         directory = bundle / "exports" / profile
         rows = json.loads((directory / "catalog.json").read_text())

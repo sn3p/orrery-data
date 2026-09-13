@@ -151,6 +151,9 @@ malformed gzip streams and missing bundle inventory. Snapshot count-field errors
 are distinguished from inconsistent arithmetic. Regressions also cover clock
 reversal within the five-second tolerance, complete count baselines, explicit
 pinned timeouts, workflow preflight and reuse without duplicate verification.
+Resealed bundles with extra root artifact fields or inconsistent copied-master
+compression provenance fail both standalone verification and orphan reuse;
+restoring valid metadata allows retry, including pinned older zlib provenance.
 CLI regressions reject identical source/output roots and path aliases before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
@@ -207,7 +210,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 94 tests; installed-wheel verification from
+The 0.3.0 milestone passed all 96 tests; installed-wheel verification from
 outside the checkout and workflow linting were completed earlier in this branch.
 The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
