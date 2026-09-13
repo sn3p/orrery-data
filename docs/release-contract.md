@@ -77,8 +77,10 @@ actual producing runtime remain recorded claims.
 | Activation | Validate API source values/pairs before writes; build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
 | Saved evidence | Report/output paths cannot overwrite inputs or candidates; copied data uses a private per-run path; report replacement is atomic and previous evidence survives failures |
 
-A named candidate matches `(snapshot|export|release)-v1-<64 hex>`.
-`snapshot.json`, `manifest.json` or `release.json` identifies a candidate only
+A named candidate matches `(snapshot|export|release|delivery)-v1-<64 hex>`.
+The optional indexed delivery candidate uses a separate contract; release schema
+1 and its layout are unchanged. `snapshot.json`, `manifest.json`, `release.json`
+or `index.json` identifies a candidate only
 when it is in the exact writable target directory. An unrelated marker in a
 parent directory does not reserve that parent's descendants.
 

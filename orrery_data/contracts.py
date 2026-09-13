@@ -4,6 +4,7 @@ These checks establish types and allowed values. Readers additionally verify
 identity hashes, repeated metadata, payload relationships and trusted pins.
 """
 
+import math
 import re
 from urllib.parse import urlsplit
 
@@ -124,9 +125,11 @@ SOURCE = obj({
 }, optional=('resolved_url',))
 SOURCES = obj({'mpcorb': SOURCE, 'numbered': SOURCE})
 SOURCE_HASHES = obj({'mpcorb': SHA, 'numbered': SHA})
-COUNTS = obj({key: UINT for key in ('orbital_records', 'master_records', 'known_discovery', 'missing_discovery',
-                                   'numbered_orbits', 'unnumbered_orbits', 'unsupported_orbits',
-                                   'discovery_records', 'unmatched_discovery_records')})
+COUNT_FIELDS = {key: UINT for key in ('orbital_records', 'master_records', 'known_discovery', 'missing_discovery',
+                                    'numbered_orbits', 'unnumbered_orbits', 'unsupported_orbits',
+                                    'discovery_records', 'unmatched_discovery_records')}
+COUNTS = obj(COUNT_FIELDS)
+EXPORT_COUNTS = obj({**COUNT_FIELDS, 'discovery_export': UINT})
 BASELINE = obj({key: UINT for key in ('orbital_records', 'discovery_records', 'master_records', 'known_discovery')})
 EXCLUSION_FIELDS = {'master': obj({'non_elliptic_orbits': UINT}),
                     'discovery': obj({'missing_discovery_date': UINT})}
@@ -147,9 +150,7 @@ EXPORT = obj({
     'data_version': EXPORT_ID, 'identity': EXPORT_IDENTITY, 'snapshot_version': SNAPSHOT_ID,
     'schema_version': literal(1), 'tool_version': NONEMPTY, 'created_at': UTC,
     'selection': SELECTION, 'sources': SOURCES,
-    'counts': obj({**{key: UINT for key in ('orbital_records', 'master_records', 'known_discovery', 'missing_discovery',
-                                          'numbered_orbits', 'unnumbered_orbits', 'unsupported_orbits',
-                                          'discovery_records', 'unmatched_discovery_records')}, 'discovery_export': UINT}),
+    'counts': EXPORT_COUNTS,
     'exclusions': obj({**EXCLUSION_FIELDS, 'selection_limit': UINT}),
     'compression': obj({'master': COMPRESSION, 'catalog': COMPRESSION}),
     'artifacts': obj({name: obj({**FILE_FIELDS, 'profile': literal(profile), 'records': UINT}) if profile else FILE
@@ -178,9 +179,33 @@ RELEASE = obj({
     'artifacts': mapping(FILE),
 })
 
+# The optional delivery index reuses export metadata types. Content equality,
+# ordering and range/date relationships still require payload verification.
+INDEX_NUMBER = rule(lambda v: type(v) in (int, float) and math.isfinite(v), 'finite number')
+INDEX_DATE_COUNT = rule(
+    lambda v: isinstance(v, list) and len(v) == 2
+    and type(v[0]) in (int, float) and math.isfinite(v[0]) and type(v[1]) is int and v[1] > 0,
+    '[finite discovery date, positive integer count]')
+INDEX_REFERENCE_FIELDS = {'url': NONEMPTY, **FILE_FIELDS}
+INDEX_REFERENCE = obj(INDEX_REFERENCE_FIELDS)
+INDEX_PAYLOAD_FIELDS = {**INDEX_REFERENCE_FIELDS, 'gzip': INDEX_REFERENCE}
+INDEX_FIELDS = {
+    'contract_version': literal(1), 'schema_version': literal(1), 'encoding': literal('json-array'),
+    'catalog_id': EXPORT_ID, 'snapshot_version': SNAPSHOT_ID,
+    'producer': obj({'tool_version': VERSION}), 'selection': SELECTION,
+    'counts': EXPORT_COUNTS, 'exclusions': obj({**EXCLUSION_FIELDS, 'selection_limit': UINT}),
+    'sources': SOURCES, 'full': obj(INDEX_PAYLOAD_FIELDS),
+    'provenance': obj({key: INDEX_REFERENCE for key in ('manifest', 'master', 'header', 'notice')}),
+    'chunk_bytes': POSITIVE, 'date_counts': array(INDEX_DATE_COUNT),
+    'chunks': array(obj({'start': UINT, 'end': UINT, 'first_disc': INDEX_NUMBER, 'last_disc': INDEX_NUMBER,
+                         **INDEX_PAYLOAD_FIELDS})),
+}
+INDEX = obj(INDEX_FIELDS)
+
 
 def validate_contract(kind, value):
-    {'snapshot': SNAPSHOT, 'export': EXPORT, 'database': DATABASE, 'release': RELEASE}[kind](value, kind)
+    {'snapshot': SNAPSHOT, 'export': EXPORT, 'database': DATABASE, 'release': RELEASE,
+     'indexed': INDEX}[kind](value, kind)
     sources = value['snapshot']['sources'] if kind == 'database' else value['sources']
     for name, info in sources.items():
         if info['acquisition'] == 'http' and (info['retrieved_at'] is None or 'resolved_url' not in info):

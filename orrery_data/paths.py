@@ -8,8 +8,8 @@ import unicodedata
 from .formats import DataError
 
 
-CANDIDATE_NAME = re.compile(r"(?:snapshot|export|release)-v1-[a-f0-9]{64}")
-CANDIDATE_MARKERS = ("snapshot.json", "manifest.json", "release.json")
+CANDIDATE_NAME = re.compile(r"(?:snapshot|export|release|delivery)-v1-[a-f0-9]{64}")
+CANDIDATE_MARKERS = ("snapshot.json", "manifest.json", "release.json", "index.json")
 
 
 def validate_flat_inventory(directory, names, *, label):
@@ -64,7 +64,7 @@ def validate_writable_path(path, *, label="Output", protected_roots=()):
         if CANDIDATE_NAME.fullmatch(ancestor.name.casefold()) or (ancestor == resolved and ancestor.is_dir() and any(
                 (ancestor / marker).exists() or (ancestor / marker).is_symlink()
                 for marker in CANDIDATE_MARKERS)):
-            raise DataError(f"{label} must not be at or inside an existing immutable snapshot, export or release candidate: {ancestor}")
+            raise DataError(f"{label} must not be at or inside an existing immutable snapshot, export, release or delivery candidate: {ancestor}")
     return resolved
 
 
