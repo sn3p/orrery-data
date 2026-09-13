@@ -616,3 +616,28 @@ class ReleaseContract(unittest.TestCase):
             self.assertIn('exactly one member', error)
             self.assertFalse((destination / 'latest.json').exists())
             if command == 'build-db': self.assertFalse(destination.exists())
+
+    def test_refresh_cannot_reactivate_cached_master_with_additional_members(self):
+        prepared, _ = self.fixture()
+        source = self.store / 'snapshots' / prepared['snapshot_version']
+        master = source / 'master.jsonl.gz'
+        original_bytes = master.read_bytes()
+        snapshot = read_json(source / 'snapshot.json')
+        original_manifest = copy.deepcopy(snapshot)
+        master.write_bytes(original_bytes + gzip.compress(b'', mtime=123))
+        snapshot['files']['master.jsonl.gz'] = file_info(master)
+        write_json(source / 'snapshot.json', snapshot)
+        (self.store / 'current.json').unlink()
+        before = self.tree(self.store)
+        with self.assertRaisesRegex(DataError, 'exactly one member'):
+            load_snapshot(self.store, prepared['snapshot_version'])
+        options = ['--mpcorb', test_releases.ROOT / 'tests/fixtures/MPCORB.DAT',
+                   '--numbered', test_releases.ROOT / 'tests/fixtures/NumberedMPs.txt']
+        self.assertIn('exactly one member', self.cli('refresh', '--store', self.store, *options, code=1)['error'])
+        self.assertEqual(self.tree(self.store), before)
+        self.assertFalse((self.store / 'current.json').exists())
+        master.write_bytes(original_bytes)
+        write_json(source / 'snapshot.json', original_manifest)
+        refreshed = self.cli('refresh', '--store', self.store, *options)
+        self.assertEqual(refreshed['snapshot_version'], prepared['snapshot_version'])
+        self.assertEqual(read_json(self.store / 'current.json'), {'snapshot_version': prepared['snapshot_version']})

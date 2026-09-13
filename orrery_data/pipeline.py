@@ -49,6 +49,7 @@ def load_snapshot(store, version=None, verify=True):
             verify_decoded_source(directory / f"{name}.input", info)
         for name in ("master.jsonl.gz", "MPCORB-header.txt"):
             verify_file(directory / name, manifest["files"][name])
+        verify_generated_gzip(directory / "master.jsonl.gz")
     return directory, manifest
 
 
