@@ -16,6 +16,7 @@ from .metadata import validate_source_metadata
 from .pipeline import check, export, refresh
 from .storage import URLS, encode, read_json
 from .releases import prepare_release, verify_release
+from .indexed import DEFAULT_CHUNK_BYTES, export_indexed, verify_indexed
 
 
 def positive(value):
@@ -101,6 +102,14 @@ def parser():
     verify = commands.add_parser("verify-release")
     verify.add_argument("--bundle", type=Path, required=True)
     verify.add_argument("--manifest-sha256", help="expected release.json hash from a trusted channel")
+    indexed = commands.add_parser("export-indexed", help="optional offline derivative of an existing full/limited export")
+    indexed.add_argument("--export", dest="source_export", type=Path, required=True)
+    indexed.add_argument("--output", type=Path, default=Path("artifacts/indexed"))
+    indexed.add_argument("--chunk-bytes", type=positive, default=DEFAULT_CHUNK_BYTES,
+                         help="maximum decoded bytes per file (default: 1 MiB; maximum: 8 MiB)")
+    indexed_verify = commands.add_parser("verify-indexed")
+    indexed_verify.add_argument("--bundle", type=Path, required=True)
+    indexed_verify.add_argument("--index-sha256", help="expected index.json hash from a trusted channel")
     return root
 
 
@@ -133,6 +142,10 @@ def main(argv=None):
                                      baseline_counts=baseline)
         elif args.command == "verify-release":
             result = verify_release(args.bundle, args.manifest_sha256)
+        elif args.command == "export-indexed":
+            result = export_indexed(args.source_export, args.output, args.chunk_bytes)
+        elif args.command == "verify-indexed":
+            result = verify_indexed(args.bundle, args.index_sha256)
         elif args.command == "export":
             result = export(args.store, args.output, args.snapshot, args.limit)
         elif args.command == "build-db":

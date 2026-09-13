@@ -40,6 +40,10 @@ orrery-data export
 # Optional consumer limit: first 100k eligible MPCORB rows, then date-sort.
 orrery-data export --limit 100000
 
+# Optional indexed-loading trial, using an existing export (no new acquisition).
+orrery-data export-indexed --export artifacts/export-v1-HASH
+orrery-data verify-indexed --bundle artifacts/indexed/delivery-v1-HASH --index-sha256 HASH
+
 # Build a complete local database from the current validated snapshot.
 orrery-data build-db
 orrery-data db-info --verify
@@ -73,6 +77,14 @@ small `latest.json` pointer after success. It includes:
   counts, exclusions and selection settings.
 - `MPCORB-header.txt` and `NOTICE.txt`: upstream header and attribution.
 
+`export-indexed` creates a separate experimental bundle with the unchanged full
+export, bounded discovery files and a small index of cumulative date counts.
+`--chunk-bytes` controls the decoded file cap (default 1 MiB). It prints the
+exact index pin, changes no active pointer and leaves the source export intact.
+Both consumer adapters can use this same bundle for comparison. See the
+[trial contract, adapter operations and shared fixtures](docs/consumer-contract.md).
+Consumer loading and renderer integration remain separate app work.
+
 `build-db` atomically replaces `artifacts/orrery.sqlite3` with the complete
 master, including unknown discovery dates. Use `--database /path/catalog.sqlite3`
 on the build and read commands for another location, or `--snapshot` on the
@@ -95,6 +107,12 @@ UI and app integration remain separate work.
 
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)
+
+The [consumer delivery plan](docs/consumer-delivery-plan.md)
+describes the agreed exploration of full-file and indexed loading through
+consumer-owned adapters, with a possible database service later. The optional
+producer format is available for local trials; consumer conformance, public
+distribution and selection of a production default remain pending.
 
 ## Attribution
 

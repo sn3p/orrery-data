@@ -1,0 +1,65 @@
+{
+  "scope": "OrreryData producer local trial; not browser or hosted transfer evidence",
+  "python": "3.12.7",
+  "producer_tool_version": "0.4.0",
+  "original_export_tool_version": "0.3.0",
+  "catalog_id": "export-v1-b0d9911194ffdc6d14bdc2e90565f83ffe2740a0b72b0297ee997569716316bd",
+  "pin": {
+    "url": "index.json",
+    "sha256": "bf4252e0e20b6db07df83a2d87f731788235067fbcd2d3a78c98f92083880db2",
+    "bytes": 265372
+  },
+  "records": 895910,
+  "chunks": 114,
+  "chunk_cap_bytes": 1048576,
+  "largest_decoded_chunk_bytes": 1048576,
+  "index_decoded_bytes": 265372,
+  "index_local_gzip_level6_bytes": 82298,
+  "distinct_discovery_dates": 12365,
+  "full_json_bytes": 118824557,
+  "full_json_sha256": "0fb42d148878ea3270ee81a6bd501ba65b50b78dd558a24abab45f0af084199b",
+  "full_gzip_bytes": 34197622,
+  "all_chunks_decoded_bytes": 118824783,
+  "all_chunks_gzip_bytes": 34259404,
+  "prefixes": [
+    {
+      "through": "1980-02-01",
+      "records": 9262,
+      "chunks": 2,
+      "decoded_chunk_bytes": 2097101,
+      "stored_gzip_chunk_bytes": 621884
+    },
+    {
+      "through": "2000-01-01",
+      "records": 84467,
+      "chunks": 11,
+      "decoded_chunk_bytes": 11533564,
+      "stored_gzip_chunk_bytes": 3364532
+    },
+    {
+      "through": "2010-01-01",
+      "records": 657774,
+      "chunks": 84,
+      "decoded_chunk_bytes": 88074815,
+      "stored_gzip_chunk_bytes": 25334961
+    },
+    {
+      "through": "2020-01-01",
+      "records": 891410,
+      "chunks": 113,
+      "decoded_chunk_bytes": 118481528,
+      "stored_gzip_chunk_bytes": 34155796
+    }
+  ],
+  "preparation_observation": {
+    "elapsed_seconds": 55.95,
+    "maximum_resident_bytes": 1189904384,
+    "note": "macOS /usr/bin/time -l; includes source and staged output verification; producer memory, not browser memory; other task work overlapped"
+  },
+  "verification": "export-indexed verified copied source metadata/master and all bounded chunks before activation; decoded numeric values/order equal original full export",
+  "limits": [
+    "Prefix sizes include whole required boundary files, no lookahead or cache reuse.",
+    "Stored gzip sizes exclude HTTP metadata; actual host compression, browser memory and frame performance untested.",
+    "Full derivative contains baseline, chunks and full master for offline provenance; consumers fetch only needed files."
+  ]
+}

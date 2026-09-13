@@ -1,7 +1,7 @@
 # Versioned data release preparation
 
-Tool 0.3.0 prepares a complete, immutable release candidate locally or in a
-manually dispatched GitHub Actions run. It does not create tags, GitHub
+Introduced in tool 0.3.0, release preparation builds a complete, immutable
+candidate locally or in a manually dispatched GitHub Actions run. It does not create tags, GitHub
 Releases, release assets, a server, or app updates. The proposed eventual
 public download destination is GitHub Releases; publication is a separate task.
 
@@ -120,7 +120,7 @@ Standalone verification and candidate reuse enforce the same requirements.
 
 | Identity | Meaning |
 |---|---|
-| Producer `tool_version` and `commit` | Code that prepared the bundle; currently 0.3.0 |
+| Producer `tool_version` and `commit` | Code that prepared the bundle; current tool 0.4.0 |
 | `dataset_version` (`data-v1-…`) | Hash of the decoded MPCORB and NumberedMPs source hashes in fixed order; independent of producer code, acquisition time, gzip wrappers and profile limits |
 | `snapshot_version` | Existing snapshot identity, including its parser tool/schema version; preserved when pinning an older snapshot |
 | JSON schema 1 / SQLite schema 1 | Existing independent payload contracts, unchanged |
