@@ -9,7 +9,7 @@ import stat
 import tempfile
 
 from . import __version__
-from .contracts import VERSION
+from .contracts import INDEX_FIELDS, validate_contract
 from .formats import DataError, FIELDS
 from .paths import validate_disjoint_paths, validate_flat_inventory, validate_writable_path
 from .pipeline import EXPORT_FILES, selected_master, validate_export_manifest
@@ -147,19 +147,15 @@ def verify_indexed(directory, index_sha256=None):
             or type(index.get("schema_version")) is not int or index["schema_version"] != 1
             or index.get("encoding") != "json-array"):
         raise DataError("Unsupported indexed contract, schema or encoding")
-    if set(index) != {"contract_version", "schema_version", "encoding", "catalog_id", "snapshot_version",
-                      "producer", "selection", "counts", "exclusions", "sources", "full", "provenance",
-                      "chunk_bytes", "date_counts", "chunks"}:
+    if index.keys() != INDEX_FIELDS.keys():
         raise DataError("Invalid indexed fields")
-    limit = chunk_limit(index.get("chunk_bytes"))
-    producer = index.get("producer")
-    if not isinstance(producer, dict) or set(producer) != {"tool_version"}:
-        raise DataError("Invalid indexed producer metadata")
-    VERSION(producer["tool_version"], "Indexed producer tool_version")
+    validate_contract("indexed", index)
+    limit = chunk_limit(index["chunk_bytes"])
+    producer = index["producer"]
     manifest, rows = verify_source_export(directory / "full")
     expected = make_index(directory, manifest, rows, limit, producer["tool_version"])
     # Compare JSON types as well as values (True and 1.0 are not integer counts),
-    # while permitting object key reordering. No separate consumer schema parser.
+    # while permitting object key reordering. Types alone do not prove content.
     if json.dumps(index, sort_keys=True) != json.dumps(expected, sort_keys=True):
         raise DataError("Index metadata, date counts or chunk ranges differ from the catalog")
     return {"catalog_id": index["catalog_id"], "path": str(directory),

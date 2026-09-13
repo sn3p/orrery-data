@@ -223,6 +223,43 @@ class IndexedCLI(unittest.TestCase):
         write_json(bundle / "index.json", index)
         self.assertIn("Checksum or size mismatch", self.verify(result, code=1)["error"])
 
+    def test_nested_index_types_reject_before_full_payload_verification(self):
+        result = self.indexed(self.prepare())
+        bundle = Path(result["path"])
+        index = read_json(bundle / "index.json")
+        (bundle / "full/catalog.json").write_bytes(b"corrupt payload must not be read first")
+        invalid = [
+            (("chunks",), None), (("chunks", 0), []),
+            (("chunks", 0, "start"), True), (("chunks", 0, "end"), 2.0),
+            (("chunks", 0, "first_disc"), "date"), (("chunks", 0, "last_disc"), False),
+            (("chunks", 0, "sha256"), "invalid"), (("chunks", 0, "bytes"), -1),
+            (("chunks", 0, "gzip"), {}), (("chunks", 0, "gzip", "bytes"), "10"),
+            (("date_counts",), {}), (("date_counts", 0), [2451544.5]),
+            (("date_counts", 0, 0), True), (("date_counts", 0, 1), 1.0),
+            (("catalog_id",), "invalid"), (("snapshot_version",), "invalid"),
+            (("full",), None), (("full", "url"), 1), (("full", "bytes"), False),
+            (("full", "gzip", "sha256"), "invalid"),
+            (("provenance", "master"), []), (("provenance", "notice", "url"), ""),
+            (("provenance", "manifest", "bytes"), 1.0), (("provenance", "header", "sha256"), 0),
+            (("selection", "limit"), True), (("counts", "discovery_export"), "6"),
+            (("exclusions", "discovery", "missing_discovery_date"), -1),
+            (("sources", "mpcorb", "decoded", "sha256"), "invalid"),
+            (("sources", "numbered", "acquisition"), "unknown"),
+            (("producer", "tool_version"), None),
+        ]
+        for path, value in invalid:
+            with self.subTest(path=path, value=value):
+                broken = copy.deepcopy(index)
+                target = broken
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                write_json(bundle / "index.json", broken)
+                error = self.cli("verify-indexed", "--bundle", bundle, code=1)
+                self.assertTrue(error["error"].startswith("indexed."), error)
+        write_json(bundle / "index.json", index)
+        self.assertIn("Checksum or size mismatch", self.verify(result, code=1)["error"])
+
     def test_invalid_caps_and_oversize_record_leave_previous_output(self):
         source = self.prepare()
         previous = self.indexed(source)

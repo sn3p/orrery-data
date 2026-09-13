@@ -19,7 +19,7 @@ becomes an immutable derivative containing the unchanged full export, bounded
 JSON/gzip chunks, cumulative date counts, provenance and an index pin. It does
 not change active pointers or the existing JSON/release schemas.
 
-The producer implementation passed 203 local tests. A saved full
+The producer implementation passed 204 local tests. A saved full
 895,910-record export produced 114 chunks capped at 1 MiB decoded, preserving
 numeric values and order. See the results above for exact sizes and identities.
 Those measurements establish producer output, not browser performance.

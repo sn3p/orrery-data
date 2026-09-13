@@ -20,6 +20,8 @@ the input export nor activates a `latest` pointer. No network access is required
 The second command checks a retained/transferred bundle. Obtain the index SHA-256
 through a trusted channel; hashes alone are not authenticity. The existing
 [release trust scope](release-contract.md#trust-and-evidence) applies.
+It validates every index field's structure and type before reading catalog
+payloads, then checks content consistency against the verified source export.
 
 ```
 delivery-v1-<SHA256 of index.json>/
