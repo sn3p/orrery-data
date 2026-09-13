@@ -87,6 +87,17 @@ class ReleaseCLI(unittest.TestCase):
             self.assertEqual(file_info(Path(first["path"]) / f"exports/{profile}/catalog.json"),
                              file_info(Path(changed_code["path"]) / f"exports/{profile}/catalog.json"))
 
+    def test_limits_larger_than_sqlite_integer_select_all_eligible_records(self):
+        limit = 2 ** 63
+        prepared = self.prepare("--selected-limit", limit)
+        bundle = Path(prepared["path"])
+        full = bundle / "exports/full/catalog.json"
+        selected = bundle / f"exports/first-{limit}/catalog.json"
+        self.assertEqual(selected.read_bytes(), full.read_bytes())
+        self.assertEqual(prepared["profiles"][f"first-{limit}"]["selection"]["limit"], limit)
+        self.verify(bundle, "--manifest-sha256", prepared["manifest"]["sha256"])
+        self.assertEqual(self.prepare("--selected-limit", limit, offline=prepared["snapshot_version"]), prepared)
+
     def test_dataset_version_independent_of_snapshot_tool_version(self):
         first = self.prepare()
         old = self.cli("refresh", "--store", self.directory / "old-store", *self.http_args(),

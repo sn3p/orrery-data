@@ -142,7 +142,7 @@ def verify_catalog(directory, manifest, expected_records, connection, limit):
                      r.perihelion_argument, r.M, r.n
               FROM objects o JOIN orbits r USING (source_order) WHERE o.disc IS NOT NULL
               ORDER BY o.source_order LIMIT ?)
-        ORDER BY disc, source_order""", (-1 if limit is None else limit,))
+        ORDER BY disc, source_order""", (-1 if limit is None else min(limit, expected_records),))
     for index, (row, expected_row) in enumerate(zip_longest(rows, expected), 1):
         validate_catalog_record(row)
         require(row["disc"] >= previous, "Catalog discovery order mismatch")
