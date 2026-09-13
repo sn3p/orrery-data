@@ -174,10 +174,13 @@ python3 scripts/validate_saved_release.py \
 Run from committed producer code with assertions enabled. The release validator
 captures that commit's exact Git blobs into a private temporary directory, then
 runs its validator, comparison helper and every producer subprocess from that
-snapshot. Concurrent checkout/HEAD changes cannot change the code used or its
-reported commit. Python and system libraries remain those of the invoking machine.
+snapshot. All provenance-sensitive Git reads disable replacement objects,
+including tree/blob extraction and the clean-checkout comparison. Concurrent
+checkout/HEAD changes and local commit/tree/blob replacement refs cannot change
+the code used or its reported commit. Python and system libraries remain those of the invoking machine.
 Regressions cover a complete fixture run while the original checkout and HEAD
-change and are restored, dirty-checkout report preservation, and relative paths.
+change and are restored, commit/tree/blob replacement refs, dirty-checkout report
+preservation, and relative paths.
 The final report is written to a temporary file in the report directory, flushed
 and synced before atomic replacement. Complete fixture runs inject partial-write,
 flush, sync and replacement failures, checking preservation of prior evidence,
@@ -187,7 +190,8 @@ rejects `python -O`, `python -OO` and enabled `PYTHONOPTIMIZE` before validation
 or output writes, so disabled checks cannot produce a passing report.
 It selects the retained snapshot version recorded in the committed release result
 directly from `snapshots/`, independently of missing, changed or malformed
-`current.json`, and verifies that snapshot and its pinned master hash. A missing
+`current.json`, and verifies that snapshot, all nine pinned counts and its pinned
+master hash. Arithmetically consistent count mutations also fail preflight. A missing
 or corrupted retained snapshot fails before creating the work directory; another
 current snapshot cannot substitute even when its master/export payloads match.
 Reference export manifests are checked before preparation: full and 100k limits
@@ -210,7 +214,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 96 tests; installed-wheel verification from
+The 0.3.0 milestone passed all 102 tests; installed-wheel verification from
 outside the checkout and workflow linting were completed earlier in this branch.
 The historical full saved candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered

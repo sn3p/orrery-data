@@ -98,7 +98,10 @@ paths. Preserve the MPC header, notice and matching master when redistributing
 catalogs; the software license does not relicense upstream data.
 
 Schema 1 requires the complete top-level manifest fields. Its `created_at` is a
-valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`). Generation ordering permits up to
+valid UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`), as is the snapshot's `created_at`.
+Snapshot loading validates the calendar date, time and type before exports or
+database builds can propagate it; standalone release verification applies the
+same check. Generation ordering permits up to
 five seconds of backward wall-clock movement between database/export generation
 and release assembly; larger contradictions fail with a clock diagnostic.
 Actual recorded timestamps are preserved rather than clamped or replaced with

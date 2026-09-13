@@ -14,7 +14,7 @@ from . import SCHEMA_VERSION, __version__
 from .formats import DataError, FIELDS, discoveries, master_rows
 from .storage import (acquire, atomic_json, deterministic_gzip, digest, encode,
                       file_info, now, read_json, request, response_metadata,
-                      validate_file_info, verify_file, write_json, writer_lock)
+                      utc_timestamp, validate_file_info, verify_file, write_json, writer_lock)
 
 
 def current(store):
@@ -44,6 +44,7 @@ def validate_snapshot_manifest(manifest, version):
             "sources", "counts", "files", "exclusions", "compression"}
     if not isinstance(manifest, dict) or set(manifest) != keys:
         raise DataError("Invalid snapshot manifest fields")
+    utc_timestamp(manifest["created_at"], "Snapshot generation")
     identity = manifest["identity"]
     if (not isinstance(identity, dict) or set(identity) != {"schema_version", "tool_version", "sources"}
             or not isinstance(identity["sources"], dict)

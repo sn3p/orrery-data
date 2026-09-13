@@ -15,6 +15,10 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 # Retained source identity recorded in docs/release-validation-result.json.
 EXPECTED_SNAPSHOT_VERSION = "snapshot-v1-53b641e2f4ae173bb0da258b6d65dd6de8c752b99fa3ce267c96bacc249a69e5"
+EXPECTED_COUNTS = {"orbital_records": 1563495, "master_records": 1563495,
+                   "known_discovery": 895910, "missing_discovery": 667585,
+                   "numbered_orbits": 895910, "unnumbered_orbits": 667585, "unsupported_orbits": 0,
+                   "discovery_records": 895910, "unmatched_discovery_records": 0}
 PRODUCER_PATHS = ("orrery_data", "scripts", "pyproject.toml")
 
 
@@ -37,10 +41,11 @@ def arguments():
 
 
 def copy_committed_producer(commit, destination):
-    # Read immutable Git blobs, not checkout files or archive transformations.
+    # Disable local replacement refs for both tree and blob reads, so these
+    # are the named commit's objects rather than substitute code.
     # HEAD and the original worktree can change after this point without
     # affecting any validator helper or producer process in this run.
-    entries = subprocess.check_output(["git", "ls-tree", "-rz", commit, "--", *PRODUCER_PATHS], cwd=ROOT)
+    entries = subprocess.check_output(["git", "--no-replace-objects", "ls-tree", "-rz", commit, "--", *PRODUCER_PATHS], cwd=ROOT)
     for entry in entries.split(b"\0"):
         if not entry:
             continue
@@ -50,7 +55,7 @@ def copy_committed_producer(commit, destination):
             raise RuntimeError("Committed producer must contain only regular files")
         target = destination / name.decode("utf-8")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(subprocess.check_output(["git", "cat-file", "blob", object_id.decode("ascii")], cwd=ROOT))
+        target.write_bytes(subprocess.check_output(["git", "--no-replace-objects", "cat-file", "blob", object_id.decode("ascii")], cwd=ROOT))
         target.chmod(0o555 if mode == b"100755" else 0o444)
 
 
@@ -71,8 +76,8 @@ def cli(*args):
 
 def main():
     args = arguments()  # Reject optimization and invalid arguments before creating files.
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    subprocess.run(["git", "diff", "--exit-code", commit, "--", *PRODUCER_PATHS], cwd=ROOT, check=True)
+    commit = subprocess.check_output(["git", "--no-replace-objects", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    subprocess.run(["git", "--no-replace-objects", "diff", "--exit-code", commit, "--", *PRODUCER_PATHS], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="orrery-release-producer-") as temp:
         producer = Path(temp)
         copy_committed_producer(commit, producer)
@@ -117,13 +122,15 @@ def reference_exports(directory):
 def validate(args, commit):
     sys.path.insert(0, str(ROOT))
     from orrery_data.pipeline import load_snapshot
-    from validate_saved_database import EXPECTED, MASTER_SHA256, sha, verify_rows
+    from validate_saved_database import MASTER_SHA256, sha, verify_rows
 
     version = EXPECTED_SNAPSHOT_VERSION
     try:
         snapshot_dir, snapshot = load_snapshot(args.store, version)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise SystemExit(f"Requires retained validated 2026-09-12 source snapshot {version}: {exc}") from exc
+    if snapshot["counts"] != EXPECTED_COUNTS:
+        raise SystemExit("Requires retained validated snapshot counts: all nine fields must match the 2026-09-12 evidence")
     master = snapshot_dir / "master.jsonl.gz"
     assert sha(master) == MASTER_SHA256, "requires retained validated master"
     references = reference_exports(args.reference_exports)
@@ -135,7 +142,7 @@ def validate(args, commit):
                                       "--output", output, "--producer-commit", commit)
     bundle = Path(prepared["path"])
     manifest = json.loads((bundle / "release.json").read_text())
-    assert all(prepared["counts"][k] == v for k, v in EXPECTED.items())
+    assert prepared["counts"] == EXPECTED_COUNTS, "prepared counts differ from retained validated snapshot counts"
     assert manifest["sources"] == json.loads((snapshot_dir / "snapshot.json").read_text())["sources"]
     print("Comparing every SQLite field against all 1,563,495 saved master rows...", flush=True)
     started = time.monotonic()

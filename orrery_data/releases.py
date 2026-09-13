@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 import platform
 import re
@@ -19,7 +19,7 @@ from .database import DATABASE_SCHEMA_VERSION, build_database, database_info
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
-from .storage import (URLS, atomic_json, digest, file_info, now, read_json, validate_file_info, verify_file,
+from .storage import (URLS, atomic_json, digest, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
                       write_json, writer_lock)
 
 RELEASE_SCHEMA_VERSION = 1
@@ -46,12 +46,7 @@ def validate_baseline(counts):
 
 
 def release_timestamp(value):
-    require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value),
-            "Release generation timestamps must be UTC YYYY-MM-DDTHH:MM:SSZ")
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise DataError("Invalid release generation timestamp") from exc
+    return utc_timestamp(value, "Release generation")
 
 
 def validate_release_metadata(manifest):

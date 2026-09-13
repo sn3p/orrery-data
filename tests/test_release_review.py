@@ -410,6 +410,51 @@ class ReleaseReview(unittest.TestCase):
             self.assertFalse((self.directory / "exports-invalid").exists())
             self.assertFalse((self.directory / "invalid-db").exists())
 
+    def test_snapshot_timestamps_reject_invalid_values_at_all_consumers(self):
+        first = self.prepare()
+        path = self.store / "snapshots" / first["snapshot_version"] / "snapshot.json"
+        original = json.loads(path.read_text())
+        invalid = [None, True, 1, [], {}, "", "yesterday", "2026-02-30T12:00:00Z",
+                   "2026-09-13T25:00:00Z", "2026-09-13T12:00:00", "2026-09-13T12:00:00+00:00"]
+        for index, value in enumerate(invalid):
+            path.write_text(json.dumps({**original, "created_at": value}))
+            before = self.tree(self.store)
+            for command, flags in (("check", self.http_args()), ("refresh", self.http_args()),
+                                   ("export", ["--output", self.directory / "bad-time-exports"]),
+                                   ("build-db", ["--database", self.directory / "bad-time-db/data.sqlite3"]),
+                                   ("prepare-release", ["--output", self.output, "--snapshot", first["snapshot_version"],
+                                                        "--producer-commit", test_releases.COMMIT])):
+                with self.subTest(value=value, command=command):
+                    output_before = self.tree(self.output)
+                    error = self.cli(command, "--store", self.store, *flags, code=1)["error"]
+                    self.assertIn("timestamp", error.lower())
+                    self.assertIn("snapshot", error.lower())
+                    self.assertEqual(self.tree(self.store), before)
+                    self.assertEqual(self.tree(self.output), output_before)
+            self.assertFalse((self.directory / "bad-time-exports").exists())
+            self.assertFalse((self.directory / "bad-time-db").exists())
+            copied = self.directory / f"timestamp-{index}"
+            shutil.copytree(first["path"], copied)
+            (copied / "snapshot.json").write_bytes(path.read_bytes())
+            self.reseal(copied)
+            before = self.tree(copied)
+            with self.subTest(value=value, command="verify-release"):
+                error = self.verify(copied, code=1)["error"]
+                self.assertIn("snapshot.json", error)
+                self.assertIn("timestamp", error.lower())
+                self.assertEqual(self.tree(copied), before)
+        path.write_text(json.dumps(original))
+        self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
+    def test_valid_leap_day_snapshot_timestamp_is_preserved(self):
+        script = ("from unittest.mock import patch\nfrom orrery_data.cli import main\n"
+                  "with patch('orrery_data.pipeline.now', return_value='2024-02-29T23:59:59Z'):\n"
+                  " raise SystemExit(main())")
+        prepared = self.prepare(script=script)
+        self.verify(prepared["path"])
+        snapshot = json.loads((Path(prepared["path"]) / "snapshot.json").read_text())
+        self.assertEqual(snapshot["created_at"], "2024-02-29T23:59:59Z")
+
     def test_small_clock_reversal_preserves_actual_times_and_large_skew_rejects(self):
         script = ("from unittest.mock import patch\nfrom orrery_data.cli import main\n"
                   "with patch('orrery_data.database.now', return_value='2026-09-13T00:00:05Z'), "

@@ -28,6 +28,15 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def utc_timestamp(value, label):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value):
+        raise DataError(f"{label} timestamps must be UTC YYYY-MM-DDTHH:MM:SSZ")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise DataError(f"Invalid {label.lower()} timestamp") from exc
+
+
 def encode(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
 

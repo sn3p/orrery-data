@@ -1,9 +1,11 @@
 """Saved-release validation must pin its source/code and run its checks."""
 
+import ast
 import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import sys
@@ -86,14 +88,19 @@ class SavedReleaseValidation(unittest.TestCase):
             version = self.snapshot["snapshot_version"]
             master = self.store / "snapshots" / version / "master.jsonl.gz"
             values = {"EXPECTED_SNAPSHOT_VERSION": version,
+                      "EXPECTED_COUNTS": self.snapshot["counts"],
                       "MASTER_SHA256": hashlib.sha256(master.read_bytes()).hexdigest(),
                       "EXPECTED": {key: self.snapshot["counts"][key]
                                    for key in ("master_records", "known_discovery", "missing_discovery")}}
             for name in ("validate_saved_release.py", "validate_saved_database.py"):
                 source = (ROOT / "scripts" / name).read_text()
-                for key, value in values.items():
-                    source = "\n".join(f"{key} = {value!r}" if line.startswith(key + " = ") else line
-                                       for line in source.split("\n"))
+                lines = source.splitlines(keepends=True)
+                for node in reversed(ast.parse(source).body):
+                    if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                            and isinstance(node.targets[0], ast.Name) and node.targets[0].id in values):
+                        key = node.targets[0].id
+                        lines[node.lineno - 1:node.end_lineno] = [f"{key} = {values[key]!r}\n"]
+                source = "".join(lines)
                 if name == "validate_saved_release.py":
                     if report_io:
                         source = source.replace("def arguments():", REPORT_IO_HOOK + "\ndef arguments():")
@@ -218,6 +225,94 @@ class SavedReleaseValidation(unittest.TestCase):
                     self.assertEqual(result["status"], "passed")
                     self.assertEqual(report.read_text(), json.dumps(result, indent=2) + "\n")
                     self.assertEqual(list(root.iterdir()), [report])
+
+    def replacement_producer(self, kind, dirty=False):
+        producer = self.producer(stop_before_prepare=False)
+        def git(*args):
+            return subprocess.check_output(["git", *args], cwd=producer, text=True).strip()
+        commit = git("rev-parse", "HEAD")
+        helper = "scripts/validate_saved_database.py"
+        marker = self.directory / "replacement-executed"
+        path = producer / helper
+        path.write_text(path.read_text() + f"\nPath({str(marker)!r}).touch()\n")
+        git("add", helper)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Replacement producer")
+        replacement = git("rev-parse", "HEAD")
+        git("reset", "--soft" if dirty else "--hard", commit)
+        suffix = {"commit": "", "tree": "^{tree}", "blob": ":" + helper}[kind]
+        git("replace", git("rev-parse", commit + suffix), git("rev-parse", replacement + suffix))
+        return producer, commit, marker
+
+    def test_commit_replacement_cannot_hide_a_different_producer_checkout(self):
+        producer, _, marker = self.replacement_producer("commit", dirty=True)
+        # Default Git sees a clean tree even though HEAD names different code.
+        subprocess.run(["git", "diff", "--exit-code", "HEAD"], cwd=producer, check=True, capture_output=True)
+        work, report = self.directory / "work", self.directory / "report.json"
+        report.write_text("previous evidence")
+        result = subprocess.run(self.invocation(producer, work, report), cwd=ROOT,
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(marker.exists(), "replacement producer must not execute")
+        self.assertFalse(work.exists())
+        self.assertEqual(report.read_text(), "previous evidence")
+
+    def test_raw_commit_tree_and_blob_are_used_despite_replacement_refs(self):
+        for kind in ("commit", "tree", "blob"):
+            with self.subTest(kind=kind):
+                producer, commit, marker = self.replacement_producer(kind)
+                report = self.directory / f"report-{kind}.json"
+                result = subprocess.run(self.invocation(producer, self.directory / f"work-{kind}", report),
+                                        cwd=ROOT, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(marker.exists(), "replacement blob must not execute")
+                saved = json.loads(report.read_text())
+                self.assertEqual(saved["producer_commit"], commit)
+                self.assertEqual(saved["release"]["producer"]["commit"], commit)
+            shutil.rmtree(producer)
+
+    def test_all_retained_counts_are_pinned_before_preparation(self):
+        self.producer()
+        path = self.store / "snapshots" / self.snapshot["snapshot_version"] / "snapshot.json"
+        original = json.loads(path.read_text())
+        # Each mutation still satisfies the schema's arithmetic invariants.
+        changes = [
+            {"numbered_orbits": -1, "unnumbered_orbits": 1},
+            {"orbital_records": 1, "unsupported_orbits": 1, "unnumbered_orbits": 1},
+            {"discovery_records": 1, "unmatched_discovery_records": 1},
+            {"master_records": -1, "unsupported_orbits": 1, "missing_discovery": -1},
+            {"known_discovery": -1, "missing_discovery": 1, "unmatched_discovery_records": 1},
+        ]
+        from orrery_data.pipeline import validate_snapshot_manifest
+        for index, delta in enumerate(changes):
+            with self.subTest(changes=delta):
+                snapshot = json.loads(json.dumps(original))
+                for key, difference in delta.items():
+                    snapshot["counts"][key] += difference
+                snapshot["exclusions"]["master"]["non_elliptic_orbits"] = snapshot["counts"]["unsupported_orbits"]
+                snapshot["exclusions"]["discovery"]["missing_discovery_date"] = snapshot["counts"]["missing_discovery"]
+                validate_snapshot_manifest(snapshot, self.snapshot["snapshot_version"])
+                path.write_text(json.dumps(snapshot))
+                before = {str(p): p.read_bytes() for p in self.store.rglob("*") if p.is_file()}
+                report, work = self.directory / f"counts-{index}.json", self.directory / f"counts-work-{index}"
+                report.write_text("previous evidence")
+                result = self.preflight(work, report)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("retained validated snapshot counts", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertFalse(result.stdout)
+                self.assertFalse(work.exists())
+                self.assertEqual(report.read_text(), "previous evidence")
+                self.assertEqual({str(p): p.read_bytes() for p in self.store.rglob("*") if p.is_file()}, before)
+        path.write_text(json.dumps(original))
+        result = self.preflight(self.directory / "valid-counts", self.directory / "valid-counts.json")
+        self.assertIn("release preparation reached", result.stderr)
+
+    def test_retained_pins_match_committed_full_data_evidence(self):
+        validator = runpy.run_path(str(ROOT / "scripts/validate_saved_release.py"))
+        evidence = json.loads((ROOT / "docs/release-validation-result.json").read_text())["release"]
+        self.assertEqual(validator["EXPECTED_SNAPSHOT_VERSION"], evidence["snapshot_version"])
+        self.assertEqual(validator["EXPECTED_COUNTS"], evidence["counts"])
 
     def test_missing_retained_snapshot_does_not_fall_back_to_identical_current_master(self):
         dates = (ROOT / "tests/fixtures/NumberedMPs.txt").read_text()
