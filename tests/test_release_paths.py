@@ -207,14 +207,204 @@ class ReleaseWriterPaths(unittest.TestCase):
         outputs = {key: self.directory / key for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY")}
         for path in outputs.values():
             path.write_text("earlier step output\n")
-        env = {**self.workflow_environment(prepared["counts"]), **{key: str(path) for key, path in outputs.items()}}
-        result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
-                                cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for path in outputs.values():
-            self.assertTrue(path.read_text().startswith("earlier step output\n"))
-        self.assertIn("\nbundle=", outputs["GITHUB_OUTPUT"].read_text())
-        self.assertIn("Prepared a release candidate", outputs["GITHUB_STEP_SUMMARY"].read_text())
+        alias = self.directory / "append-alias"
+        alias.symlink_to(self.directory, target_is_directory=True)
+        for relative_alias in (False, True):
+            with self.subTest(relative_alias=relative_alias):
+                before = {key: path.read_text() for key, path in outputs.items()}
+                env = {**self.workflow_environment(prepared["counts"]), **{
+                    key: str(Path(alias.name) / path.name if relative_alias else path)
+                    for key, path in outputs.items()}}
+                result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                        cwd=self.directory, env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for key, path in outputs.items():
+                    self.assertTrue(path.read_text().startswith(before[key]))
+                    self.assertGreater(len(path.read_text()), len(before[key]))
+                self.assertIn("\nbundle=", outputs["GITHUB_OUTPUT"].read_text())
+                self.assertIn("Prepared a release candidate", outputs["GITHUB_STEP_SUMMARY"].read_text())
+                for child in ("baseline-counts.json", "prepared-release.json", "store/current.json", "releases/latest.json"):
+                    self.assertIsInstance(json.loads((work / child).read_text()), dict)
+                self.assertEqual(json.loads(result.stdout)["status"], "verified")
+
+    def test_workflow_append_paths_cannot_corrupt_generated_metadata(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for index, child in enumerate(("prepared-release.json", "baseline-counts.json",
+                                           "store/current.json", "releases/latest.json")):
+                with self.subTest(key=key, child=child):
+                    work = self.directory / f"workflow-{key}-{index}"
+                    self.requests.clear()
+                    result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                            cwd=ROOT, env={**self.workflow_environment(baseline), key: str(work / child)},
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("overlap", result.stderr)
+                    self.assertEqual(self.requests, [])
+                    self.assertFalse(work.exists())
+
+    def test_workflow_append_paths_reject_owned_directories_and_locks(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for index, child in enumerate(("", "store", "store/snapshots", "releases", ".lock",
+                                           "store/.lock", "releases/.lock", "step-output.txt")):
+                with self.subTest(key=key, child=child):
+                    work = self.directory / f"workflow-{key}-{index}"
+                    self.requests.clear()
+                    result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                            cwd=ROOT, env={**self.workflow_environment(baseline), key: str(work / child)},
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("overlap", result.stderr)
+                    self.assertEqual(self.requests, [])
+                    self.assertFalse(work.exists())
+
+    def test_workflow_append_paths_reject_external_writer_aliases_before_writes(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for index, (child, name) in enumerate((("store", "current.json"), ("store/snapshots", "step-output.txt"),
+                                                   ("releases", "latest.json"))):
+                for mode in ("direct", "append-alias", "ancestor"):
+                    with self.subTest(key=key, child=child, mode=mode):
+                        case = self.directory / f"{key}-{index}-{mode}"
+                        work, outside = case / "workflow", case / "outside"
+                        work.mkdir(parents=True)
+                        (work / "baseline-counts.json").write_text("previous baseline evidence")
+                        (work / "prepared-release.json").write_text("previous preparation evidence")
+                        writer = work / child
+                        writer.parent.mkdir(parents=True, exist_ok=True)
+                        if mode == "ancestor":
+                            writer.symlink_to(outside / "future-writer", target_is_directory=True)
+                            append = outside
+                        else:
+                            outside.mkdir()
+                            (outside / "keep").write_text("retained external evidence")
+                            writer.symlink_to(outside, target_is_directory=True)
+                            append = outside / name
+                            if mode == "append-alias":
+                                alias = case / "append-alias"
+                                alias.symlink_to(outside, target_is_directory=True)
+                                append = alias / name
+                        before = tree(case)
+                        entries = set(case.rglob("*"))
+                        self.requests.clear()
+                        result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                                cwd=ROOT, env={**self.workflow_environment(baseline), key: str(append)},
+                                                capture_output=True, text=True, timeout=30)
+                        self.assertEqual(result.returncode, 1, result.stderr)
+                        self.assertIn("overlap", result.stderr)
+                        self.assertEqual(self.requests, [])
+                        self.assertEqual(tree(case), before)
+                        self.assertEqual(set(case.rglob("*")), entries)
+
+    def test_workflow_output_and_summary_must_have_disjoint_files(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for mode in ("same-missing", "same-existing", "case-alias-missing", "parent-alias", "output-ancestor", "summary-ancestor"):
+            with self.subTest(mode=mode):
+                case = self.directory / mode
+                case.mkdir()
+                work, output = case / "workflow", case / "github-output"
+                summary = output
+                if mode == "same-existing":
+                    output.write_text("earlier step output\n")
+                elif mode == "case-alias-missing":
+                    summary = output.with_name(output.name.upper())
+                elif mode == "parent-alias":
+                    alias = case / "alias"
+                    alias.symlink_to(case, target_is_directory=True)
+                    summary = alias / output.name
+                elif mode == "output-ancestor":
+                    summary = output / "summary"
+                elif mode == "summary-ancestor":
+                    output, summary = output / "output", output
+                before = tree(case)
+                entries = set(case.rglob("*"))
+                self.requests.clear()
+                env = {**self.workflow_environment(baseline), "GITHUB_OUTPUT": str(output),
+                       "GITHUB_STEP_SUMMARY": str(summary)}
+                result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                        cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("GITHUB_STEP_SUMMARY must not overlap GITHUB_OUTPUT", result.stderr)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(tree(case), before)
+                self.assertEqual(set(case.rglob("*")), entries)
+
+    def test_workflow_append_paths_reserve_future_case_and_unicode_aliases(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        # These ambiguous names are rejected on every runner, even if its
+        # filesystem could currently create distinct files for them.
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for name, alias in (("workflow", "WORKFLOW"), ("workflow-é", "WORKFLOW-E\u0301")):
+                with self.subTest(key=key, name=name):
+                    work = self.directory / name
+                    append = self.directory / alias / "PREPARED-RELEASE.JSON"
+                    self.requests.clear()
+                    result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                            cwd=ROOT, env={**self.workflow_environment(baseline), key: str(append)},
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("overlap", result.stderr)
+                    self.assertEqual(self.requests, [])
+                    self.assertEqual(list(self.directory.iterdir()), [])
+
+    def test_workflow_append_paths_require_existing_directory_parents_before_writes(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
+            for kind in ("missing", "file"):
+                with self.subTest(key=key, kind=kind):
+                    case = self.directory / f"{key}-{kind}"
+                    work, parent = case / "workflow", case / "append-parent"
+                    work.mkdir(parents=True)
+                    (work / "baseline-counts.json").write_text("previous baseline evidence")
+                    (work / "prepared-release.json").write_text("previous preparation evidence")
+                    if kind == "file":
+                        parent.write_text("retained external evidence")
+                    before = tree(case)
+                    entries = set(case.rglob("*"))
+                    self.requests.clear()
+                    result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                            cwd=ROOT, env={**self.workflow_environment(baseline), key: str(parent / "output")},
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("parent must already exist" if kind == "missing" else "Not a directory", result.stderr)
+                    self.assertEqual(self.requests, [])
+                    self.assertEqual(tree(case), before)
+                    self.assertEqual(set(case.rglob("*")), entries)
+
+    def test_workflow_append_paths_reject_existing_case_aliases(self):
+        baseline = {"orbital_records": 9, "master_records": 9, "discovery_records": 6, "known_discovery": 6}
+        helper = ROOT / "scripts/prepare_release_workflow.py"
+        work = self.directory / "workflow"
+        work.mkdir()
+        alias = work.with_name(work.name.upper())
+        if not alias.exists() or not alias.samefile(work):
+            self.skipTest("filesystem has case-sensitive names")
+        (work / "baseline-counts.json").write_text("previous baseline evidence")
+        (work / "prepared-release.json").write_text("previous preparation evidence")
+        output = self.directory / "github-output"
+        output.write_text("earlier step output\n")
+        envs = [{key: str(alias / "prepared-release.json")} for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY")]
+        envs.append({"GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(output.with_name(output.name.upper()))})
+        before = tree(self.directory)
+        entries = set(self.directory.rglob("*"))
+        for env in envs:
+            with self.subTest(env=env):
+                self.requests.clear()
+                result = subprocess.run([sys.executable, str(helper), "--work-dir", str(work), *self.http_args()],
+                                        cwd=ROOT, env={**self.workflow_environment(baseline), **env},
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("overlap", result.stderr)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(tree(self.directory), before)
+                self.assertEqual(set(self.directory.rglob("*")), entries)
 
     def test_workflow_child_lock_aliases_fail_before_baseline_replacement(self):
         prepared = self.prepare()

@@ -5,7 +5,7 @@ import math
 import re
 
 from .formats import DataError, FIELDS, identity
-from .storage import loads_json, verify_generated_gzip_header
+from .storage import loads_json, verify_generated_gzip
 
 OBJECT_FIELDS = ("id", "number", "packed_designation", "readable_designation", "disc")
 ORBIT_FIELDS = (*FIELDS[1:], "orbit_reference", "orbit_computer")
@@ -50,7 +50,7 @@ def validate_record(row):
 
 def iter_master(path):
     try:
-        verify_generated_gzip_header(path)
+        verify_generated_gzip(path)
         with gzip.open(path, "rt", encoding="utf-8") as stream:
             for number, line in enumerate(stream, 1):
                 try:

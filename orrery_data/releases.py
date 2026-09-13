@@ -17,14 +17,14 @@ import zlib
 from . import SCHEMA_VERSION, __version__
 from .database import DATABASE_SCHEMA_VERSION, build_database, database_info, open_database
 from .contracts import URL, validate_contract
-from .metadata import validate_source_metadata
+from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
 from .paths import validate_writable_path
 from .formats import DataError, FIELDS
 from .pipeline import (export, load_snapshot, refresh, validate_export_manifest, validate_snapshot_counts,
                        validate_snapshot_manifest)
 from .storage import (URLS, atomic_json, digest, file_info, now, read_json, utc_timestamp, validate_file_info, verify_file,
-                      verify_generated_gzip_header,
+                      verify_generated_gzip,
                       write_json, writer_lock)
 
 RELEASE_SCHEMA_VERSION = 1
@@ -126,7 +126,7 @@ def checksums(directory, names):
 def verify_catalog(directory, manifest, expected_records, connection, limit):
     plain = directory / "catalog.json"
     try:
-        verify_generated_gzip_header(directory / "catalog.json.gz")
+        verify_generated_gzip(directory / "catalog.json.gz")
         with gzip.open(directory / "catalog.json.gz", "rb") as stream:
             require(hashlib.file_digest(stream, "sha256").hexdigest() == file_info(plain)["sha256"],
                     "Compressed catalog differs from JSON")
@@ -315,9 +315,9 @@ def prepare_release(store, output, producer_commit, *, version=None, limits=None
     require(timeout is None or (type(timeout) is int and timeout > 0), "Timeout must be a positive integer")
     local = {} if local is None else local
     metadata = {} if metadata is None else metadata
-    require(isinstance(local, dict) and local.keys() <= URLS.keys(), "Local sources must contain mpcorb/numbered paths")
+    validate_local_sources(local)
     validate_source_metadata(metadata)
-    require(version is None or (not any(local.values()) and not metadata and timeout is None
+    require(version is None or (all(path is None for path in local.values()) and not metadata and timeout is None
                                and (urls is None or urls == URLS)),
             "Snapshot pin cannot be combined with source acquisition options")
     timeout = 60 if timeout is None else timeout

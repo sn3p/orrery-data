@@ -63,7 +63,7 @@ and payload cases supplement structural mutations.
 | Database metadata | Exact metadata/identity fields, integer schema versions, valid snapshot, timestamp/runtime, header and notice text bound to hashes |
 | Release profile | Export ID, nonnegative integer records and exact selection |
 | Preparation | Nullable four-count baseline, nullable nine-count previous snapshot, boolean decrease override; non-overridden decreases reject |
-| Pointers | Exactly the supported version key; release pointer also has exact manifest file information |
+| Pointers | Exactly the supported version key; release pointer also has exact manifest file information; export and release roots reject each other's pointer types |
 
 Every content-derived ID must equal its documented ordered-JSON identity hash.
 Repeated metadata must agree with the authoritative object, with exact JSON
@@ -75,9 +75,11 @@ remain the actual recorded values. Recorded versions need not equal the verifier
 Stored source loading verifies both raw and decoded bytes against their hashes;
 local saved HTTP Content-Length may describe the upstream representation rather
 than locally recompressed bytes. For HTTP acquisition, Content-Length must agree
-with recorded raw bytes. Other HTTP header strings remain recorded observations. Generated master/catalog gzip
-headers require zero mtime and no optional fields or stored filename; compression
-level and the actual producing runtime remain recorded claims.
+with recorded raw bytes. Other HTTP header strings remain recorded observations. Generated master/catalog files contain exactly one complete gzip member with
+zero mtime, no optional header fields or stored filename, and no trailing bytes.
+The complete frame (including its trailer) is checked; upstream source gzip is
+not subject to this generated-artifact framing rule. Compression level and the
+actual producing runtime remain recorded claims.
 
 ## Payload and state guarantees
 
@@ -89,8 +91,8 @@ level and the actual producing runtime remain recorded claims.
 | SQLite | Read-only transaction; supported metadata/schema, integrity/FK checks; all rows and source order equal the master |
 | Discovery catalogs | Full/selected rows equal the corresponding source-order selection from SQLite/master, then stable discovery sort; exact nine fields and gzip/plain equality |
 | Pins | Only omitted snapshot selects current; explicit malformed/empty pins fail at all consumers |
-| Inputs and outputs | Writers reject destinations at/below immutable snapshots, exports or release candidates, including aliases; source refresh cannot use a candidate as its writable store |
-| Activation | Build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
+| Inputs and outputs | Writers reject destinations at/below immutable snapshots, exports or release candidates, including aliases; source refresh cannot use a candidate as its writable store; workflow append paths must be outside every resolved writer root and distinct from each other |
+| Activation | Validate API source values/pairs before writes; build in private stages, verify, then atomically activate; failure preserves previous candidate/pointer and permits retry; concurrent writers are excluded |
 | Existing artifacts | Reuse validates structure, content and provenance before changing a pointer |
 | Saved evidence | Report/output paths cannot overwrite inputs or candidates; copied data uses a private per-run path; report replacement is atomic and previous evidence survives failures |
 | Code provenance | Saved validator reads raw committed blobs with replacements disabled and runs helpers/subprocesses in isolation; a dirty producer is rejected |
@@ -98,3 +100,9 @@ level and the actual producing runtime remain recorded claims.
 Hosted workflow dispatch, runner MPC access and artifact upload/download require
 separate post-merge verification. Release publication, HTTP hosting and app
 integration remain outside this milestone.
+
+Workflow append destinations reserve a portable namespace: paths differing only
+by case or Unicode NFC normalization count as overlaps even on a case-sensitive
+filesystem. Their parent directories must already exist. Checks cover both
+command orders for export/release roots and both framework append destinations
+against workflow metadata, including resolved child roots outside the work tree.

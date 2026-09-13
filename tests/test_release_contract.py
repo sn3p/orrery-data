@@ -346,7 +346,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_recursive_export_mutations_cannot_activate_cached_outputs(self):
         prepared, _ = self.fixture()
-        root = self.directory / 'exports'
+        root = self.directory / 'standalone-exports'
         result = export(self.store, root, prepared['snapshot_version'], 2)
         path = Path(result['path']) / 'manifest.json'
         original = read_json(path)
@@ -484,7 +484,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_export_reuse_does_not_activate_resealed_false_metadata(self):
         prepared, _ = self.fixture()
-        root = self.directory / 'exports'
+        root = self.directory / 'standalone-exports'
         result = export(self.store, root, prepared['snapshot_version'], 2)
         manifest_path = Path(result['path']) / 'manifest.json'
         manifest = read_json(manifest_path)
@@ -560,3 +560,59 @@ class ReleaseContract(unittest.TestCase):
         snapshot['files']['master.jsonl.gz'] = file_info(master)
         self.sync_snapshot(bundle, snapshot)
         self.assertIn('Packed and readable MPC numbers disagree', self.verify(bundle, code=1)['error'])
+
+    def test_resealed_catalog_and_master_reject_additional_gzip_members(self):
+        _, original = self.fixture()
+        for artifact in ('catalog', 'master'):
+            for mtime in (0, 1234567):
+                bundle = self.directory / f'{artifact}-{mtime}'
+                shutil.copytree(original, bundle)
+                path = bundle / f'exports/full/{artifact}.json{"l" if artifact == "master" else ""}.gz'
+                original_payload = gzip.decompress(path.read_bytes())
+                payload = path.read_bytes() + gzip.compress(b'', mtime=mtime)
+                self.assertEqual(gzip.decompress(payload), original_payload)
+                if artifact == 'catalog':
+                    path.write_bytes(payload)
+                    self.reseal_export(bundle, 'full')
+                else:
+                    for profile in (bundle / 'exports').iterdir():
+                        (profile / 'master.jsonl.gz').write_bytes(payload)
+                    snapshot = read_json(bundle / 'snapshot.json')
+                    snapshot['files']['master.jsonl.gz'] = file_info(path)
+                    self.sync_snapshot(bundle, snapshot)
+                before = self.verification_state(bundle)
+                self.assertIn('exactly one member', self.verify(bundle, code=1)['error'])
+                self.assertEqual(self.verification_state(bundle), before)
+
+    def test_stored_master_and_cached_catalog_reject_additional_gzip_members(self):
+        prepared, _ = self.fixture()
+        root = self.directory / 'standalone-exports'
+        exported = self.cli('export', '--store', self.store, '--output', root)
+        cached = Path(exported['path'])
+        catalog = cached / 'catalog.json.gz'
+        catalog.write_bytes(catalog.read_bytes() + gzip.compress(b'', mtime=123))
+        manifest = read_json(cached / 'manifest.json')
+        manifest['artifacts']['catalog.json.gz'].update(file_info(catalog))
+        write_json(cached / 'manifest.json', manifest)
+        (cached / 'SHA256SUMS').write_text(''.join(
+            f"{file_info(cached / name)['sha256']}  {name}\n"
+            for name in sorted([*manifest['artifacts'], 'manifest.json'])))
+        before = self.tree(root)
+        self.assertIn('exactly one member', self.cli('export', '--store', self.store, '--output', root, code=1)['error'])
+        self.assertEqual(self.tree(root), before)
+        source = self.store / 'snapshots' / prepared['snapshot_version']
+        master = source / 'master.jsonl.gz'
+        master.write_bytes(master.read_bytes() + gzip.compress(b'', mtime=123))
+        snapshot = read_json(source / 'snapshot.json')
+        snapshot['files']['master.jsonl.gz'] = file_info(master)
+        write_json(source / 'snapshot.json', snapshot)
+        for command, destination_flag, name in (
+                ('export', '--output', 'fresh-export'), ('build-db', '--database', 'new.sqlite3'),
+                ('prepare-release', '--output', 'fresh-release')):
+            options = ['--producer-commit', '1' * 40] if command == 'prepare-release' else []
+            destination = self.directory / name
+            error = self.cli(command, '--store', self.store, '--snapshot', prepared['snapshot_version'],
+                             destination_flag, destination, *options, code=1)['error']
+            self.assertIn('exactly one member', error)
+            self.assertFalse((destination / 'latest.json').exists())
+            if command == 'build-db': self.assertFalse(destination.exists())

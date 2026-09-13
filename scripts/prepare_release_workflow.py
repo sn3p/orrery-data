@@ -8,12 +8,30 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import unicodedata
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from orrery_data.releases import COMMIT, validate_baseline
 from orrery_data.paths import validate_append_path, validate_writable_path
 from orrery_data.storage import atomic_json, loads_json, writer_lock
+
+
+def paths_overlap(first, second):
+    # Reserve a portable namespace, including paths that do not exist yet.
+    # Deliberately reject case/Unicode-normalization-only distinctions even on
+    # case-sensitive filesystems; those destinations overlap on other runners.
+    names = [Path(unicodedata.normalize("NFC", str(path).casefold())) for path in (first, second)]
+    if names[0].is_relative_to(names[1]) or names[1].is_relative_to(names[0]):
+        return True
+    for path, root in ((first, second), (second, first)):
+        # resolve() follows symlinks but can retain different spelling for the
+        # same existing path on a case-insensitive filesystem.
+        if root.exists():
+            for ancestor in (path, *path.parents):
+                if ancestor.exists() and ancestor.samefile(root):
+                    return True
+    return False
 
 
 def main():
@@ -38,15 +56,31 @@ def main():
         allow = os.environ.get("RELEASE_ALLOW_COUNT_DECREASE", "false")
         if allow not in ("true", "false"):
             raise ValueError("Count decrease input must be true or false")
+        writer_roots = []
         for root in (args.work_dir, args.work_dir / "store", args.work_dir / "releases"):
-            validate_writable_path(root, label="Workflow writer directory")
+            writer_roots.append(validate_writable_path(root, label="Workflow writer directory"))
             validate_append_path(root / ".lock", label="Workflow writer lock")
-        validate_writable_path(args.work_dir / "store/snapshots", label="Workflow snapshots directory")
+        writer_roots.append(validate_writable_path(args.work_dir / "store/snapshots",
+                                                   label="Workflow snapshots directory"))
         for name in ("baseline-counts.json", "prepared-release.json"):
             validate_writable_path(args.work_dir / name, label="Workflow metadata")
+        append_paths = {}
         for key in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"):
             if os.environ.get(key):
-                validate_append_path(os.environ[key], label=key)
+                path = validate_append_path(os.environ[key], label=key)
+                # Check each resolved writer root: store and snapshot children
+                # may point outside work_dir. Append destinations also cannot
+                # occupy a future directory or share a file with each other.
+                for root in writer_roots:
+                    if paths_overlap(path, root):
+                        raise ValueError(f"{key} must not overlap workflow writer paths: {root}")
+                for other_key, other_path in append_paths.items():
+                    if paths_overlap(path, other_path):
+                        raise ValueError(f"{key} must not overlap {other_key}: {other_path}")
+                append_paths[key] = path
+        for key, path in append_paths.items():
+            if not path.parent.is_dir():
+                raise ValueError(f"{key} parent must already exist and be a directory: {path.parent}")
         with writer_lock(args.work_dir):
             return prepare(args, commit, baseline, limits, allow)
     except subprocess.CalledProcessError as exc:

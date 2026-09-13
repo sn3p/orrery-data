@@ -4,7 +4,6 @@ from collections import Counter
 import gzip
 import hashlib
 import http.client
-import os
 from pathlib import Path
 import re
 import shutil
@@ -14,13 +13,13 @@ import zlib
 from . import SCHEMA_VERSION, __version__
 from .formats import DataError, FIELDS, discoveries, master_rows
 from .contracts import URL, validate_contract
-from .metadata import validate_source_metadata
+from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
 from .paths import validate_writable_path
 from .storage import (URLS, acquire, atomic_json, deterministic_gzip, digest, encode,
                       file_info, now, read_json, request, response_metadata,
                       utc_timestamp, validate_file_info, verify_decoded_source, verify_file,
-                      verify_generated_gzip_header, write_json, writer_lock)
+                      verify_generated_gzip, write_json, writer_lock)
 
 
 def current(store):
@@ -215,13 +214,7 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
         raise DataError("Source URLs require mpcorb and numbered")
     for name, url in urls.items():
         URL(url, f"Source URL {name}")
-    if not isinstance(local, dict) or not local.keys() <= URLS.keys():
-        raise DataError("Local sources must contain mpcorb/numbered paths")
-    for name, path in local.items():
-        if path is not None and (not isinstance(path, (str, os.PathLike)) or not os.fspath(path)):
-            raise DataError(f"Local source {name} must be a nonempty path or null")
-    if sum(path is not None for path in local.values()) not in (0, 2):
-        raise DataError("Provide both local mpcorb and numbered paths, or neither")
+    validate_local_sources(local)
     validate_source_metadata(metadata)
     if type(timeout) is not int or timeout <= 0:
         raise DataError("Timeout must be a positive integer")
@@ -288,10 +281,21 @@ def selected_master(path, counts, limit):
     return selected
 
 
+def validate_export_pointer(output):
+    pointer = output / "latest.json"
+    if pointer.exists() or pointer.is_symlink():
+        value = read_json(pointer)
+        if (not isinstance(value, dict) or set(value) != {"data_version"}
+                or not isinstance(value["data_version"], str)
+                or not re.fullmatch(r"export-v1-[a-f0-9]{64}", value["data_version"])):
+            raise DataError("Invalid latest export pointer; use a separate export output root")
+
+
 def export(store, output, version=None, limit=None):
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise DataError("--limit must be a positive integer")
     validate_writable_path(output, label="Export output", protected_roots=(store / "snapshots",))
+    validate_export_pointer(output)
     source, snapshot = load_snapshot(store, version)
     selection = {"profile": "discovery", "limit": limit,
                  "select": "first-known-dates-in-mpcorb-order", "sort": "disc-ascending-stable"}
@@ -299,6 +303,7 @@ def export(store, output, version=None, limit=None):
                 "schema_version": SCHEMA_VERSION, "selection": selection}
     export_version = "export-v1-" + digest(identity)
     with writer_lock(output):
+        validate_export_pointer(output)  # Recheck after excluding cooperating writers.
         destination = output / export_version
         if destination.exists():
             manifest = read_json(destination / "manifest.json")
@@ -325,7 +330,7 @@ def export(store, output, version=None, limit=None):
                 validate_catalog_record(row)
                 if tuple(row[key] for key in FIELDS) != expected:
                     raise DataError("Existing export catalog differs from selected master data")
-            verify_generated_gzip_header(destination / "catalog.json.gz")
+            verify_generated_gzip(destination / "catalog.json.gz")
             with gzip.open(destination / "catalog.json.gz", "rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != file_info(destination / "catalog.json")["sha256"]:
                     raise DataError("Existing compressed catalog differs from JSON")

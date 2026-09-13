@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+import zlib
 from urllib.request import Request, urlopen
 
 from . import __version__
@@ -66,14 +67,27 @@ def verify_file(path, info):
         raise DataError(f"Checksum or size mismatch: {path.name}")
 
 
-def verify_generated_gzip_header(path):
-    # Generated artifacts have no optional header fields or stored filename,
-    # and record mtime=0. Runtime and compression level cannot be inferred
-    # reliably from the stream; source-input gzip has no such header contract.
-    with path.open("rb") as stream:
-        header = stream.read(10)
-    if len(header) != 10 or header[:8] != b"\x1f\x8b\x08\x00\x00\x00\x00\x00":
-        raise DataError(f"Invalid {path.name}: generated gzip requires zero mtime and no optional header fields")
+def verify_generated_gzip(path):
+    # Producers write exactly one member, without optional fields or filename,
+    # and with mtime=0. Check the entire frame, including CRC/trailer and EOF:
+    # gzip.open would transparently accept further members or zero padding.
+    # Bound both compressed input and discarded decompressed output memory.
+    try:
+        with path.open("rb") as stream:
+            header = stream.read(10)
+            if len(header) != 10 or header[:8] != b"\x1f\x8b\x08\x00\x00\x00\x00\x00":
+                raise DataError(f"Invalid {path.name}: generated gzip requires zero mtime and no optional header fields")
+            stream.seek(0)
+            decoder = zlib.decompressobj(wbits=31)
+            while not decoder.eof:
+                chunk = decoder.unconsumed_tail or stream.read(CHUNK)
+                if not chunk:
+                    raise DataError(f"Invalid {path.name}: incomplete generated gzip member")
+                decoder.decompress(chunk, CHUNK)
+            if decoder.unused_data or stream.read(1):
+                raise DataError(f"Invalid {path.name}: generated gzip requires exactly one member and no trailing bytes")
+    except zlib.error as exc:
+        raise DataError(f"Invalid {path.name}: {exc}") from exc
 
 
 def verify_decoded_source(path, info):
