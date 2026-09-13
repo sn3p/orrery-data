@@ -118,8 +118,9 @@ def main(argv=None):
         elif args.command == "prepare-release":
             if bool(args.mpcorb) != bool(args.numbered):
                 raise DataError("Provide both --mpcorb and --numbered, or neither")
-            if args.snapshot and (args.mpcorb or args.source_metadata
-                                  or args.mpcorb_url != URLS["mpcorb"] or args.numbered_url != URLS["numbered"]):
+            if args.snapshot is not None and (
+                    args.mpcorb or args.source_metadata
+                    or args.mpcorb_url != URLS["mpcorb"] or args.numbered_url != URLS["numbered"]):
                 raise DataError("--snapshot cannot be combined with source acquisition options")
             metadata = read_json(args.source_metadata) if args.source_metadata else {}
             validate_source_metadata(metadata)

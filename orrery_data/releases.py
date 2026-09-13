@@ -235,6 +235,8 @@ def verify_release(directory, manifest_sha256=None):
 
 def prepare_release(store, output, producer_commit, *, version=None, limits=None, urls=None,
                     local=None, metadata=None, timeout=60, allow_count_decrease=False, baseline_counts=None):
+    require(version is None or (isinstance(version, str) and re.fullmatch(r"snapshot-v1-" + SHA256, version)),
+            "Snapshot pin must be snapshot-v1- followed by 64 lowercase hexadecimal characters")
     require(isinstance(producer_commit, str) and re.fullmatch(COMMIT, producer_commit),
             "Producer commit must be a full 40-character lowercase Git SHA")
     limits = sorted(set(limits if limits is not None else [100000]))

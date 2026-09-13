@@ -8,6 +8,8 @@ import shutil
 import unittest
 
 import test_releases
+from orrery_data.formats import DataError
+from orrery_data.releases import prepare_release
 from orrery_data.storage import digest, file_info
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,6 +145,49 @@ class ReleaseReview(unittest.TestCase):
                     for root, tree in before.items():
                         self.assertEqual(self.tree(root), tree)
         self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+
+    def test_explicit_snapshot_pins_are_validated_before_side_effects(self):
+        first = self.prepare()
+        before_store, before_output = self.tree(self.store), self.tree(self.output)
+        self.requests.clear()
+        invalid = ("", " ", "current", "../current", "snapshot-v1-" + "a" * 63,
+                   "snapshot-v1-" + "A" * 64, first["snapshot_version"] + "\n")
+        for store in (self.store, self.directory / "missing-store"):
+            for output in (self.output, self.directory / "missing-output"):
+                for value in invalid:
+                    with self.subTest(store=store, output=output, value=value):
+                        error = self.cli("prepare-release", "--store", store, "--output", output,
+                                         "--producer-commit", test_releases.COMMIT, "--snapshot", value, code=1)["error"]
+                        self.assertIn("Snapshot pin must be", error)
+                        self.assertEqual(self.tree(self.store), before_store)
+                        self.assertEqual(self.tree(self.output), before_output)
+                        self.assertFalse((self.directory / "missing-store").exists())
+                        self.assertFalse((self.directory / "missing-output").exists())
+                        self.assertEqual(self.requests, [])
+        # Empty explicitly supplied pins also obey the CLI's acquisition exclusion.
+        error = self.cli("prepare-release", "--store", self.store, "--output", self.output,
+                         "--producer-commit", test_releases.COMMIT, "--snapshot", "", *self.http_args(), code=1)["error"]
+        self.assertIn("--snapshot cannot be combined", error)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.tree(self.store), before_store)
+        self.assertEqual(self.tree(self.output), before_output)
+        # A valid explicit pin ignores even an unusable mutable current pointer.
+        current = self.store / "current.json"
+        pointer = current.read_bytes()
+        current.write_text(json.dumps({"snapshot_version": "snapshot-v1-" + "f" * 64}))
+        try:
+            self.assertEqual(self.prepare(offline=first["snapshot_version"]), first)
+            self.assertEqual(self.requests, [])
+        finally:
+            current.write_bytes(pointer)
+
+    def test_programmatic_snapshot_pins_require_strings(self):
+        for version in (False, True, 0, 1, [], {}, b""):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(DataError, "Snapshot pin must be"):
+                    prepare_release(self.store, self.output, test_releases.COMMIT, version=version)
+                self.assertFalse(self.store.exists())
+                self.assertFalse(self.output.exists())
 
     def test_pinned_snapshot_preserves_original_compression_provenance(self):
         first = self.prepare()

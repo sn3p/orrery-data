@@ -51,8 +51,11 @@ the default selected profile; values are deduplicated and sorted. Each is the
 first N eligible MPCORB records **before** stable discovery-date sorting, just
 like the existing `export --limit`. All supported master records, including
 null discovery dates, remain in SQLite and in each export's master file.
-`--snapshot` cannot be combined with source acquisition arguments. Invalid
-CLI arguments return 2; preparation/verification failures return 1; success
+An explicit `--snapshot` must be `snapshot-v1-` followed by 64 lowercase
+hexadecimal characters. Empty or malformed pins fail before locking or reading
+snapshots; they never fall back to the current snapshot. `--snapshot` cannot be
+combined with source acquisition arguments. Invalid CLI arguments return 2;
+preparation/verification failures return 1; success
 returns 0. Structured command results/errors use the existing JSON boundary.
 
 ## Bundle layout and versions

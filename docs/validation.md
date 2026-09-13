@@ -142,6 +142,9 @@ Additional release CLI regressions cover orbital ranges in full/selected catalog
 strict integer identity schemas and exact identity/producer fields, preservation
 of bundles when an output path is at or beneath a candidate, and differing zlib
 build/runtime versions.
+Empty or malformed explicit snapshot pins fail before locks or snapshot reads,
+preserve existing source/candidate bytes and create no output for missing roots.
+Valid pins remain offline and independent of the mutable current pointer.
 CLI regressions reject identical source/output roots and path aliases before
 refreshing or writing, retain existing sources and candidates, and verify
 recovery with distinct roots and pinned preparation with a shared root.
@@ -192,7 +195,7 @@ The release report identifies the exact producing commit and artifact hashes.
 GitHub-hosted dispatch/upload/download and app rendering are separate,
 unverified surfaces; no manual workflow run or data publication is implied.
 
-The 0.3.0 milestone passed all 80 tests, installed-wheel verification from
+The 0.3.0 milestone passed all 82 tests, installed-wheel verification from
 outside the checkout, independent review and workflow linting. The full saved
 candidate matched every SQLite field and every retained full/100k export
 payload hash. Its original fresh preparation succeeded; the rerun encountered
