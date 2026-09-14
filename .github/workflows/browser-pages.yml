@@ -1,5 +1,13 @@
 name: Publish current browser data
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'data/**'
+      - '.github/workflows/browser-pages.yml'
+      - 'scripts/prepare_browser_site.py'
+      # The verification CLI imports the producer package, including shared validators.
+      - 'orrery_data/**'
   workflow_dispatch:
     inputs:
       force:
@@ -21,27 +29,33 @@ jobs:
     outputs:
       status: ${{ steps.prepare.outputs.status }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          # Compare the complete push range, including pushes with several commits.
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         id: pages
       - name: Verify and stage current data
         id: prepare
         env:
           BASE_URL: ${{ steps.pages.outputs.base_url }}
-          FORCE: ${{ inputs.force }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          PUBLICATION_BASE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
           args=()
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          if [ -n "$PUBLICATION_BASE" ]; then args+=(--publication-base "$PUBLICATION_BASE"); fi
           python scripts/prepare_browser_site.py --output .context/pages-site --latest-url "$BASE_URL/latest.json" "${args[@]}" > result.json
           python -c 'import json; print("status=" + json.load(open("result.json"))["status"])' >> "$GITHUB_OUTPUT"
           cat result.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: steps.prepare.outputs.status == 'prepared'
         with:
           path: .context/pages-site
+          include-hidden-files: true
   deploy:
     needs: prepare
     if: needs.prepare.outputs.status == 'prepared'
@@ -53,5 +67,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment

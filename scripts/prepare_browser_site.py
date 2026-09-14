@@ -10,6 +10,9 @@ import sys
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+# Keep in sync with the workflow's non-data push paths. The CLI imports the
+# producer package transitively; no installation or external config is needed.
+PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
 
 
 def main():
@@ -17,6 +20,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True, help='new, empty staging directory')
     parser.add_argument('--latest-url', help='optional trusted published descriptor to detect an unchanged deployment')
     parser.add_argument('--force', action='store_true')
+    parser.add_argument('--publication-base', help='push before commit; redeploy when publication code changed since it')
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists() or output.is_symlink():
@@ -30,8 +34,16 @@ def main():
         print(result.stderr, file=sys.stderr)
         return result.returncode
     verified = json.loads(result.stdout)
+    force = args.force
+    if args.publication_base is not None:
+        comparison = subprocess.run(
+            ['git', 'diff', '--quiet', '--no-ext-diff', args.publication_base, 'HEAD', '--', *PUBLICATION_PATHS],
+            cwd=ROOT, capture_output=True)
+        # An unavailable base (for example a first/force push) must not silently
+        # skip a publication-code change. Local data has already passed verification.
+        force = force or comparison.returncode != 0
     unchanged = False
-    if args.latest_url and not args.force:
+    if args.latest_url and not force:
         try:
             with urlopen(args.latest_url, timeout=20) as response:
                 current = json.loads(response.read(4097))

@@ -4,8 +4,11 @@ The current browser dataset lives in `data/`. Use `python3 scripts/update_browse
 for a manual, validated update with conditional MPC source reuse, or
 `python3 -m orrery_data verify-browser --directory data` to verify it offline.
 The [browser distribution and Pages workflow](docs/browser-delivery.md) define
-latest discovery, changed-file updates and the consumer migration. Public hosting
-and production consumer adoption require the documented publication steps.
+latest discovery, changed-file updates and the consumer migration. Relevant changes
+on `master` automatically trigger verified publication of the committed dataset to
+[GitHub Pages](https://sn3p.github.io/orrery-data/latest.json). MPC acquisition and
+regeneration remain manual; publication also supports manual dispatch and force.
+Production consumer adoption remains separate application work.
 
 Validated, versioned minor-planet snapshots, local SQLite queries and static
 exports and release candidates for Orrery and Orrery3D. Python 3.11+ on macOS/Linux with its standard
@@ -110,8 +113,10 @@ versions and verification](docs/releases.md).
 Raw inputs, local stores, generated databases and complete exports are ignored by Git;
 the current browser projection in `data/` is tracked.
 This repository does not automatically publish releases or update either app.
-Manual Pages deployment is prepared; hosted verification, release publication, browser SQLite, deltas, sampling, date-range
-UI and app integration remain separate work.
+Pages serves the current dataset, with automatic publication after relevant
+`master` changes and a manual force option. Full hosted acceptance, release
+publication, browser SQLite, deltas, sampling, date-range UI and app integration
+remain separate work.
 
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)
@@ -120,8 +125,8 @@ The [consumer delivery plan](docs/consumer-delivery-plan.md)
 describes the agreed exploration of full-file and indexed loading through
 consumer-owned adapters, with a possible database service later. The optional
 complete producer format remains available for local trials. The current
-[browser distribution](docs/browser-delivery.md) adds latest discovery and manual
-Pages staging; public deployment and production app adoption remain pending.
+[browser distribution](docs/browser-delivery.md) adds latest discovery and verified
+Pages publication; production app adoption remains separate.
 
 ## Attribution
 

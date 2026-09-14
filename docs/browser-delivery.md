@@ -29,7 +29,8 @@ No command makes a Git commit, pushes or publishes data.
 Use one fresh branch/workspace per data-update PR, a descriptive branch and a
 draft PR. Review counts/provenance and the reported added/changed/unchanged/deleted
 files. If the result is unchanged there is no data commit or deployment to make.
-Merge and publication remain explicit owner actions. Never reuse a retired branch.
+Merge remains an explicit owner action; relevant changes on `master` then trigger
+automatic publication as described below. Never reuse a retired branch.
 
 For the first seed or repeatable offline processing:
 
@@ -132,19 +133,63 @@ through their real loader and recovery UI in their own review units.
 
 ## Pages publication and hosted acceptance
 
-After the change is merged, configure the repository's Pages source to GitHub
-Actions and manually run **Publish current browser data** on `master`. The workflow
-verifies data, stages the complete inventory and uses GitHub's Pages artifact/deploy
-actions. It does not refresh sources or change Git. Concurrent deployments queue.
-An equal published latest descriptor skips deployment; `force` permits repair.
+The repository's Pages source is already configured as GitHub Actions, with HTTPS
+enforced. **Publish current browser data** runs automatically on pushes to `master`
+that change any of these paths:
 
-The expected address is `https://sn3p.github.io/orrery-data/latest.json`; it is not
-an available endpoint until Pages setup and publication succeed. No host is enabled
-by generating files. Current Pages size/traffic limits and actual compression,
-MIME types, revalidation, CORS from localhost, decoded hashes and stale-session
-recovery must be verified on that real endpoint before hosted delivery is complete.
-The browser suite uses a separate local data origin with negotiated gzip; that
-establishes adapter behavior, not GitHub's HTTP configuration.
+- `data/**`: committed browser data;
+- `.github/workflows/browser-pages.yml`: publication workflow;
+- `scripts/prepare_browser_site.py`: verification and staging entry point;
+- `orrery_data/**`: the producer package imported by the verification CLI,
+  including its shared validators.
+
+Documentation, tests, consumer code and the manual update script alone do not
+trigger publication. Pull requests, feature-branch pushes and tags do not publish.
+The manual `workflow_dispatch` entry point remains available on `master`; runs
+selected on other branches skip preparation and deployment.
+
+Every eligible run verifies the committed data before staging a complete artifact. A
+data-only push or normal manual run skips upload/deployment when the live
+`latest.json` descriptor equals the committed descriptor. An unavailable or
+invalid live descriptor permits a valid local dataset to be prepared. Invalid
+local hashes or inventory fail before staging, even when forcing deployment.
+
+For push runs, the checkout includes Git history so the stager can compare the
+push's `before` commit with the checked-out `HEAD`, including multi-commit pushes.
+Changes to any of the three publication-code paths above force a redeploy even
+when the descriptor is identical. If that comparison is unavailable (such as a
+first push or an unreachable pre-force-push commit), the run also redeploys the
+verified data. Manual runs keep the existing descriptor no-op behavior; select
+`force: true` to repair or explicitly redeploy unchanged data. A triggered run
+therefore does not always mean a deployment took place; its result is `prepared`
+or `unchanged`.
+
+The workflow uses GitHub's Node 24 checkout/Python/Pages actions and uploads the
+complete inventory plus `.nojekyll`. Preparation has only contents/Pages read
+permissions; deployment retains Pages write/OIDC permissions and the `github-pages`
+environment. The `browser-pages` concurrency group does not cancel a running
+deployment. GitHub can replace a pending run with a newer one; this is not a FIFO
+queue. Publication does not fetch MPC sources, regenerate data, write to Git or
+create releases.
+
+The live discovery address is `https://sn3p.github.io/orrery-data/latest.json`.
+The site root intentionally returns 404 because this data artifact has no
+`index.html`. Initial publication verified descriptor/index/sample integrity,
+JSON MIME types and CORS headers. Full hosted browser, negotiated compression,
+cache freshness and stale-session recovery remain separate acceptance work; the
+local browser suite does not establish GitHub's HTTP configuration. After this
+workflow change lands, inspect its first push-triggered run, deployed commit,
+live descriptor and action-runtime warnings before calling automatic rollout
+verified.
+
+Manual publication from GitHub or the CLI remains available:
+
+```sh
+gh workflow run browser-pages.yml --ref master
+gh workflow run browser-pages.yml --ref master -f force=true
+```
+
+Local staging and browser checks:
 
 ```sh
 python3 scripts/prepare_browser_site.py --output .context/pages-site
