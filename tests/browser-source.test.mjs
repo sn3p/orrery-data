@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import CatalogSource from "../consumer/CatalogSource.js";
 import { serve } from "./http-server.mjs";
 
@@ -58,6 +61,55 @@ test("actual adapter preserves v1 whole/indexed and new browser fixtures", async
   }
   const latestCalls = server.state.calls.filter(call => call.path.endsWith("latest.json"));
   assert.ok(latestCalls.every(call => call.headers["cache-control"]?.includes("no-cache") || call.headers["cache-control"]?.includes("max-age=0")));
+});
+
+test("producer-verified mixed-case source schemes load through both consumer contracts", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "orrery-scheme-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const cli = (...args) => JSON.parse(execFileSync("python3", ["-m", "orrery_data", ...args], { encoding: "utf8" }));
+  const store = path.join(directory, "store"), browser = path.join(directory, "browser");
+  cli("refresh", "--store", store, "--mpcorb", path.join(root, "MPCORB.DAT"),
+    "--numbered", path.join(root, "NumberedMPs.txt"),
+    "--mpcorb-url", "HTTPS://minorplanetcenter.net/iau/MPCORB/MPCORB.DAT.gz",
+    "--numbered-url", "hTtP://minorplanetcenter.net/iau/lists/NumberedMPs.txt");
+  const exported = cli("export", "--store", store, "--output", path.join(directory, "exports"));
+  const indexed = cli("export-indexed", "--export", exported.path, "--output", path.join(directory, "indexed"));
+  cli("verify-indexed", "--bundle", indexed.path);
+  cli("export-browser", "--bundle", indexed.path, "--output", browser);
+  const server = await serve(directory);
+  t.after(server.close);
+  const expected = JSON.parse(await fs.readFile(path.join(exported.path, "catalog.json")));
+  const assertRead = async source => {
+    try {
+      const events = await read(source, { start: 0, end: expected.length });
+      assert.equal(events.at(-1).type, "complete");
+      assert.deepEqual(events.filter(event => event.type === "batch").flatMap(event => event.records), expected);
+    } finally { source.close(); }
+  };
+  const indexURL = server.origin + "/" + path.relative(directory, path.join(indexed.path, "index.json")).split(path.sep).join("/");
+  for (const mode of ["whole", "indexed"]) await assertRead(await CatalogSource.open({ ...indexed.pin, url: indexURL }, { mode }));
+  await assertRead(await CatalogSource.openLatest(server.origin + "/browser/latest.json"));
+
+  // Also check the optional resolved_url field using a standalone distribution
+  // that the producer verifier accepts, with HTTPS and HTTP case variants.
+  const latestPath = path.join(browser, "latest.json");
+  const latest = JSON.parse(await fs.readFile(latestPath));
+  const oldIndex = path.join(browser, latest.index.url);
+  const index = JSON.parse(await fs.readFile(oldIndex));
+  for (const [name, scheme] of [["mpcorb", "HtTpS"], ["numbered", "HTTP"]]) {
+    const source = index.sources[name];
+    source.url = source.url.replace(/^[^:]+/, "https");
+    source.resolved_url = source.url.replace(/^https/, scheme);
+    source.acquisition = "http";
+    source.retrieved_at = "2026-09-14T00:00:00Z";
+  }
+  const bytes = Buffer.from(JSON.stringify(index) + "\n"), sha256 = createHash("sha256").update(bytes).digest("hex");
+  latest.index = { url: `index-${sha256}.json`, sha256, bytes: bytes.length };
+  await fs.writeFile(path.join(browser, latest.index.url), bytes);
+  await fs.writeFile(latestPath, JSON.stringify(latest) + "\n");
+  await fs.unlink(oldIndex);
+  cli("verify-browser", "--directory", browser);
+  await assertRead(await CatalogSource.openLatest(server.origin + "/browser/latest.json"));
 });
 
 test("new sessions revalidate; old sessions fail coherently across replacement and reopen", async t => {
