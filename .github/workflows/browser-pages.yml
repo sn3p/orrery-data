@@ -1,0 +1,54 @@
+name: Publish current browser data
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Redeploy even when the published index is unchanged
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: browser-pages
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.prepare.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/configure-pages@v5
+        id: pages
+      - name: Verify and stage current data
+        id: prepare
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          args=()
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          python scripts/prepare_browser_site.py --output .context/pages-site --latest-url "$BASE_URL/latest.json" "${args[@]}" > result.json
+          python -c 'import json; print("status=" + json.load(open("result.json"))["status"])' >> "$GITHUB_OUTPUT"
+          cat result.json
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.prepare.outputs.status == 'prepared'
+        with:
+          path: .context/pages-site
+  deploy:
+    needs: prepare
+    if: needs.prepare.outputs.status == 'prepared'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

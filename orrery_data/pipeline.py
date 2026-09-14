@@ -16,6 +16,7 @@ from .contracts import URL, identity_digest, validate_contract
 from .metadata import validate_local_sources, validate_source_metadata
 from .records import iter_master, validate_catalog_record
 from .paths import validate_flat_inventory, validate_writable_path
+from .source_cache import cached_source, save_sources
 from .storage import (URLS, acquire, atomic_json, deterministic_gzip, encode,
                       file_info, now, read_json, read_pointer, request, response_metadata,
                       utc_timestamp, validate_file_info, verify_decoded_source, verify_file,
@@ -213,7 +214,7 @@ def check(store, urls, timeout):
             "sources": results}
 
 
-def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
+def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False, reuse_unchanged=False):
     store = Path(store)
     if not isinstance(urls, dict) or urls.keys() != URLS.keys():
         raise DataError("Source URLs require mpcorb and numbered")
@@ -225,6 +226,8 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
         raise DataError("Timeout must be a positive integer")
     if type(allow_count_decrease) is not bool:
         raise DataError("Count decrease override must be boolean")
+    if type(reuse_unchanged) is not bool:
+        raise DataError("Source reuse must be boolean")
     validate_writable_path(store, label="Source store")
     validate_writable_path(store / "snapshots", label="Snapshot output")
     with writer_lock(store):
@@ -233,8 +236,17 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
         snapshots.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".refresh-", dir=store) as temp:
             stage = Path(temp)
-            sources = {name: acquire(name, stage, url, local.get(name), metadata.get(name, {}), timeout)
+            cache = store / "http-cache"
+            sources = {name: acquire(name, stage, url, local.get(name), metadata.get(name, {}), timeout,
+                                    cached_source(cache, name, url) if reuse_unchanged and not local.get(name) else None)
                        for name, url in urls.items()}
+            identity = {"schema_version": SCHEMA_VERSION, "tool_version": __version__,
+                        "sources": {name: info["decoded"]["sha256"] for name, info in sources.items()}}
+            if reuse_unchanged and previous and identity == previous["identity"]:
+                destination = snapshots / previous["snapshot_version"]
+                save_sources(cache, stage, sources)
+                return {"status": "unchanged", "snapshot_version": previous["snapshot_version"],
+                        "counts": previous["counts"], "path": str(destination)}
             discovery = discoveries(stage / "numbered.txt")
             counts, header = Counter(), []
             with deterministic_gzip(stage / "master.jsonl.gz") as target:
@@ -246,8 +258,6 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
                     if counts[key] < previous["counts"][key]:
                         raise DataError(f"{key} decreased from {previous['counts'][key]} to {counts[key]}; "
                                         "inspect sources, then explicitly use --allow-count-decrease if intentional")
-            identity = {"schema_version": SCHEMA_VERSION, "tool_version": __version__,
-                        "sources": {name: info["decoded"]["sha256"] for name, info in sources.items()}}
             version = "snapshot-v1-" + identity_digest("snapshot", identity)
             manifest = {"snapshot_version": version, "identity": identity,
                         "schema_version": SCHEMA_VERSION, "tool_version": __version__,
@@ -266,6 +276,8 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False):
                 _, manifest = load_snapshot(store, version)
             else:
                 stage.rename(destination)
+            if reuse_unchanged:
+                save_sources(cache, destination, manifest["sources"])
             atomic_json(store / "current.json", {"snapshot_version": version})
         return {"status": "unchanged" if previous and previous["snapshot_version"] == version else "updated",
                 "snapshot_version": version, "counts": manifest["counts"], "path": str(destination)}

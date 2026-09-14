@@ -1,5 +1,9 @@
 # Update and release preparation
 
+This page describes complete immutable exports and their original build-time
+integration. For the current shared browser dataset, conditional refresh and
+runtime latest discovery, use [browser distribution](browser-delivery.md).
+
 1. Run `orrery-data check --store .data` and inspect each source result. Save
    stdout to an ignored file if an audit of check times is useful. A HEAD
    request uses validators from the selected snapshot, not a previous check.
@@ -89,7 +93,9 @@ into the app's static build assets, then serve those assets normally. Pin the
 trusted manifest/checksum alongside the version; a checksum downloaded from
 the same untrusted location alone is not authentication. Keep the MPC header,
 notice, master/provenance and consistent manifest available with redistribution.
-The app must not silently follow latest data at page load.
+This pinned build-time path keeps its selected version. Consumers adopting the
+separate browser distribution instead discover latest at session start and pin
+that verified index for the session; see its coherence and recovery requirements.
 
 Orrery and Orrery3D can choose different limits. The full dated saved export is
 a candidate for Orrery3D integration, not a proven browser/GPU capacity. Test

@@ -224,6 +224,9 @@ __marimo__/
 .context/
 .data/
 artifacts/
+.*-browser-lock/
+.browser-*/
+node_modules/
 
 # Generated local SQLite databases, sidecars and interrupted build directories
 *.sqlite
