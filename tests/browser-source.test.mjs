@@ -13,6 +13,25 @@ const read = async (source, range, options) => {
   return result;
 };
 
+test("latest discovery requires HTTPS outside loopback and rejects before fetching", async t => {
+  const reachedFetch = new Error("reached fetch");
+  const fetch = t.mock.method(globalThis, "fetch", async () => { throw reachedFetch; });
+  for (const url of [
+    "http://example.test/latest.json", "http://192.168.1.20/latest.json",
+    "http://localhost.example.test/latest.json", "http://127.0.0.1.example.test/latest.json",
+    "http://example.test/latest.json?next=http://localhost", "http://localhost@example.test/latest.json",
+    "http://user@localhost/latest.json", "https://user@example.test/latest.json",
+    "http://[::]/latest.json", "http://[::ffff:192.0.2.1]/latest.json", "ftp://localhost/latest.json",
+  ]) await assert.rejects(CatalogSource.openLatest(url), /Invalid catalogue latest URL/, url);
+  assert.equal(fetch.mock.callCount(), 0);
+  for (const url of [
+    "https://example.test/latest.json", "http://localhost:8080/latest.json", "http://LOCALHOST./latest.json",
+    "http://127.0.0.1/latest.json", "http://127.25.50.75/latest.json", "http://127.1/latest.json",
+    "http://[::1]/latest.json", "http://[0:0:0:0:0:0:0:1]/latest.json",
+  ]) await assert.rejects(CatalogSource.openLatest(url), error => error === reachedFetch, url);
+  assert.equal(fetch.mock.callCount(), 8);
+});
+
 test("actual adapter preserves v1 whole/indexed and new browser fixtures", async t => {
   const server = await serve(root, { compressed: true });
   t.after(server.close);

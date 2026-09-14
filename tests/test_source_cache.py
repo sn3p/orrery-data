@@ -133,3 +133,33 @@ class SourceCacheCLI(unittest.TestCase):
         metadata.write_text(json.dumps({'numbered': {'sha256': '0' * 64}}))
         self.refresh('--source-metadata', metadata, code=1)
         self.assertEqual(json.loads((self.store / 'current.json').read_bytes())['snapshot_version'], first['snapshot_version'])
+
+    def test_malformed_cached_etags_fall_back_and_repair_without_changing_provenance(self):
+        first = self.refresh()
+        manifest = Path(first['path']) / 'snapshot.json'
+        before = manifest.read_bytes(), manifest.stat().st_mtime_ns
+        metadata_path = self.store / 'http-cache/mpcorb.json'
+        valid = json.loads(metadata_path.read_text())
+        for etag in ('"bad\nvalue"', '"bad\rvalue"', '"bad\tvalue"', '"bad\x00value"',
+                     '"bad\x7fvalue"', '"bad value"', '"bad"value"', '"bad\u0100value"'):
+            with self.subTest(etag=repr(etag)):
+                metadata_path.write_text(json.dumps({**valid, 'etag': etag}))
+                self.calls.clear()
+                result = self.refresh()
+                self.assertEqual(result['status'], 'unchanged')
+                self.assertEqual(result['snapshot_version'], first['snapshot_version'])
+                self.assertEqual(self.calls[0], ('/orbits', None, 200))
+                self.assertEqual(before, (manifest.read_bytes(), manifest.stat().st_mtime_ns))
+                self.assertEqual(json.loads(metadata_path.read_text())['etag'], valid['etag'])
+                self.calls.clear()
+                self.refresh()
+                self.assertEqual(self.calls[0], ('/orbits', valid['etag'], 304))
+
+    def test_valid_empty_and_latin1_etags_remain_usable(self):
+        for etag in ('""', '"!#~\x80\xff"'):
+            with self.subTest(etag=repr(etag)):
+                self.etags['/orbits'] = etag
+                self.refresh()
+                self.calls.clear()
+                self.assertEqual(self.refresh()['status'], 'unchanged')
+                self.assertEqual(self.calls[0], ('/orbits', etag, 304))

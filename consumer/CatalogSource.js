@@ -88,7 +88,11 @@ export async function fetchVerified(ref, url, signal) {
 export default class CatalogSource {
   static async openLatest(url, { signal } = {}) {
     const location = new URL(url);
-    requireValue(["https:", "http:"].includes(location.protocol) && !location.username && !location.password, "latest URL");
+    // URL parsing normalizes IPv4 spellings and compressed IPv6 addresses.
+    const loopback = ["localhost", "localhost.", "[::1]"].includes(location.hostname)
+      || /^127(?:\.\d{1,3}){3}$/.test(location.hostname);
+    requireValue((location.protocol === "https:" || (location.protocol === "http:" && loopback))
+      && !location.username && !location.password, "latest URL (HTTPS required outside loopback)");
     // HTTPS origin is the trust boundary. Revalidate once per new session.
     const response = await fetch(location.href, { signal, cache: "no-cache", redirect: "error" });
     if (!response.ok) throw new Error(`Catalogue discovery failed (${response.status}).`);

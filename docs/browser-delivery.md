@@ -48,7 +48,7 @@ complete export/indexed/release formats and commands remain available.
 
 `refresh --reuse-unchanged` uses a separate verified HTTP cache. Strong ETags can
 produce 304 responses; revalidation retains original acquisition provenance.
-Missing, corrupt, weak-validator or different-URL entries cause a full GET.
+Missing, corrupt, malformed/weak-validator or different-URL entries cause a full GET.
 If a redirect destination changes, a 304 cannot reuse the previous resource's
 validator: the producer retries unconditionally against the selected URL.
 Each 200 body is checked and parsed before activation, and both selected sources
@@ -74,7 +74,8 @@ The fixed discovery URL is `latest.json` at the data site's root:
 hash/length describes decoded bytes. The descriptor has only those fields and
 is at most 4 KiB. Its index is at most 4 MiB, with a content hash in its filename.
 Every new session revalidates latest against its configured trusted HTTPS origin
-(HTTP is permitted for local development), then pins the verified index for its
+(HTTP is permitted only for `localhost`, `localhost.`, IPv4 loopback `127.0.0.0/8`
+or IPv6 loopback `[::1]`), then pins the verified index for its
 lifetime. No polling, automatic source replacement or hard-coded build-time
 dataset hash is needed. The trusted origin authenticates discovery; hashes
 establish consistency, not independent authentication against that origin.

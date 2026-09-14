@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .contracts import SOURCE
 from .formats import DataError
+from .metadata import validate_source_metadata
 from .storage import atomic_json, read_json, verify_file, verify_decoded_source
 
 
@@ -17,9 +18,11 @@ def cached_source(directory, name, url):
             return None
         info = read_json(metadata)
         SOURCE(info, "cached source")
+        # Check the full entity-tag grammar before constructing a request header.
+        validate_source_metadata({name: {"etag": info["etag"]}})
         if (info["url"] != url or info["acquisition"] != "http" or not info["retrieved_at"]
                 or not info.get("resolved_url") or not info["etag"]
-                or not info["etag"].startswith('"') or not info["etag"].endswith('"')):
+                or info["etag"].startswith('W/')):
             return None
         if info["content_length"] is not None and int(info["content_length"]) != info["bytes"]:
             return None

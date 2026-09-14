@@ -27,6 +27,19 @@ try {
       data.state.root = path.resolve("tests/fixtures/browser-v1/ties");
       data.state.delay = 0; data.state.faults.clear();
       await go();
+      const untrustedRequests = [];
+      page.on("request", request => {
+        if (new URL(request.url()).hostname.endsWith("example.test")) untrustedRequests.push(request.url());
+      });
+      for (const url of ["http://catalogue.example.test/latest.json", "http://localhost.example.test/latest.json"]) {
+        const error = await page.evaluate(async url => {
+          const { default: CatalogSource } = await import("/consumer/CatalogSource.js");
+          try { await CatalogSource.openLatest(url); return null; }
+          catch (error) { return error.message; }
+        }, url);
+        assert.match(error, /HTTPS required outside loopback/);
+      }
+      assert.deepEqual(untrustedRequests, []);
       await page.getByRole("button", { name: "Load catalogue", exact: true }).focus();
       await page.keyboard.press("Enter");
       await page.waitForFunction(() => window.result.state === "complete");
@@ -54,7 +67,7 @@ try {
       removedOldFiles = false;
       assert.deepEqual(pageErrors, []);
       assert.deepEqual(consoleErrors, []);
-      reports.push({ browser: name, fixtures: "passed", responsive: "passed", recovery: "passed", pageErrors, consoleErrors, expectedResourceErrors });
+      reports.push({ browser: name, discoveryTrust: "passed", fixtures: "passed", responsive: "passed", recovery: "passed", pageErrors, consoleErrors, expectedResourceErrors });
       if (name === "chromium" && process.env.FULL_BROWSER_DATA) {
         data.state.root = path.resolve(process.env.FULL_BROWSER_DATA);
         data.state.delay = 0;
