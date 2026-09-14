@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Catalogue delivery check</title>
+<style>
+body{font:16px system-ui;max-width:48rem;margin:2rem auto;padding:0 1rem;color:#162330;background:#f6f8fa}
+button{font:inherit;padding:.6rem 1rem;margin:0 .5rem .5rem 0}button:focus-visible{outline:3px solid #0969da;outline-offset:3px}
+output{display:block;margin:1rem 0;overflow-wrap:anywhere}p{line-height:1.5}
+</style>
+<h1>Catalogue delivery check</h1>
+<p>Opens the latest dataset and verifies its complete discovery population.</p>
+<button id="load">Load catalogue</button><button id="cancel" disabled>Cancel</button><button id="reload">Reload latest</button>
+<output id="status" role="status" aria-live="polite">Ready</output>
+<script type="module">
+import CatalogSource from "/consumer/CatalogSource.js";
+const url = new URL(location.href).searchParams.get("latest");
+const status = document.querySelector("#status"), load = document.querySelector("#load"), cancel = document.querySelector("#cancel");
+let source, controller, generation = 0;
+window.result = {};
+async function run() {
+  const token = ++generation;
+  source?.close(); controller?.abort(); controller = new AbortController();
+  status.textContent = "Loading…"; load.disabled = true; cancel.disabled = false;
+  window.result = { state: "loading", committed: 0 };
+  try {
+    source = await CatalogSource.openLatest(url, { signal: controller.signal });
+    const opened = source;
+    window.result.sourceId = source.sourceId;
+    for await (const event of source.read({ start: 0, end: source.info.counts.discovery_export }, { signal: controller.signal })) {
+      if (token !== generation || opened !== source) return;
+      if (event.type === "batch") {
+        if (event.start !== window.result.committed || event.sourceId !== opened.sourceId) throw new Error("Mixed source or gap");
+        window.result.committed = event.end;
+      } else window.result.state = "complete";
+      status.textContent = `Verified ${window.result.committed.toLocaleString("en-US")} objects`;
+    }
+  } catch (error) {
+    if (token !== generation) return;
+    window.result.state = error.name === "AbortError" ? "cancelled" : "error";
+    status.textContent = error.name === "AbortError" ? "Cancelled" : "Dataset unavailable or changed. Reload latest to restart.";
+  } finally {
+    if (token === generation) { load.disabled = false; cancel.disabled = true; }
+  }
+}
+load.onclick = run;
+cancel.onclick = () => controller?.abort();
+document.querySelector("#reload").onclick = run;
+</script></html>

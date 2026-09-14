@@ -17,6 +17,7 @@ from .pipeline import check, export, refresh
 from .storage import URLS, encode, read_json
 from .releases import prepare_release, verify_release
 from .indexed import DEFAULT_CHUNK_BYTES, export_indexed, verify_indexed
+from .browser import export_browser, verify_browser
 
 
 def positive(value):
@@ -66,6 +67,8 @@ def parser():
             cmd.add_argument("--numbered", type=Path, help="import local NumberedMPs (plain or gzip)")
             cmd.add_argument("--source-metadata", type=Path, help="optional per-source JSON provenance and expected hashes")
             cmd.add_argument("--allow-count-decrease", action="store_true", help="accept an inspected reduction in source/eligible counts")
+        if name == "refresh":
+            cmd.add_argument("--reuse-unchanged", action="store_true", help="revalidate verified cached HTTP sources with strong ETags")
         if name in ("export", "build-db", "prepare-release"):
             cmd.add_argument("--snapshot", help=("pin a snapshot for offline preparation; otherwise refresh sources"
                                                 if name == "prepare-release" else "pin a snapshot version (default: current)"))
@@ -110,6 +113,12 @@ def parser():
     indexed_verify = commands.add_parser("verify-indexed")
     indexed_verify.add_argument("--bundle", type=Path, required=True)
     indexed_verify.add_argument("--index-sha256", help="expected index.json hash from a trusted channel")
+    browser = commands.add_parser("export-browser", help="verify and project a full indexed bundle into one current browser tree")
+    browser.add_argument("--bundle", type=Path, required=True)
+    browser.add_argument("--output", type=Path, default=Path("data"))
+    browser_verify = commands.add_parser("verify-browser")
+    browser_verify.add_argument("--directory", type=Path, default=Path("data"))
+    browser_verify.add_argument("--index-sha256")
     return root
 
 
@@ -124,7 +133,8 @@ def main(argv=None):
             metadata = read_json(args.source_metadata) if args.source_metadata else {}
             validate_source_metadata(metadata)
             result = refresh(args.store, {name: getattr(args, name + "_url") for name in URLS},
-                             {name: getattr(args, name) for name in URLS}, metadata, args.timeout, args.allow_count_decrease)
+                             {name: getattr(args, name) for name in URLS}, metadata, args.timeout,
+                             args.allow_count_decrease, args.reuse_unchanged)
         elif args.command == "prepare-release":
             if bool(args.mpcorb) != bool(args.numbered):
                 raise DataError("Provide both --mpcorb and --numbered, or neither")
@@ -146,6 +156,10 @@ def main(argv=None):
             result = export_indexed(args.source_export, args.output, args.chunk_bytes)
         elif args.command == "verify-indexed":
             result = verify_indexed(args.bundle, args.index_sha256)
+        elif args.command == "export-browser":
+            result = export_browser(args.bundle, args.output)
+        elif args.command == "verify-browser":
+            result = verify_browser(args.directory, args.index_sha256)
         elif args.command == "export":
             result = export(args.store, args.output, args.snapshot, args.limit)
         elif args.command == "build-db":

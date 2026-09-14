@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import zlib
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 from . import __version__
 from .formats import DataError
@@ -179,14 +180,14 @@ def response_metadata(response):
             "content_length": response.headers.get("Content-Length")}
 
 
-def request(url, method="GET", timeout=60):
+def request(url, method="GET", timeout=60, headers=None):
     if not url.startswith(("https://", "http://")):
         raise DataError("Source URLs must use HTTP or HTTPS")
     return urlopen(Request(url, method=method, headers={
-        "User-Agent": f"orrery-data/{__version__}", "Accept-Encoding": "identity"}), timeout=timeout)
+        "User-Agent": f"orrery-data/{__version__}", "Accept-Encoding": "identity", **(headers or {})}), timeout=timeout)
 
 
-def acquire(name, stage, url, local, metadata, timeout):
+def acquire(name, stage, url, local, metadata, timeout, cached=None):
     raw = stage / f"{name}.input"
     info = {"url": url, "retrieved_at": None if local else now(), "acquisition": "local" if local else "http",
             "etag": None, "last_modified": None, "content_length": None}
@@ -195,14 +196,32 @@ def acquire(name, stage, url, local, metadata, timeout):
         info.update({k: metadata[k] for k in ("etag", "last_modified", "content_length", "retrieved_at") if k in metadata})
         shutil.copyfile(local, raw)
     else:
-        with request(url, timeout=timeout) as response, raw.open("wb") as target:
-            if response.status != 200:
-                raise DataError(f"{name}: expected HTTP 200, got {response.status}")
-            if response.headers.get("Content-Encoding", "identity") != "identity":
-                raise DataError("Unexpected HTTP content encoding")
-            info.update(response_metadata(response))
-            info["resolved_url"] = response.url
-            shutil.copyfileobj(response, target, CHUNK)
+        headers = {"If-None-Match": cached[1]["etag"]} if cached else {}
+        try:
+            response = request(url, timeout=timeout, headers=headers)
+        except HTTPError as exc:
+            if exc.code != 304 or not cached:
+                raise
+            same_resource = exc.url == cached[1]["resolved_url"]
+            exc.close()
+            if same_resource:
+                shutil.copyfile(cached[0], raw)
+                # Revalidation is not a new acquisition or source publication date.
+                info = dict(cached[1])
+                response = None
+            else:
+                # Entity tags are scoped to a resource. A redirect destination
+                # can reuse the old tag for entirely different content.
+                response = request(url, timeout=timeout)
+        if response is not None:
+            with response, raw.open("wb") as target:
+                if response.status != 200:
+                    raise DataError(f"{name}: expected HTTP 200, got {response.status}")
+                if response.headers.get("Content-Encoding", "identity") != "identity":
+                    raise DataError("Unexpected HTTP content encoding")
+                info.update(response_metadata(response))
+                info["resolved_url"] = response.url
+                shutil.copyfileobj(response, target, CHUNK)
         if info["content_length"] is not None and raw.stat().st_size != int(info["content_length"]):
             raise DataError(f"{name}: truncated HTTP download")
     info.update(file_info(raw))

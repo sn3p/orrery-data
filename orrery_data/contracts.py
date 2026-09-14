@@ -201,11 +201,21 @@ INDEX_FIELDS = {
                          **INDEX_PAYLOAD_FIELDS})),
 }
 INDEX = obj(INDEX_FIELDS)
+BROWSER_FIELDS = {key: value for key, value in INDEX_FIELDS.items()
+                  if key not in ('contract_version', 'full', 'provenance', 'chunks')}
+BROWSER_FIELDS.update({
+    'browser_contract_version': literal(1),
+    'provenance': obj({'header': obj({'url': TEXT, **FILE_FIELDS}),
+                       'notice': obj({'url': TEXT, **FILE_FIELDS})}),
+    'chunks': array(obj({'start': UINT, 'end': UINT, 'first_disc': INDEX_NUMBER, 'last_disc': INDEX_NUMBER,
+                         'url': TEXT, **FILE_FIELDS})),
+})
+BROWSER = obj(BROWSER_FIELDS)
 
 
 def validate_contract(kind, value):
     {'snapshot': SNAPSHOT, 'export': EXPORT, 'database': DATABASE, 'release': RELEASE,
-     'indexed': INDEX}[kind](value, kind)
+     'indexed': INDEX, 'browser': BROWSER}[kind](value, kind)
     sources = value['snapshot']['sources'] if kind == 'database' else value['sources']
     for name, info in sources.items():
         if info['acquisition'] == 'http' and (info['retrieved_at'] is None or 'resolved_url' not in info):
