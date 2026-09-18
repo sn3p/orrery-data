@@ -6,11 +6,12 @@ gzip sidecars and the full master stay in local producer storage. There are no
 permanent deployed version sets or required GitHub Releases. Git history still
 retains previous changed file contents.
 
-The committed seed uses the retained 895,910-record export, not a newly acquired
-MPC snapshot. Run `verify-browser` to inspect its current pin and inventory. Its
-114 JSON chunks total 118,824,783 decoded bytes; HTTP transfer depends on hosting.
+The committed catalogue uses the 18 September 2026 MPCORB refresh and retains
+895,910 discovery-dated records. Run `verify-browser` to inspect its current pin
+and inventory. Its 114 JSON chunks total 118,824,800 decoded bytes; HTTP transfer
+depends on hosting.
 
-## Manual update and review
+## Scheduled and manual update review
 
 Python 3.11+ is sufficient for generation. From a fresh checkout:
 
@@ -44,6 +45,38 @@ python3 scripts/update_browser.py --mpcorb /path/MPCORB.DAT.gz \
 The normal online path requires no local Mac-only bundle. Snapshots, exports and
 the optional HTTP cache live in ignored `.data/` and `artifacts/`. The existing
 complete export/indexed/release formats and commands remain available.
+
+`Refresh MPC browser data` runs each Monday at 18:17 UTC and supports manual
+dispatch. It refuses to start while another `automation/mpc-refresh-*` PR is
+open, restores the verified HTTP source cache, runs the same updater without a
+count-decrease override, verifies the complete browser inventory, and rejects
+any tracked change outside `data/`. It also compares guarded counts with the
+committed browser index, so fresh runners retain the count-decrease gate without
+depending on a cached local snapshot. An unchanged projection creates no branch
+or PR. A changed projection is committed to a unique run-specific branch and
+opened as a draft PR against `master`; it is never pushed directly or auto-merged.
+
+The repository setting that permits `GITHUB_TOKEN` to create pull requests must
+remain enabled. The workflow itself keeps the repository's read-only token
+default and requests only `contents: write` and `pull-requests: write`. GitHub
+requires owner approval before CI created by the workflow's PR event can run.
+A human merge supplies the normal `master` push that triggers Pages; an Actions
+token push does not trigger that publication workflow.
+
+### Cadence decision and measured churn
+
+The first live refresh on 18 September 2026 compared the 12 September MPCORB
+seed with that day's MPCORB while NumberedMPs remained unchanged. The catalogue
+kept 895,910 discovery records in 114 chunks and grew only 161 decoded bytes,
+but orbital changes replaced all 114 content-addressed chunks. The public diff
+was 115 additions, 115 deletions, one changed `latest.json`, and two unchanged
+provenance files. A two-commit isolated Git pack grew by 32,237,619 bytes.
+
+At that measured increment, daily commits project to about 11.77 GB/year and
+weekly commits to about 1.68 GB/year. Daily Git refreshes were therefore
+rejected. Weekly review is the initial balance between MPCORB freshness and
+repository growth; the local/manual path remains available for an urgent orbit
+refresh. This is not a delta format, compaction plan or hosting change.
 
 ## Conditional acquisition
 
@@ -177,10 +210,9 @@ The site root intentionally returns 404 because this data artifact has no
 `index.html`. Initial publication verified descriptor/index/sample integrity,
 JSON MIME types and CORS headers. Full hosted browser, negotiated compression,
 cache freshness and stale-session recovery remain separate acceptance work; the
-local browser suite does not establish GitHub's HTTP configuration. After this
-workflow change lands, inspect its first push-triggered run, deployed commit,
-live descriptor and action-runtime warnings before calling automatic rollout
-verified.
+local browser suite does not establish GitHub's HTTP configuration. The PR6
+push-triggered rollout and live descriptor were verified on 14 September 2026;
+each later data merge remains visible in its own Pages run and live descriptor.
 
 Manual publication from GitHub or the CLI remains available:
 
@@ -202,6 +234,6 @@ FULL_BROWSER_DATA=data npm run test:browser
 The last command verifies the complete committed population in Chromium plus
 fixture lifecycle/desktop/narrow workflows in Chromium, Firefox and WebKit.
 Scientific positional accuracy, physical-device speed and production app GPU
-performance remain separate from distribution correctness. Chunk churn and
-Git storage savings must be measured across real updates; byte-size boundaries
-and old orbital corrections can change many files.
+performance remain separate from distribution correctness. The first real
+refresh churn measurement is recorded above; later byte-size boundaries and old
+orbital corrections can still change a different number of files.

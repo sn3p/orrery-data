@@ -1,13 +1,15 @@
 # Orrery Data
 
-The current browser dataset lives in `data/`. Use `python3 scripts/update_browser.py`
-for a manual, validated update with conditional MPC source reuse, or
+The current browser dataset lives in `data/`. A weekly GitHub Actions job runs
+the existing validated producer and opens a unique draft data PR when the
+browser projection changes. Use `python3 scripts/update_browser.py` for the same
+manual path with conditional MPC source reuse, or
 `python3 -m orrery_data verify-browser --directory data` to verify it offline.
 The [browser distribution and Pages workflow](docs/browser-delivery.md) define
 latest discovery, changed-file updates and the consumer migration. Relevant changes
 on `master` automatically trigger verified publication of the committed dataset to
-[GitHub Pages](https://sn3p.github.io/orrery-data/latest.json). MPC acquisition and
-regeneration remain manual; publication also supports manual dispatch and force.
+[GitHub Pages](https://sn3p.github.io/orrery-data/latest.json). Acquisition also
+supports manual workflow dispatch; publication retains manual dispatch and force.
 Production consumer adoption remains separate application work.
 
 Validated, versioned minor-planet snapshots, local SQLite queries and static
@@ -113,10 +115,11 @@ versions and verification](docs/releases.md).
 Raw inputs, local stores, generated databases and complete exports are ignored by Git;
 the current browser projection in `data/` is tracked.
 This repository does not automatically publish releases or update either app.
-Pages serves the current dataset, with automatic publication after relevant
-`master` changes and a manual force option. Full hosted acceptance, release
-publication, browser SQLite, deltas, sampling, date-range UI and app integration
-remain separate work.
+The weekly acquisition workflow never pushes data directly to `master` or
+auto-merges its draft PR. Pages serves the current dataset, with automatic
+publication after relevant reviewed `master` changes and a manual force option.
+Full hosted acceptance, release publication, browser SQLite, deltas, sampling,
+date-range UI and app integration remain separate work.
 
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)

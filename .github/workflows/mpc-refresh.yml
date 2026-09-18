@@ -1,0 +1,117 @@
+name: Refresh MPC browser data
+
+on:
+  schedule:
+    # Weekly rather than daily: the first real refresh added 32.24 MB to a
+    # packed repository. A non-zero minute avoids GitHub's busiest cron window.
+    - cron: '17 18 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: mpc-browser-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check for an open automated refresh PR
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pending_urls=$(gh pr list --state open --limit 100 \
+            --json baseRefName,headRefName,isCrossRepository,url \
+            --jq '.[] | select(.baseRefName == "master" and .isCrossRepository == false and (.headRefName | startswith("automation/mpc-refresh-"))) | .url')
+          pending_count=$(printf '%s\n' "$pending_urls" | sed '/^$/d' | wc -l | tr -d ' ')
+          if [ "$pending_count" -gt 1 ]; then
+            echo "Found more than one open automated refresh PR; refusing to choose one." >&2
+            printf '%s\n' "$pending_urls" >&2
+            exit 1
+          fi
+          if [ "$pending_count" -eq 1 ]; then
+            echo "open=true" >> "$GITHUB_OUTPUT"
+            echo "A refresh PR is already awaiting review: $pending_urls" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.pending.outputs.open == 'false'
+        with:
+          ref: master
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v7
+        if: steps.pending.outputs.open == 'false'
+        with:
+          python-version: '3.13'
+
+      - name: Restore verified MPC HTTP source cache
+        if: steps.pending.outputs.open == 'false'
+        uses: actions/cache/restore@v6
+        with:
+          path: .data/http-cache
+          key: mpc-http-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mpc-http-${{ runner.os }}-
+
+      - name: Acquire, rebuild and verify browser data
+        if: steps.pending.outputs.open == 'false'
+        run: |
+          mkdir -p .context/scheduled-refresh
+          python3 scripts/update_browser.py > .context/scheduled-refresh/update.json
+          python3 -m orrery_data verify-browser --directory data > .context/scheduled-refresh/verification.json
+
+      - name: Save verified MPC HTTP source cache
+        if: steps.pending.outputs.open == 'false'
+        uses: actions/cache/save@v6
+        with:
+          path: .data/http-cache
+          key: mpc-http-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Prepare the review record
+        if: steps.pending.outputs.open == 'false'
+        id: review
+        run: |
+          python3 scripts/prepare_refresh_pr.py \
+            --refresh-result .context/scheduled-refresh/update.json \
+            --verification-result .context/scheduled-refresh/verification.json \
+            --body .context/scheduled-refresh/pull-request.md \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and open a unique draft PR
+        if: steps.review.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REFRESH_BRANCH: ${{ steps.review.outputs.branch }}
+          PR_TITLE: ${{ steps.review.outputs.title }}
+          PR_BODY: ${{ steps.review.outputs.body }}
+        run: |
+          if git ls-remote --exit-code --heads origin "refs/heads/$REFRESH_BRANCH" >/dev/null 2>&1; then
+            echo "Refusing to reuse existing branch $REFRESH_BRANCH" >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$REFRESH_BRANCH"
+          git add -A -- data
+          git commit -m "$PR_TITLE"
+          git push --set-upstream origin "HEAD:refs/heads/$REFRESH_BRANCH"
+          if ! pr_url=$(gh pr create --draft --base master --head "$REFRESH_BRANCH" \
+            --title "$PR_TITLE" --body-file "$PR_BODY"); then
+            echo "PR creation failed; deleting the branch created by this run." >&2
+            git push origin --delete "$REFRESH_BRANCH" || \
+              echo "Failed to delete orphan branch $REFRESH_BRANCH" >&2
+            exit 1
+          fi
+          echo "Created draft refresh PR: $pr_url" >> "$GITHUB_STEP_SUMMARY"
