@@ -1,9 +1,10 @@
 # Orrery Data
 
 The current browser dataset lives in `data/`. A weekly GitHub Actions job runs
-the existing validated producer and opens a unique draft data PR when the
-browser projection changes. Use `python3 scripts/update_browser.py` for the same
-manual path with conditional MPC source reuse, or
+the existing validated producer and commits changed public files directly to
+`master`; unchanged projections create no commit. It then starts the existing
+Pages publisher for the committed data. Use `python3 scripts/update_browser.py`
+for the same manual path with conditional MPC source reuse, or
 `python3 -m orrery_data verify-browser --directory data` to verify it offline.
 The [browser distribution and Pages workflow](docs/browser-delivery.md) define
 latest discovery, changed-file updates and the consumer migration. Relevant changes
@@ -115,9 +116,12 @@ versions and verification](docs/releases.md).
 Raw inputs, local stores, generated databases and complete exports are ignored by Git;
 the current browser projection in `data/` is tracked.
 This repository does not automatically publish releases or update either app.
-The weekly acquisition workflow never pushes data directly to `master` or
-auto-merges its draft PR. Pages serves the current dataset, with automatic
-publication after relevant reviewed `master` changes and a manual force option.
+The weekly acquisition workflow validates and non-force-pushes changed `data/`
+directly to `master`, then explicitly starts the existing Pages publisher.
+Unchanged data creates no commit and, when the hosted descriptor is current, no
+publication run. A stale hosted copy is reconciled automatically on the next
+run. Validation failures and concurrent `master` updates stop before a push.
+Pages also retains a manual force option.
 Full hosted acceptance, release publication, browser SQLite, deltas, sampling,
 date-range UI and app integration remain separate work.
 

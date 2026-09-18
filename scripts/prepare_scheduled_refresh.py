@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Validate a scheduled browser refresh and prepare its draft-PR metadata."""
+"""Validate a scheduled browser refresh and prepare its commit metadata."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,14 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from orrery_data.paths import path_within, paths_overlap, resolved_path, validate_append_path
+
+
 SUMMARY_FIELDS = ("pin", "records", "chunks", "files", "bytes")
 COUNT_GUARDS = ("orbital_records", "discovery_records", "master_records", "known_discovery")
-REVIEW_COUNTS = (*COUNT_GUARDS, "missing_discovery")
+REQUIRED_COUNTS = (*COUNT_GUARDS, "missing_discovery")
+NONNEGATIVE_SUMMARY_FIELDS = ("records", "chunks", "files", "bytes")
 
 
 def read_json(path, label):
@@ -21,6 +27,43 @@ def read_json(path, label):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"Invalid {label}: {exc}") from exc
+
+
+def validate_result_shape(result, label):
+    if not isinstance(result, dict):
+        raise ValueError(f"{label.title()} result must be an object")
+    if not isinstance(result.get("pin"), dict) or set(result["pin"]) != {"url", "sha256", "bytes"}:
+        raise ValueError(f"{label.title()} result has an invalid pin")
+    pin = result["pin"]
+    digest = pin["sha256"]
+    if (not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
+            or pin["url"] != f"index-{digest}.json"
+            or type(pin["bytes"]) is not int or pin["bytes"] < 0):
+        raise ValueError(f"{label.title()} result has an invalid pin")
+    for field in NONNEGATIVE_SUMMARY_FIELDS:
+        if field not in result or type(result[field]) is not int or result[field] < 0:
+            raise ValueError(f"{label.title()} result has an invalid {field}")
+    if not isinstance(result.get("path"), str) or not result["path"]:
+        raise ValueError(f"{label.title()} result has an invalid path")
+
+
+def validate_append_targets(repository, protected, **targets):
+    repository = resolved_path(repository)
+    protected = [resolved_path(path) for path in protected]
+    resolved_targets = {}
+    for label, path in targets.items():
+        if path is None:
+            continue
+        resolved = resolved_path(path)
+        if path_within(resolved, repository):
+            raise ValueError(f"{label} must be outside the repository worktree")
+        if any(paths_overlap(resolved, candidate)
+               for candidate in (*protected, *resolved_targets.values())):
+            raise ValueError(f"{label} overlaps another helper path")
+        resolved = validate_append_path(path, label=label)
+        if not resolved.parent.is_dir():
+            raise ValueError(f"{label} parent must already exist and be a directory")
+        resolved_targets[label] = resolved
 
 
 def git_paths(repository, *args):
@@ -58,6 +101,8 @@ def inventory_set(values, label):
 
 
 def validate_results(repository, refresh, verification, git_changes):
+    validate_result_shape(refresh, "refresh")
+    validate_result_shape(verification, "verification")
     if refresh.get("status") not in {"updated", "unchanged"}:
         raise ValueError("Refresh result has an invalid status")
     for field in SUMMARY_FIELDS:
@@ -103,6 +148,12 @@ def load_index(repository, pin):
     index_path = (data / name).resolve()
     if index_path.parent != data or not re.fullmatch(r"index-[a-f0-9]{64}\.json", index_path.name):
         raise ValueError("Refresh pin does not reference a root index")
+    try:
+        index_bytes = index_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Invalid browser index: {exc}") from exc
+    if len(index_bytes) != pin["bytes"] or hashlib.sha256(index_bytes).hexdigest() != pin["sha256"]:
+        raise ValueError("Refresh pin does not match the browser index")
     index = read_json(index_path, "browser index")
     for field in ("snapshot_version", "catalog_id", "counts", "sources"):
         if field not in index:
@@ -110,7 +161,7 @@ def load_index(repository, pin):
     counts = index["counts"]
     if not isinstance(counts, dict):
         raise ValueError("Browser index counts must be an object")
-    for key in REVIEW_COUNTS:
+    for key in REQUIRED_COUNTS:
         if key not in counts:
             raise ValueError(f"Browser index is missing required count {key}")
         if type(counts[key]) is not int or counts[key] < 0:
@@ -165,42 +216,6 @@ def source_date(index):
     return max(dates)
 
 
-def run_identity():
-    run_id, attempt = os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if (not re.fullmatch(r"[1-9][0-9]*", run_id)
-            or not re.fullmatch(r"[1-9][0-9]*", attempt)):
-        raise ValueError("GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be positive integers")
-    return run_id, attempt
-
-
-def pull_request_body(index, refresh, run_url):
-    counts, sources, changes = index["counts"], index["sources"], refresh["changes"]
-    lines = [
-        "Automated weekly refresh through the existing MPC producer pipeline.",
-        "",
-        "- Browser records: {:,}".format(refresh["records"]),
-        f"- Chunks/files: {refresh['chunks']} / {refresh['files']}",
-        f"- Snapshot: `{index['snapshot_version']}`",
-        f"- Index: `{refresh['pin']['sha256']}`",
-        "- Orbital / known-discovery / missing-discovery records: "
-        "{:,} / {:,} / {:,}".format(
-            counts["orbital_records"], counts["known_discovery"], counts["missing_discovery"]),
-        f"- MPCORB last modified: {sources['mpcorb']['last_modified']}",
-        f"- NumberedMPs last modified: {sources['numbered']['last_modified']}",
-        "- Public-file churn: {} added, {} changed, {} deleted, {} unchanged".format(
-            len(changes["added"]), len(changes["changed"]),
-            len(changes["deleted"]), len(changes["unchanged"])),
-    ]
-    if run_url:
-        lines.append(f"- Workflow run: {run_url}")
-    lines += [
-        "",
-        "The updater ran without `--allow-count-decrease`; committed counts were rechecked, and `verify-browser` passed before this PR was created.",
-        "This PR is deliberately draft and is never auto-merged. Merging it triggers the existing committed-data Pages publication workflow.",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def append_lines(path, lines):
     with path.open("a", encoding="utf-8") as target:
         target.write("".join(f"{key}={value}\n" for key, value in lines.items()))
@@ -211,12 +226,17 @@ def main():
     parser.add_argument("--repository", type=Path, default=ROOT)
     parser.add_argument("--refresh-result", type=Path, required=True)
     parser.add_argument("--verification-result", type=Path, required=True)
-    parser.add_argument("--body", type=Path, required=True)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--github-summary", type=Path)
     args = parser.parse_args()
     try:
         repository = args.repository.resolve()
+        validate_append_targets(
+            repository,
+            (args.refresh_result, args.verification_result),
+            github_output=args.github_output,
+            github_summary=args.github_summary,
+        )
         refresh = read_json(args.refresh_result, "refresh result")
         verification = read_json(args.verification_result, "verification result")
         git_changes = worktree_changes(repository)
@@ -224,21 +244,12 @@ def main():
         index = load_index(repository, refresh["pin"])
         reject_count_decreases(committed_index(repository), index)
         paths = git_changes["paths"]
-        run_id, attempt = run_identity()
-        branch = f"automation/mpc-refresh-{run_id}-{attempt}"
         title = f"Refresh MPC browser data ({source_date(index)})"
-        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
-        slug = os.environ.get("GITHUB_REPOSITORY", "")
-        run_url = f"{server}/{slug}/actions/runs/{run_id}" if slug else ""
-        body = pull_request_body(index, refresh, run_url)
-        args.body.parent.mkdir(parents=True, exist_ok=True)
-        args.body.write_text(body, encoding="utf-8")
-        outputs = {"changed": str(bool(paths)).lower(), "branch": branch,
-                   "title": title, "body": str(args.body.resolve())}
+        outputs = {"changed": str(bool(paths)).lower(), "title": title}
         if args.github_output:
             append_lines(args.github_output, outputs)
         summary = (f"## MPC browser refresh\n\n"
-                   f"- Result: {'review required' if paths else 'no committed data change'}\n"
+                   f"- Result: {'commit required' if paths else 'no committed data change'}\n"
                    f"- Records: {refresh['records']:,}\n"
                    f"- Chunks: {refresh['chunks']}\n"
                    f"- Index: `{refresh['pin']['sha256']}`\n")
