@@ -60,9 +60,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .data/http-cache
-          key: mpc-http-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mpc-http-${{ runner.os }}-lookup-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            mpc-http-${{ runner.os }}-
+            mpc-http-${{ runner.os }}-content-
 
       - name: Acquire, rebuild and verify browser data
         if: steps.pending.outputs.open == 'false'
@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .data/http-cache
-          key: mpc-http-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mpc-http-${{ runner.os }}-content-${{ hashFiles('.data/http-cache/**') }}
 
       - name: Prepare the review record
         if: steps.pending.outputs.open == 'false'

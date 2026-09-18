@@ -13,6 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SUMMARY_FIELDS = ("pin", "records", "chunks", "files", "bytes")
 COUNT_GUARDS = ("orbital_records", "discovery_records", "master_records", "known_discovery")
+REVIEW_COUNTS = (*COUNT_GUARDS, "missing_discovery")
 
 
 def read_json(path, label):
@@ -26,7 +27,7 @@ def git_paths(repository, *args):
     result = subprocess.run(("git", *args), cwd=repository, capture_output=True)
     if result.returncode:
         raise ValueError(result.stderr.decode(errors="replace").strip() or "Unable to inspect Git changes")
-    return {value.decode() for value in result.stdout.split(b"\0") if value}
+    return {os.fsdecode(value) for value in result.stdout.split(b"\0") if value}
 
 
 def worktree_changes(repository):
@@ -106,6 +107,14 @@ def load_index(repository, pin):
     for field in ("snapshot_version", "catalog_id", "counts", "sources"):
         if field not in index:
             raise ValueError(f"Browser index is missing {field}")
+    counts = index["counts"]
+    if not isinstance(counts, dict):
+        raise ValueError("Browser index counts must be an object")
+    for key in REVIEW_COUNTS:
+        if key not in counts:
+            raise ValueError(f"Browser index is missing required count {key}")
+        if type(counts[key]) is not int or counts[key] < 0:
+            raise ValueError(f"Browser index has an invalid required count {key}")
     return index
 
 
@@ -158,7 +167,8 @@ def source_date(index):
 
 def run_identity():
     run_id, attempt = os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if not run_id.isdigit() or not attempt.isdigit():
+    if (not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or not re.fullmatch(r"[1-9][0-9]*", attempt)):
         raise ValueError("GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be positive integers")
     return run_id, attempt
 

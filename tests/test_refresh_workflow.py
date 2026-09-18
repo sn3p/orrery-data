@@ -7,6 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+from scripts import prepare_refresh_pr as refresh_helper
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +64,7 @@ class RefreshWorkflow(unittest.TestCase):
                                "deleted": ["index-" + "a" * 64 + ".json"] if status == "updated" else []}}
         return refresh, summary
 
-    def run_helper(self, refresh, verification, code=0):
+    def run_helper(self, refresh, verification, code=0, env_updates=None):
         context = self.root / ".context"
         context.mkdir(exist_ok=True)
         refresh_path, verification_path = context / "refresh.json", context / "verification.json"
@@ -70,6 +73,7 @@ class RefreshWorkflow(unittest.TestCase):
         verification_path.write_text(json.dumps(verification), encoding="utf-8")
         env = {**os.environ, "GITHUB_RUN_ID": "12345", "GITHUB_RUN_ATTEMPT": "2",
                "GITHUB_REPOSITORY": "sn3p/orrery-data", "GITHUB_SERVER_URL": "https://github.test"}
+        env.update(env_updates or {})
         result = subprocess.run([
             sys.executable, HELPER, "--repository", self.root,
             "--refresh-result", refresh_path, "--verification-result", verification_path,
@@ -107,6 +111,16 @@ class RefreshWorkflow(unittest.TestCase):
         (self.root / "README.md").write_text("unexpected", encoding="utf-8")
         self.assertIn("outside data/", self.run_helper(refresh, verification, code=1)[0].stderr)
 
+    def test_non_utf8_unexpected_git_path_is_rejected_cleanly(self):
+        outputs = iter((b"unexpected-\xff\0", b"", b"", b""))
+
+        def git_result(args, **_kwargs):
+            return subprocess.CompletedProcess(args, 0, next(outputs), b"")
+
+        with mock.patch.object(refresh_helper.subprocess, "run", side_effect=git_result):
+            with self.assertRaisesRegex(ValueError, "outside data/"):
+                refresh_helper.worktree_changes(self.root)
+
     def test_fresh_runner_rejects_decrease_from_committed_index(self):
         pin = self.write_data("b" * 64, "2026-09-18T12:34:56Z")
         index = self.root / "data" / pin["url"]
@@ -119,6 +133,31 @@ class RefreshWorkflow(unittest.TestCase):
         (self.root / "data/latest.json").write_text(json.dumps(latest), encoding="utf-8")
         refresh, verification = self.results(pin)
         self.assertIn("decreased from committed 3 to 2", self.run_helper(refresh, verification, code=1)[0].stderr)
+
+    def test_pr_metadata_count_is_validated(self):
+        pin = self.write_data("b" * 64, "2026-09-18T12:34:56Z")
+        index = self.root / "data" / pin["url"]
+        value = json.loads(index.read_text())
+        del value["counts"]["missing_discovery"]
+        index.write_text(json.dumps(value), encoding="utf-8")
+        pin["bytes"] = index.stat().st_size
+        latest = json.loads((self.root / "data/latest.json").read_text())
+        latest["index"] = pin
+        (self.root / "data/latest.json").write_text(json.dumps(latest), encoding="utf-8")
+        refresh, verification = self.results(pin)
+        result = self.run_helper(refresh, verification, code=1)[0]
+        self.assertIn("missing required count missing_discovery", result.stderr)
+
+    def test_run_identity_requires_positive_ascii_integers(self):
+        pin = self.write_data("b" * 64, "2026-09-18T12:34:56Z")
+        refresh, verification = self.results(pin)
+        for environment in (
+                {"GITHUB_RUN_ID": "0"}, {"GITHUB_RUN_ATTEMPT": "0"},
+                {"GITHUB_RUN_ID": "１２３"}):
+            with self.subTest(environment=environment):
+                result = self.run_helper(
+                    refresh, verification, code=1, env_updates=environment)[0]
+                self.assertIn("must be positive integers", result.stderr)
 
     def test_status_and_reported_inventory_must_match_git(self):
         pin = self.write_data("b" * 64, "2026-09-18T12:34:56Z")
@@ -137,12 +176,16 @@ class RefreshWorkflow(unittest.TestCase):
             "automation/mpc-refresh-", "python3 scripts/update_browser.py",
             "python3 -m orrery_data verify-browser --directory data", "gh pr create --draft --base master",
             "actions/cache/restore@v6", "actions/cache/save@v6", "path: .data/http-cache",
+            "mpc-http-${{ runner.os }}-lookup-${{ github.run_id }}-${{ github.run_attempt }}",
+            "mpc-http-${{ runner.os }}-content-", "hashFiles('.data/http-cache/**')",
             "if: github.ref == 'refs/heads/master'", "ref: master", ".isCrossRepository == false",
             "git push origin --delete \"$REFRESH_BRANCH\"",
         ):
             self.assertIn(required, workflow)
         self.assertNotIn("--allow-count-decrease", workflow)
         self.assertNotIn("git push origin master", workflow)
+        self.assertNotIn(
+            "key: mpc-http-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}", workflow)
 
 
 if __name__ == "__main__":
