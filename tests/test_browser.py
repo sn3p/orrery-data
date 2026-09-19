@@ -48,8 +48,8 @@ class BrowserCLI(unittest.TestCase):
         latest = json.loads((self.output / 'latest.json').read_bytes())
         return json.loads((self.output / latest['index']['url']).read_bytes())
 
-    def stamped_bundle(self, retrieved_at, last_modified=None, digest=None):
-        bundle = self.root / f'bundle-{retrieved_at}-{last_modified}-{digest}'
+    def stamped_bundle(self, retrieved_at, last_modified=None, digest=None, http=False, etag=None):
+        bundle = self.root / f'bundle-{retrieved_at}-{last_modified}-{digest}-{http}-{etag}'
         shutil.copytree(FIX / 'consumer-v1/ties', bundle)
 
         def stamp_sources(value):
@@ -60,6 +60,11 @@ class BrowserCLI(unittest.TestCase):
                 if digest is not None:
                     info['sha256'] = digest
                     info['decoded'] = {**info['decoded'], 'sha256': digest}
+                if http:
+                    info['acquisition'] = 'http'
+                    info['resolved_url'] = info['url']
+                if etag is not None:
+                    info['etag'] = etag
 
         manifest_path = bundle / 'full/manifest.json'
         manifest = json.loads(manifest_path.read_bytes())
@@ -151,6 +156,52 @@ class BrowserCLI(unittest.TestCase):
         current['snapshot_version'] = 'snapshot-v1-' + 'e' * 64
         preserve_equal_acquisition_clocks(current, previous)
         self.assertEqual(current['sources']['mpcorb']['retrieved_at'], '2026-09-19T07:28:34Z')
+
+    def test_changed_acquisition_or_etag_does_not_inherit_previous_clock(self):
+        previous = {
+            'snapshot_version': 'snapshot-v1-' + 'a' * 64,
+            'catalog_id': 'export-v1-' + 'a' * 64,
+            'chunks': [{'sha256': 'b' * 64}],
+            'sources': {'mpcorb': {
+                'url': 'https://example.test/mpcorb', 'sha256': 'c' * 64, 'bytes': 1,
+                'last_modified': None, 'etag': None, 'acquisition': 'local',
+                'retrieved_at': None, 'compression': 'none',
+                'decoded': {'sha256': 'c' * 64, 'bytes': 1},
+            }},
+        }
+        http = {
+            'snapshot_version': previous['snapshot_version'],
+            'catalog_id': previous['catalog_id'],
+            'chunks': previous['chunks'],
+            'sources': {'mpcorb': {
+                **previous['sources']['mpcorb'], 'acquisition': 'http',
+                'resolved_url': 'https://example.test/mpcorb',
+                'retrieved_at': '2026-09-19T07:28:34Z',
+            }},
+        }
+        preserve_equal_acquisition_clocks(http, previous)
+        self.assertEqual(http['sources']['mpcorb']['retrieved_at'], '2026-09-19T07:28:34Z')
+        tagged = json.loads(json.dumps(http))
+        tagged['sources']['mpcorb']['etag'] = '"changed"'
+        tagged['sources']['mpcorb']['retrieved_at'] = '2026-09-19T08:00:00Z'
+        preserve_equal_acquisition_clocks(tagged, http)
+        self.assertEqual(tagged['sources']['mpcorb']['retrieved_at'], '2026-09-19T08:00:00Z')
+
+        local = self.cli('export-browser', '--bundle', FIX / 'consumer-v1/ties', '--output', self.output)
+        migrated = self.cli(
+            'export-browser', '--bundle',
+            self.stamped_bundle('2026-09-19T07:28:34Z', http=True, etag='"v1"'),
+            '--output', self.output)
+        self.assertEqual(migrated['status'], 'updated')
+        self.assertNotEqual(local['pin'], migrated['pin'])
+        self.assertEqual(self.public_index()['sources']['mpcorb']['acquisition'], 'http')
+        self.assertEqual(self.public_index()['sources']['mpcorb']['retrieved_at'], '2026-09-19T07:28:34Z')
+        retagged = self.cli(
+            'export-browser', '--bundle',
+            self.stamped_bundle('2026-09-19T08:00:00Z', http=True, etag='"v2"'),
+            '--output', self.output)
+        self.assertEqual(retagged['status'], 'updated')
+        self.assertEqual(self.public_index()['sources']['mpcorb']['retrieved_at'], '2026-09-19T08:00:00Z')
 
     def test_empty_removes_obsolete_files_and_keeps_identical_notice(self):
         self.project()

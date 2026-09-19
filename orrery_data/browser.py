@@ -132,10 +132,10 @@ def published_index(directory):
 
 
 def preserve_equal_acquisition_clocks(index, previous):
-    """Keep public retrieval clocks when catalogue and source identity match.
+    """Keep public retrieval clocks when only those clocks would change.
 
-    Fresh runners rebuild snapshots with a new retrieved_at even when SHA-256
-    and Last-Modified are unchanged. That clock is not catalogue identity.
+    Fresh runners rebuild snapshots with a new retrieved_at even when every
+    other source field is unchanged. That clock is not catalogue identity.
     """
     if previous is None:
         return
@@ -153,7 +153,8 @@ def preserve_equal_acquisition_clocks(index, previous):
         old = previous_sources.get(name)
         if not isinstance(info, dict) or not isinstance(old, dict):
             continue
-        if info.get('sha256') != old.get('sha256') or info.get('last_modified') != old.get('last_modified'):
+        if {key: value for key, value in info.items() if key != 'retrieved_at'} != {
+                key: value for key, value in old.items() if key != 'retrieved_at'}:
             continue
         info['retrieved_at'] = old.get('retrieved_at')
 

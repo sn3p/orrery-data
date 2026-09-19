@@ -53,15 +53,16 @@ rejects any tracked change outside `data/`. It also compares guarded counts with
 the committed browser index, so fresh runners retain the count-decrease gate
 without depending on a cached local snapshot.
 
-An unchanged projection creates no commit. Equal source SHA-256 / last-modified
-with unchanged snapshot and chunks keeps the previous public-index retrieval
-timestamps, so a re-fetch does not rehash `latest.json` or look like a new
-catalogue to consumers. When its descriptor already matches the hosted
-descriptor, it also does not start Pages. A changed projection stages only
-`data/`, creates one dated commit on the checked-out `master`, and pushes it
-directly with an ordinary non-force push. If `master` advanced during
-acquisition, the push is non-fast-forward and fails; the job does not rebase,
-force-push or retry stale output.
+An unchanged projection creates no commit. When the rebuilt public index would
+differ only in retrieval timestamps, those clocks are kept so a re-fetch does
+not rehash `latest.json` or look like a new catalogue to consumers. Source
+SHA-256 / last-modified identity is not enough by itself if URL, ETag,
+acquisition or other provenance fields also moved. When its descriptor already
+matches the hosted descriptor, it also does not start Pages. A changed
+projection stages only `data/`, creates one dated commit on the checked-out
+`master`, and pushes it directly with an ordinary non-force push. If `master`
+advanced during acquisition, the push is non-fast-forward and fails; the job
+does not rebase, force-push or retry stale output.
 
 After acquire and `verify-browser`, the workflow inventories `data/` in Git.
 When that inventory is empty it skips Python 3.11, 3.12, 3.13 and the Node
@@ -111,8 +112,8 @@ validator: the producer retries unconditionally against the selected URL.
 Each 200 body is checked and parsed before activation, and both selected sources
 must validate. Identical decoded sources/settings reuse the existing snapshot.
 A fresh runner without that snapshot still records a new retrieval clock locally,
-but the public browser index keeps the previous `retrieved_at` when source
-SHA-256, last-modified, snapshot identity and chunks are unchanged.
+but the public browser index keeps the previous `retrieved_at` when the rebuilt
+index would otherwise differ only in that clock.
 An invalid immutable snapshot remains an error; cache repair does not repair
 damaged authoritative snapshots. Plain `refresh` retains its full-GET behavior.
 
