@@ -270,11 +270,18 @@ class RefreshWorkflow(unittest.TestCase):
 
         checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
         self.assertEqual(checkout["with"]["ref"], "master")
-        setup_versions = [
-            step["with"]["python-version"] for step in steps
+        self.assertNotIn("if", checkout)
+        setup_python = [
+            step for step in steps
             if step.get("uses", "").startswith("actions/setup-python@")
         ]
-        self.assertEqual(setup_versions, ["3.13", "3.11", "3.12", "3.13"])
+        self.assertEqual(
+            [step["with"]["python-version"] for step in setup_python],
+            ["3.13", "3.11", "3.12", "3.13"],
+        )
+        self.assertNotIn("if", setup_python[0])
+        for step in setup_python[1:]:
+            self.assertEqual(step["if"], "steps.validation.outputs.changed == 'true'")
 
         restore = named_steps["Restore verified MPC HTTP source cache"]
         self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
@@ -289,23 +296,33 @@ class RefreshWorkflow(unittest.TestCase):
         self.assertEqual(saved["with"]["path"], ".data/http-cache")
         self.assertIn("hashFiles('.data/http-cache/**')", saved["with"]["key"])
 
-        acquire = named_steps["Acquire, rebuild and verify browser data"]["run"]
-        self.assertIn("python3 scripts/update_browser.py", acquire)
-        self.assertIn("python3 -m orrery_data verify-browser --directory data", acquire)
+        acquire = named_steps["Acquire, rebuild and verify browser data"]
+        self.assertNotIn("if", acquire)
+        self.assertIn("python3 scripts/update_browser.py", acquire["run"])
+        self.assertIn("python3 -m orrery_data verify-browser --directory data", acquire["run"])
+        validation = named_steps["Validate the scheduled update"]
+        self.assertEqual(validation["id"], "validation")
+        self.assertNotIn("if", validation)
+        self.assertIn("python3 scripts/prepare_scheduled_refresh.py", validation["run"])
         for version in ("3.11", "3.12", "3.13"):
             test_step = named_steps[f"Test on Python {version}"]
+            self.assertEqual(test_step["if"], "steps.validation.outputs.changed == 'true'")
             self.assertIn("python -m pip install '.[test]'", test_step["run"])
             self.assertIn("python -m unittest discover -s tests -v", test_step["run"])
+        for name in (
+            "Set up Python 3.11 regression boundary", "Set up Python 3.12 regression boundary",
+            "Restore Python 3.13 regression boundary", "Set up Node regression boundary",
+        ):
+            self.assertEqual(named_steps[name]["if"], "steps.validation.outputs.changed == 'true'")
         browser_test = named_steps["Test browser source integration"]
+        self.assertEqual(browser_test["if"], "steps.validation.outputs.changed == 'true'")
         self.assertEqual(browser_test["env"]["FULL_BROWSER_DATA"], "data")
         self.assertIn("npm ci", browser_test["run"])
         self.assertIn("npm test", browser_test["run"])
 
-        validation = named_steps["Validate the scheduled update"]
-        self.assertEqual(validation["id"], "validation")
-        self.assertIn("python3 scripts/prepare_scheduled_refresh.py", validation["run"])
         publication = named_steps["Reconcile committed and published browser data"]
         self.assertEqual(publication["id"], "publication")
+        self.assertNotIn("if", publication)
         self.assertIn("python3 scripts/prepare_browser_site.py", publication["run"])
         commit = named_steps["Commit and push changed browser data"]
         self.assertEqual(commit["if"], "steps.validation.outputs.changed == 'true'")
@@ -320,6 +337,14 @@ class RefreshWorkflow(unittest.TestCase):
                 "--allow-count-decrease", "pull-requests: write", "gh pr create",
                 "automation/mpc-refresh-", "git push --force"):
             self.assertNotIn(forbidden, workflow_commands)
+        self.assertLess(
+            names.index("Acquire, rebuild and verify browser data"),
+            names.index("Validate the scheduled update"),
+        )
+        self.assertLess(
+            names.index("Validate the scheduled update"),
+            names.index("Set up Python 3.11 regression boundary"),
+        )
         commit_index = names.index("Commit and push changed browser data")
         for prerequisite in (
             "Test on Python 3.11", "Test on Python 3.12", "Test on Python 3.13",
