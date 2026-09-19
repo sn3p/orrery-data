@@ -1,0 +1,147 @@
+name: Refresh MPC browser data
+
+on:
+  schedule:
+    # Weekly rather than daily: the first real refresh added 32.24 MB to a
+    # packed repository. A non-zero minute avoids GitHub's busiest cron window.
+    - cron: '17 18 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pages: read
+
+concurrency:
+  group: mpc-browser-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Restore verified MPC HTTP source cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .data/http-cache
+          key: mpc-http-${{ runner.os }}-lookup-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mpc-http-${{ runner.os }}-content-
+
+      - name: Acquire, rebuild and verify browser data
+        run: |
+          mkdir -p .context/scheduled-refresh
+          python3 scripts/update_browser.py > .context/scheduled-refresh/update.json
+          python3 -m orrery_data verify-browser --directory data > .context/scheduled-refresh/verification.json
+
+      - name: Save verified MPC HTTP source cache
+        uses: actions/cache/save@v6
+        with:
+          path: .data/http-cache
+          key: mpc-http-${{ runner.os }}-content-${{ hashFiles('.data/http-cache/**') }}
+
+      - name: Set up Python 3.11 regression boundary
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Test on Python 3.11
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Set up Python 3.12 regression boundary
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Test on Python 3.12
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Restore Python 3.13 regression boundary
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Test on Python 3.13
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Set up Node regression boundary
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Test browser source integration
+        env:
+          FULL_BROWSER_DATA: data
+        run: |
+          npm ci
+          npm test
+
+      - name: Validate the scheduled update
+        id: validation
+        run: |
+          python3 scripts/prepare_scheduled_refresh.py \
+            --refresh-result .context/scheduled-refresh/update.json \
+            --verification-result .context/scheduled-refresh/verification.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Read the Pages configuration
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Reconcile committed and published browser data
+        id: publication
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          python3 scripts/prepare_browser_site.py \
+            --output .context/scheduled-refresh/pages-site \
+            --latest-url "$BASE_URL/latest.json" \
+            > .context/scheduled-refresh/publication.json
+          python3 -c 'import json; print("status=" + json.load(open(".context/scheduled-refresh/publication.json"))["status"])' >> "$GITHUB_OUTPUT"
+          cat .context/scheduled-refresh/publication.json
+
+      - name: Commit and push changed browser data
+        if: steps.validation.outputs.changed == 'true'
+        env:
+          COMMIT_TITLE: ${{ steps.validation.outputs.title }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- data
+          git diff --cached --quiet && {
+            echo "Validation reported changes but no data changes were staged." >&2
+            exit 1
+          }
+          git commit -m "$COMMIT_TITLE"
+          git push origin HEAD:refs/heads/master
+          echo "Committed and pushed verified browser data: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the committed browser data
+        if: steps.publication.outputs.status == 'prepared'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run browser-pages.yml --ref master -f force=false
+          echo "Dispatched the existing Pages publisher for the committed data." >> "$GITHUB_STEP_SUMMARY"

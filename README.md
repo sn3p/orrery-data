@@ -1,13 +1,16 @@
 # Orrery Data
 
-The current browser dataset lives in `data/`. Use `python3 scripts/update_browser.py`
-for a manual, validated update with conditional MPC source reuse, or
+The current browser dataset lives in `data/`. A weekly GitHub Actions job runs
+the existing validated producer and commits changed public files directly to
+`master`; unchanged projections create no commit. It then starts the existing
+Pages publisher for the committed data. Use `python3 scripts/update_browser.py`
+for the same manual path with conditional MPC source reuse, or
 `python3 -m orrery_data verify-browser --directory data` to verify it offline.
 The [browser distribution and Pages workflow](docs/browser-delivery.md) define
 latest discovery, changed-file updates and the consumer migration. Relevant changes
 on `master` automatically trigger verified publication of the committed dataset to
-[GitHub Pages](https://sn3p.github.io/orrery-data/latest.json). MPC acquisition and
-regeneration remain manual; publication also supports manual dispatch and force.
+[GitHub Pages](https://sn3p.github.io/orrery-data/latest.json). Acquisition also
+supports manual workflow dispatch; publication retains manual dispatch and force.
 Production consumer adoption remains separate application work.
 
 Validated, versioned minor-planet snapshots, local SQLite queries and static
@@ -30,7 +33,7 @@ whose work makes these datasets possible.
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[test]'
 python -m unittest discover -s tests -v
 ```
 
@@ -113,10 +116,14 @@ versions and verification](docs/releases.md).
 Raw inputs, local stores, generated databases and complete exports are ignored by Git;
 the current browser projection in `data/` is tracked.
 This repository does not automatically publish releases or update either app.
-Pages serves the current dataset, with automatic publication after relevant
-`master` changes and a manual force option. Full hosted acceptance, release
-publication, browser SQLite, deltas, sampling, date-range UI and app integration
-remain separate work.
+The weekly acquisition workflow validates and non-force-pushes changed `data/`
+directly to `master`, then explicitly starts the existing Pages publisher.
+Unchanged data creates no commit and, when the hosted descriptor is current, no
+publication run. A stale hosted copy is reconciled automatically on the next
+run. Validation failures and concurrent `master` updates stop before a push.
+Pages also retains a manual force option.
+Full hosted acceptance, release publication, browser SQLite, deltas, sampling,
+date-range UI and app integration remain separate work.
 
 [Schema and units](docs/schema.md) · [Repeatable updates and pinned artifacts](docs/workflow.md)
 · [Validation and saved-source regression](docs/validation.md)

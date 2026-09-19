@@ -163,3 +163,28 @@ test("cancelling a read leaves another read usable; closing rejects stale work",
   source.close();
   await assert.rejects(stale, error => error.name === "AbortError");
 });
+
+if (process.env.FULL_BROWSER_DATA) test("complete candidate traverses through the production consumer adapter", async t => {
+  const directory = path.resolve(process.env.FULL_BROWSER_DATA);
+  const server = await serve(directory, { compressed: true });
+  t.after(server.close);
+  const source = await CatalogSource.openLatest(server.origin + "/latest.json");
+  let committed = 0, batches = 0;
+  try {
+    for await (const event of source.read({ start: 0, end: source.info.counts.discovery_export })) {
+      if (event.type === "batch") {
+        assert.equal(event.start, committed);
+        assert.equal(event.records.length, event.end - event.start);
+        committed = event.end;
+        batches++;
+      } else {
+        assert.equal(event.type, "complete");
+        assert.equal(event.end, source.info.counts.discovery_export);
+      }
+    }
+    assert.equal(committed, source.info.counts.discovery_export);
+    assert.equal(batches, source.info.chunks.length);
+    assert.equal(new Set(server.state.calls.filter(call => call.path.startsWith("/chunks/"))
+      .map(call => call.path)).size, source.info.chunks.length);
+  } finally { source.close(); }
+});
