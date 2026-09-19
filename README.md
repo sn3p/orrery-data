@@ -33,7 +33,7 @@ whose work makes these datasets possible.
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[test]'
 python -m unittest discover -s tests -v
 ```
 

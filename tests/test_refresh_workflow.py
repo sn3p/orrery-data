@@ -10,6 +10,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import yaml
+
 from scripts import prepare_scheduled_refresh as refresh_helper
 
 
@@ -136,6 +138,16 @@ class RefreshWorkflow(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside data/"):
                 refresh_helper.worktree_changes(self.root)
 
+    def test_data_root_git_path_is_rejected_cleanly(self):
+        outputs = iter((b"data\0", b"", b"", b""))
+
+        def git_result(args, **_kwargs):
+            return subprocess.CompletedProcess(args, 0, next(outputs), b"")
+
+        with mock.patch.object(refresh_helper.subprocess, "run", side_effect=git_result):
+            with self.assertRaisesRegex(ValueError, "outside data/"):
+                refresh_helper.worktree_changes(self.root)
+
     def test_fresh_runner_rejects_decrease_from_committed_index(self):
         pin = self.write_data("b" * 64, "2026-09-18T12:34:56Z")
         index = self.root / "data" / pin["url"]
@@ -239,46 +251,83 @@ class RefreshWorkflow(unittest.TestCase):
         self.assertIn("added inventory disagrees", self.run_helper(refresh, verification, code=1)[0].stderr)
 
     def test_workflow_commits_data_and_dispatches_pages_with_failure_gates(self):
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        for required in (
-            "cron: '17 18 * * 1'", "workflow_dispatch:", "actions: write", "contents: write", "pages: read",
-            "python3 scripts/update_browser.py", "python3 scripts/prepare_scheduled_refresh.py",
-            "python3 -m orrery_data verify-browser --directory data", "git add -A -- data",
-            "git push origin HEAD:refs/heads/master",
-            "gh workflow run browser-pages.yml --ref master -f force=false",
-            "python -m unittest discover -s tests -v", "npm ci", "npm test", "FULL_BROWSER_DATA: data",
-            "python-version: '3.11'", "python-version: '3.12'", "python-version: '3.13'",
-            "python3 scripts/prepare_browser_site.py", "id: publication",
-            "if: steps.publication.outputs.status == 'prepared'",
-            "actions/cache/restore@v6", "actions/cache/save@v6", "path: .data/http-cache",
+        workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        self.assertEqual(workflow["on"]["schedule"], [{"cron": "17 18 * * 1"}])
+        self.assertIn("workflow_dispatch", workflow["on"])
+        self.assertEqual(
+            workflow["permissions"],
+            {"actions": "write", "contents": "write", "pages": "read"},
+        )
+
+        self.assertEqual(set(workflow["jobs"]), {"refresh"})
+        job = workflow["jobs"]["refresh"]
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/master'")
+        self.assertNotIn("permissions", job)
+        steps = job["steps"]
+        names = [step.get("name") for step in steps]
+        named_steps = {step["name"]: step for step in steps if "name" in step}
+        self.assertEqual(len(named_steps), len([name for name in names if name]))
+
+        checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+        self.assertEqual(checkout["with"]["ref"], "master")
+        setup_versions = [
+            step["with"]["python-version"] for step in steps
+            if step.get("uses", "").startswith("actions/setup-python@")
+        ]
+        self.assertEqual(setup_versions, ["3.13", "3.11", "3.12", "3.13"])
+
+        restore = named_steps["Restore verified MPC HTTP source cache"]
+        self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
+        self.assertEqual(restore["with"]["path"], ".data/http-cache")
+        self.assertEqual(
+            restore["with"]["key"],
             "mpc-http-${{ runner.os }}-lookup-${{ github.run_id }}-${{ github.run_attempt }}",
-            "mpc-http-${{ runner.os }}-content-", "hashFiles('.data/http-cache/**')",
-            "if: github.ref == 'refs/heads/master'", "ref: master",
-            "if: steps.validation.outputs.changed == 'true'",
-        ):
-            self.assertIn(required, workflow)
+        )
+        self.assertEqual(restore["with"]["restore-keys"].strip(), "mpc-http-${{ runner.os }}-content-")
+        saved = named_steps["Save verified MPC HTTP source cache"]
+        self.assertTrue(saved["uses"].startswith("actions/cache/save@"))
+        self.assertEqual(saved["with"]["path"], ".data/http-cache")
+        self.assertIn("hashFiles('.data/http-cache/**')", saved["with"]["key"])
+
+        acquire = named_steps["Acquire, rebuild and verify browser data"]["run"]
+        self.assertIn("python3 scripts/update_browser.py", acquire)
+        self.assertIn("python3 -m orrery_data verify-browser --directory data", acquire)
+        for version in ("3.11", "3.12", "3.13"):
+            test_step = named_steps[f"Test on Python {version}"]
+            self.assertIn("python -m pip install '.[test]'", test_step["run"])
+            self.assertIn("python -m unittest discover -s tests -v", test_step["run"])
+        browser_test = named_steps["Test browser source integration"]
+        self.assertEqual(browser_test["env"]["FULL_BROWSER_DATA"], "data")
+        self.assertIn("npm ci", browser_test["run"])
+        self.assertIn("npm test", browser_test["run"])
+
+        validation = named_steps["Validate the scheduled update"]
+        self.assertEqual(validation["id"], "validation")
+        self.assertIn("python3 scripts/prepare_scheduled_refresh.py", validation["run"])
+        publication = named_steps["Reconcile committed and published browser data"]
+        self.assertEqual(publication["id"], "publication")
+        self.assertIn("python3 scripts/prepare_browser_site.py", publication["run"])
+        commit = named_steps["Commit and push changed browser data"]
+        self.assertEqual(commit["if"], "steps.validation.outputs.changed == 'true'")
+        self.assertIn("git add -A -- data", commit["run"])
+        self.assertIn("git push origin HEAD:refs/heads/master", commit["run"])
+        publish = named_steps["Publish the committed browser data"]
+        self.assertEqual(publish["if"], "steps.publication.outputs.status == 'prepared'")
+        self.assertIn("gh workflow run browser-pages.yml --ref master -f force=false", publish["run"])
+
+        workflow_commands = "\n".join(step.get("run", "") for step in steps)
         for forbidden in (
                 "--allow-count-decrease", "pull-requests: write", "gh pr create",
                 "automation/mpc-refresh-", "git push --force"):
-            self.assertNotIn(forbidden, workflow)
-        self.assertEqual(workflow.count("python -m unittest discover -s tests -v"), 3)
-        self.assertEqual(workflow.count("if: steps.validation.outputs.changed == 'true'"), 1)
-        self.assertLess(
-            workflow.index("python -m unittest discover -s tests -v"),
-            workflow.index("git push origin HEAD:refs/heads/master"),
-        )
-        self.assertLess(
-            workflow.index("npm test"),
-            workflow.index("git push origin HEAD:refs/heads/master"),
-        )
-        self.assertLess(
-            workflow.index("python3 scripts/prepare_browser_site.py"),
-            workflow.index("git push origin HEAD:refs/heads/master"),
-        )
-        self.assertLess(
-            workflow.index("git push origin HEAD:refs/heads/master"),
-            workflow.index("gh workflow run browser-pages.yml --ref master -f force=false"),
-        )
+            self.assertNotIn(forbidden, workflow_commands)
+        commit_index = names.index("Commit and push changed browser data")
+        for prerequisite in (
+            "Test on Python 3.11", "Test on Python 3.12", "Test on Python 3.13",
+            "Test browser source integration", "Validate the scheduled update",
+            "Reconcile committed and published browser data",
+        ):
+            self.assertLess(names.index(prerequisite), commit_index)
+        self.assertLess(commit_index, names.index("Publish the committed browser data"))
 
 
 if __name__ == "__main__":

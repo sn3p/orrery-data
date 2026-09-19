@@ -5,7 +5,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -80,10 +80,16 @@ def worktree_changes(repository):
     untracked = git_paths(repository, "ls-files", "--others", "--exclude-standard", "-z")
     added |= untracked
     paths = tracked | untracked
-    unexpected = sorted(path for path in paths if not Path(path).parts or Path(path).parts[0] != "data")
+    parsed_paths = {path: PurePosixPath(path) for path in paths}
+    unexpected = sorted(
+        path for path, parsed in parsed_paths.items()
+        if len(parsed.parts) < 2 or parsed.parts[0] != "data"
+    )
     if unexpected:
         raise ValueError("Scheduled refresh changed files outside data/: " + ", ".join(unexpected))
-    strip_data = lambda values: {path.removeprefix("data/") for path in values}
+    def strip_data(values):
+        return {parsed_paths[path].relative_to("data").as_posix() for path in values}
+
     return {"added": strip_data(added), "changed": strip_data(tracked - added - deleted),
             "deleted": strip_data(deleted), "paths": paths}
 
