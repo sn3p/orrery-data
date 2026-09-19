@@ -10,9 +10,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orrery_data.browser import export_browser, verify_browser
+from orrery_data.browser import export_browser, preserve_equal_acquisition_clocks, verify_browser
 from orrery_data.formats import DataError
-from orrery_data.storage import writer_lock
+from orrery_data.pipeline import EXPORT_FILES
+from orrery_data.storage import encode, file_info, writer_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / 'tests/fixtures'
@@ -43,6 +44,38 @@ class BrowserCLI(unittest.TestCase):
         index = json.loads((self.output / latest['index']['url']).read_bytes())
         return [row for chunk in index['chunks'] for row in json.loads((self.output / chunk['url']).read_bytes())]
 
+    def public_index(self):
+        latest = json.loads((self.output / 'latest.json').read_bytes())
+        return json.loads((self.output / latest['index']['url']).read_bytes())
+
+    def stamped_bundle(self, retrieved_at, last_modified=None, digest=None):
+        bundle = self.root / f'bundle-{retrieved_at}-{last_modified}-{digest}'
+        shutil.copytree(FIX / 'consumer-v1/ties', bundle)
+
+        def stamp_sources(value):
+            for info in value['sources'].values():
+                info['retrieved_at'] = retrieved_at
+                if last_modified is not None:
+                    info['last_modified'] = last_modified
+                if digest is not None:
+                    info['sha256'] = digest
+                    info['decoded'] = {**info['decoded'], 'sha256': digest}
+
+        manifest_path = bundle / 'full/manifest.json'
+        manifest = json.loads(manifest_path.read_bytes())
+        stamp_sources(manifest)
+        manifest_path.write_text(encode(manifest) + '\n', encoding='utf-8')
+        (bundle / 'full/SHA256SUMS').write_text(''.join(
+            f"{file_info(bundle / 'full' / name)['sha256']}  {name}\n"
+            for name in sorted([*EXPORT_FILES, 'manifest.json'])))
+        index_path = bundle / 'index.json'
+        index = json.loads(index_path.read_bytes())
+        stamp_sources(index)
+        index['provenance']['manifest'] = {
+            'url': 'full/manifest.json', **file_info(manifest_path)}
+        index_path.write_text(encode(index) + '\n', encoding='utf-8')
+        return bundle
+
     def test_round_trip_noop_and_migration_fixtures(self):
         result = self.project()
         self.assertEqual(result['records'], 6)
@@ -56,6 +89,68 @@ class BrowserCLI(unittest.TestCase):
         self.cli('verify-indexed', '--bundle', FIX / 'consumer-v1/ties')
         for name, (contents, _) in before.items():
             self.assertEqual(contents, (FIX / 'browser-v1/ties' / name).read_bytes())
+
+    def test_equal_source_identity_preserves_public_pin_clocks(self):
+        first = self.cli('export-browser', '--bundle',
+                         self.stamped_bundle('2026-09-18T12:00:00Z', 'Fri, 18 Sep 2026 12:49:54 GMT'),
+                         '--output', self.output)
+        before = self.state()
+        clocks = {name: info['retrieved_at'] for name, info in self.public_index()['sources'].items()}
+        self.assertEqual(set(clocks.values()), {'2026-09-18T12:00:00Z'})
+        again = self.cli('export-browser', '--bundle',
+                         self.stamped_bundle('2026-09-19T07:28:34Z', 'Fri, 18 Sep 2026 12:49:54 GMT'),
+                         '--output', self.output)
+        self.assertEqual(again['status'], 'unchanged')
+        self.assertEqual(first['pin'], again['pin'])
+        self.assertEqual(before, self.state())
+        self.assertEqual(
+            {name: info['retrieved_at'] for name, info in self.public_index()['sources'].items()},
+            clocks)
+
+    def test_changed_last_modified_or_digest_still_rewrites_the_pin(self):
+        first = self.cli('export-browser', '--bundle',
+                         self.stamped_bundle('2026-09-18T12:00:00Z', 'Fri, 18 Sep 2026 12:49:54 GMT'),
+                         '--output', self.output)
+        modified = self.cli('export-browser', '--bundle',
+                            self.stamped_bundle('2026-09-19T07:28:34Z', 'Sat, 19 Sep 2026 12:49:54 GMT'),
+                            '--output', self.output)
+        self.assertEqual(modified['status'], 'updated')
+        self.assertNotEqual(first['pin'], modified['pin'])
+        self.assertEqual(
+            {name: info['retrieved_at'] for name, info in self.public_index()['sources'].items()},
+            {'mpcorb': '2026-09-19T07:28:34Z', 'numbered': '2026-09-19T07:28:34Z'})
+        digested = self.cli('export-browser', '--bundle',
+                            self.stamped_bundle('2026-09-19T08:00:00Z', 'Sat, 19 Sep 2026 12:49:54 GMT', 'a' * 64),
+                            '--output', self.output)
+        self.assertEqual(digested['status'], 'updated')
+        self.assertNotEqual(modified['pin'], digested['pin'])
+        self.assertEqual(self.public_index()['sources']['mpcorb']['retrieved_at'], '2026-09-19T08:00:00Z')
+
+    def test_clock_preservation_requires_matching_snapshot_and_chunks(self):
+        previous = {
+            'snapshot_version': 'snapshot-v1-' + 'a' * 64,
+            'catalog_id': 'export-v1-' + 'a' * 64,
+            'chunks': [{'sha256': 'b' * 64}],
+            'sources': {'mpcorb': {'sha256': 'c' * 64, 'last_modified': 'Friday',
+                                   'retrieved_at': '2026-09-18T12:00:00Z'}},
+        }
+        current = {
+            'snapshot_version': previous['snapshot_version'],
+            'catalog_id': previous['catalog_id'],
+            'chunks': [{'sha256': 'b' * 64}],
+            'sources': {'mpcorb': {'sha256': 'c' * 64, 'last_modified': 'Friday',
+                                   'retrieved_at': '2026-09-19T07:28:34Z'}},
+        }
+        preserve_equal_acquisition_clocks(current, previous)
+        self.assertEqual(current['sources']['mpcorb']['retrieved_at'], '2026-09-18T12:00:00Z')
+        current['sources']['mpcorb']['retrieved_at'] = '2026-09-19T07:28:34Z'
+        current['chunks'] = [{'sha256': 'd' * 64}]
+        preserve_equal_acquisition_clocks(current, previous)
+        self.assertEqual(current['sources']['mpcorb']['retrieved_at'], '2026-09-19T07:28:34Z')
+        current['chunks'] = previous['chunks']
+        current['snapshot_version'] = 'snapshot-v1-' + 'e' * 64
+        preserve_equal_acquisition_clocks(current, previous)
+        self.assertEqual(current['sources']['mpcorb']['retrieved_at'], '2026-09-19T07:28:34Z')
 
     def test_empty_removes_obsolete_files_and_keeps_identical_notice(self):
         self.project()

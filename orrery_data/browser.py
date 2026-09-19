@@ -116,7 +116,49 @@ def verify_browser(directory, index_sha256=None):
             'files': len(names), 'bytes': sum((directory / name).stat().st_size for name in names)}
 
 
-def build_candidate(bundle, stage):
+def published_index(directory):
+    """Read a previously published index without traversing chunk payloads."""
+    try:
+        latest = read_json(directory / 'latest.json')
+        LATEST(latest, 'latest')
+        pin = latest['index']
+        check_reference(pin, 'index-', '.json')
+        verify_file(directory / pin['url'], pin)
+        index = read_json(directory / pin['url'])
+        validate_contract('browser', index)
+        return index
+    except (OSError, ValueError, DataError, KeyError, TypeError):
+        return None
+
+
+def preserve_equal_acquisition_clocks(index, previous):
+    """Keep public retrieval clocks when catalogue and source identity match.
+
+    Fresh runners rebuild snapshots with a new retrieved_at even when SHA-256
+    and Last-Modified are unchanged. That clock is not catalogue identity.
+    """
+    if previous is None:
+        return
+    if (index.get('snapshot_version') != previous.get('snapshot_version')
+            or index.get('catalog_id') != previous.get('catalog_id')):
+        return
+    previous_chunks = [chunk.get('sha256') for chunk in previous.get('chunks', [])]
+    current_chunks = [chunk.get('sha256') for chunk in index.get('chunks', [])]
+    if previous_chunks != current_chunks:
+        return
+    previous_sources, current_sources = previous.get('sources'), index.get('sources')
+    if not isinstance(previous_sources, dict) or not isinstance(current_sources, dict):
+        return
+    for name, info in current_sources.items():
+        old = previous_sources.get(name)
+        if not isinstance(info, dict) or not isinstance(old, dict):
+            continue
+        if info.get('sha256') != old.get('sha256') or info.get('last_modified') != old.get('last_modified'):
+            continue
+        info['retrieved_at'] = old.get('retrieved_at')
+
+
+def build_candidate(bundle, stage, previous=None):
     # Full source verification precedes projection. This does not prune/relax v1.
     verify_indexed(bundle)
     original = read_json(bundle / 'index.json')
@@ -135,6 +177,7 @@ def build_candidate(bundle, stage):
         ref['url'] = 'chunks/' + chunk['sha256'] + '.json'
         shutil.copyfile(bundle / chunk['url'], stage / ref['url'])
         index['chunks'].append(ref)
+    preserve_equal_acquisition_clocks(index, previous)
     temporary = stage / 'index.json'
     write_json(temporary, index)
     pin = reference(temporary, 'index-', '.json')
@@ -182,9 +225,10 @@ def export_browser(bundle, output):
     managed_files(output)
     lock = output.parent / ('.' + output.name + '-browser-lock')
     with writer_lock(lock):
+        previous = published_index(output)
         with tempfile.TemporaryDirectory(prefix='.browser-', dir=output.parent) as temp:
             stage = Path(temp)
-            build_candidate(bundle, stage)
+            build_candidate(bundle, stage, previous)
             changes = sync_candidate(stage, output)
             result = verify_browser(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',
