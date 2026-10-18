@@ -1,5 +1,8 @@
 # Orrery Data
 
+Versioned minor-planet datasets and export tools for
+[Orrery](https://github.com/sn3p/Orrery).
+
 The current browser dataset lives in `data/`. A weekly GitHub Actions job runs
 the existing validated producer and commits changed public files directly to
 `master`; unchanged projections create no commit, including when a re-fetch
@@ -14,8 +17,7 @@ on `master` automatically trigger verified publication of the committed dataset 
 supports manual workflow dispatch; publication retains manual dispatch and force.
 Production consumer adoption remains separate application work.
 
-Validated, versioned minor-planet snapshots, local SQLite queries and static
-exports and release candidates for Orrery and Orrery3D. Python 3.11+ on macOS/Linux with its standard
+Python 3.11+ on macOS/Linux with its standard
 `sqlite3` module; no third-party runtime dependencies or server.
 
 The orbital elements and discovery circumstances used by this project are
@@ -116,7 +118,7 @@ versions and verification](docs/releases.md).
 
 Raw inputs, local stores, generated databases and complete exports are ignored by Git;
 the current browser projection in `data/` is tracked.
-This repository does not automatically publish releases or update either app.
+This repository does not automatically publish releases or update Orrery.
 The weekly acquisition workflow validates and non-force-pushes changed `data/`
 directly to `master`, then explicitly starts the existing Pages publisher.
 Unchanged data, including equal source SHA-256 / last-modified whose public
