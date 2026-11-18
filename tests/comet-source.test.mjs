@@ -50,7 +50,7 @@ test('corrupt and missing objects fail; retry retains the original pin', async t
 
 test('cancellation and source close reject delayed responses before caching', async t => {
   let release;
-  await fixture(t, async relative => {
+  const calls = await fixture(t, async relative => {
     if (relative.startsWith('objects/')) await new Promise(resolve => { release = resolve; });
   });
   const source = await CometSource.openLatest(base + 'latest.json');
@@ -60,7 +60,8 @@ test('cancellation and source close reject delayed responses before caching', as
   await assert.rejects(pending, { name: 'AbortError' });
   const pending2 = source.load('1P'); source.close(); release();
   await assert.rejects(pending2, { name: 'AbortError' });
-  assert.equal(source.cache.size, 0);
+  await assert.rejects(source.load('1P'), { name: 'AbortError' });
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 2);
 });
 
 test('untrusted URL and oversized or unsupported descriptor fail before object reads', async t => {
@@ -111,7 +112,7 @@ test('concurrent readers share object verification and one cancellation preserve
   const [a, b] = await Promise.all([first, second]);
   assert.equal(a, b);
   assert.equal(await source.load('1P'), a);
-  assert.equal(source.pending.size, 0);
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 1);
   source.close();
 });
 
@@ -127,13 +128,11 @@ test('all cancelled readers abort shared work and permit retry before stale work
   a.abort(); assert.equal(gates[0].signal.aborted, false);
   b.abort(); assert.equal(gates[0].signal.aborted, true);
   await Promise.all(rejected);
-  assert.equal(source.pending.size, 0);
   const retry = source.load('2P');
   assert.equal(gates.length, 2);
   gates[0].release(); gates[1].release();
   assert.equal((await retry).id, '2P');
   assert.equal(calls.filter(v => v.startsWith('objects/')).length, 2);
-  assert.equal(source.pending.size, 0);
   source.close();
 });
 
@@ -150,15 +149,14 @@ test('shared failures evict the request and source close cancels every reader', 
   const failures = [assert.rejects(source.load('55P')), assert.rejects(source.load('55P'))];
   release(); await Promise.all(failures);
   assert.equal(calls.filter(v => v.startsWith('objects/')).length, 1);
-  assert.equal(source.pending.size, 0);
   corrupt = false;
   const closed = [assert.rejects(source.load('55P'), { name: 'AbortError' }),
     assert.rejects(source.load('55P'), { name: 'AbortError' })];
   source.close(); assert.equal(transportSignal.aborted, true);
   await Promise.all(closed);
   release();
-  assert.equal(source.cache.size, 0);
-  assert.equal(source.pending.size, 0);
+  await assert.rejects(source.load('55P'), { name: 'AbortError' });
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 2);
 });
 
 test('a pre-aborted reader never starts or joins object work', async t => {
@@ -167,7 +165,6 @@ test('a pre-aborted reader never starts or joins object work', async t => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(source.load('1P', { signal: controller.signal }), { name: 'AbortError' });
   assert.equal(calls.length, 2);
-  assert.equal(source.pending.size, 0);
   source.close();
 });
 
@@ -201,4 +198,76 @@ test('shared discovery transport preserves asteroid fixtures and rejects bounded
   await assert.rejects(CatalogSource.openLatest('https://example.test/data/latest.json', { signal: controller.signal }),
     { name: 'AbortError' });
   assert.equal(requests.length, count);
+});
+
+test('synchronous fetch interception can cancel before subscriber registration', async t => {
+  const controller = new AbortController();
+  let transportSignal, intercept = true;
+  const calls = await fixture(t, (relative, options) => {
+    if (intercept && relative.startsWith('objects/')) {
+      transportSignal = options.signal;
+      controller.abort();
+    }
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  await assert.rejects(source.load('1P', { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(transportSignal.aborted, true);
+  intercept = false;
+  assert.equal((await source.load('1P')).id, '1P');
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 2);
+  source.close();
+});
+
+function cancelAtVerifiedContinuation(t, controller) {
+  const digest = crypto.subtle.digest.bind(crypto.subtle);
+  const decode = TextDecoder.prototype.decode;
+  let decodedAfterAbort = 0;
+  t.mock.method(crypto.subtle, 'digest', async (...args) => {
+    const result = await digest(...args);
+    // Schedule after verifyBytes and fetchVerified resume, before their caller
+    // resumes. This exercises the cancellation gap between promise continuations.
+    queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => controller.abort())));
+    return result;
+  });
+  t.mock.method(TextDecoder.prototype, 'decode', function (...args) {
+    if (controller.signal.aborted) decodedAfterAbort++;
+    return decode.apply(this, args);
+  });
+  return () => decodedAfterAbort;
+}
+
+test('last cancellation between verified bytes and object continuation skips decoding', async t => {
+  await fixture(t);
+  const source = await CometSource.openLatest(base + 'latest.json');
+  const controller = new AbortController();
+  const decodedAfterAbort = cancelAtVerifiedContinuation(t, controller);
+  await assert.rejects(source.load('1P', { signal: controller.signal }), { name: 'AbortError' });
+  // Subscriber rejection is immediate; let any stale shared continuation finish.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(decodedAfterAbort(), 0);
+  source.close();
+});
+
+test('cancellation between verified bytes and index continuation skips decoding', async t => {
+  await fixture(t);
+  const controller = new AbortController();
+  const decodedAfterAbort = cancelAtVerifiedContinuation(t, controller);
+  await assert.rejects(CometSource.openLatest(base + 'latest.json', { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(decodedAfterAbort(), 0);
+});
+
+test('comet adapter errors keep comet context at discovery, selection and load boundaries', async t => {
+  let failDescriptor = true, failObjects = false;
+  await fixture(t, relative => (failDescriptor && relative === 'latest.json')
+    || (failObjects && relative.startsWith('objects/')) ? new Response(null, { status: 404 }) : null);
+  await assert.rejects(CometSource.openLatest(base + 'latest.json'), { message: 'Comet discovery failed (404).' });
+  failDescriptor = false;
+  const source = await CometSource.openLatest(base + 'latest.json');
+  await assert.rejects(source.load('unknown'), { message: 'Invalid comet selection.' });
+  failObjects = true;
+  await assert.rejects(source.load('1P'), /^Error: Comet request failed \(404\): objects\//);
+  source.close();
+  await assert.rejects(source.load('1P'), { name: 'AbortError', message: 'Comet read cancelled.' });
 });

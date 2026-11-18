@@ -1,5 +1,11 @@
-import { aborted, check, linkCancellation, fetchLatest, fetchVerified, decodeJSON as decode } from './transport.js';
-import { freeze, requireValue, keys as fields } from './contract.js';
+import { aborted as abortError, check as checkSignal, fetchLatest, fetchVerified, decodeJSON } from './transport.js';
+import { freeze, requireValue as requireProductValue, keys } from './contract.js';
+
+const aborted = () => abortError('comet');
+const check = signal => checkSignal(signal, 'comet');
+const decode = bytes => decodeJSON(bytes, 'comet');
+const requireValue = (ok, label) => requireProductValue(ok, label, 'comet');
+const fields = (value, expected) => keys(value, expected, [], 'comet');
 
 const START = 2444239.5, STEP = 4, COUNT = 10958;
 const IDS = ['1P', '2P', '55P'];
@@ -48,11 +54,13 @@ export function interpolateComet(series, jd) {
 // outstanding reads. Selection and renderer generation remain the app's concern.
 export default class CometSource {
   static async openLatest(url, { signal } = {}) {
-    const { location, latest } = await fetchLatest(url, signal);
+    const { location, latest } = await fetchLatest(url, signal, 'comet');
     fields(latest, ['comet_contract_version', 'index']); version(latest);
     reference(latest.index, 'index-', 256 * 1024);
     const indexURL = new URL(latest.index.url, location).href;
-    const index = decode(await fetchVerified(latest.index, indexURL, signal));
+    const bytes = await fetchVerified(latest.index, indexURL, signal, 'comet');
+    check(signal);
+    const index = decode(bytes);
     fields(index, ['comet_contract_version', 'objects']); version(index);
     requireValue(Array.isArray(index.objects) && index.objects.length === IDS.length, 'catalogue');
     index.objects.forEach((entry, i) => {
@@ -97,13 +105,14 @@ export default class CometSource {
     let pending = this.pending.get(id);
     if (!pending) {
       const controller = new AbortController();
-      const unlink = linkCancellation(controller, [this.lifetime.signal]);
       pending = { controller, subscribers: new Set(), settled: false };
       this.pending.set(id, pending);
       pending.promise = (async () => {
         try {
-          const value = validateComet(decode(await fetchVerified(entry.data,
-            new URL(entry.data.url, this.url).href, controller.signal)), id);
+          const bytes = await fetchVerified(entry.data,
+            new URL(entry.data.url, this.url).href, controller.signal, 'comet');
+          check(controller.signal);
+          const value = validateComet(decode(bytes), id);
           for (const row of entry.validation.references) requireValue(
             Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
             'interpolation tolerance');
@@ -112,7 +121,6 @@ export default class CometSource {
           return value;
         } finally {
           pending.settled = true;
-          unlink();
           if (this.pending.get(id) === pending) this.pending.delete(id);
         }
       })();
@@ -120,15 +128,13 @@ export default class CometSource {
     // Cancellation belongs to each subscriber. Only the last cancelled reader
     // aborts shared work, and eviction permits an immediate independent retry.
     return new Promise((resolve, reject) => {
-      const subscriber = new AbortController();
-      const unlink = linkCancellation(subscriber, [this.lifetime.signal, ...(signal ? [signal] : [])]);
+      const signals = [...new Set([this.lifetime.signal, ...(signal ? [signal] : [])])];
       let finished = false;
       const finish = (callback, value) => {
         if (finished) return;
         finished = true;
-        subscriber.signal.removeEventListener('abort', cancel);
-        unlink();
-        pending.subscribers.delete(subscriber);
+        for (const signal of signals) signal.removeEventListener('abort', cancel);
+        pending.subscribers.delete(cancel);
         if (!pending.settled && pending.subscribers.size === 0) {
           pending.controller.abort();
           if (this.pending.get(id) === pending) this.pending.delete(id);
@@ -136,10 +142,11 @@ export default class CometSource {
         callback(value);
       };
       const cancel = () => finish(reject, aborted());
-      pending.subscribers.add(subscriber);
-      subscriber.signal.addEventListener('abort', cancel, { once: true });
+      pending.subscribers.add(cancel);
+      for (const signal of signals) signal.addEventListener('abort', cancel, { once: true });
       pending.promise.then(value => finish(resolve, value), error => finish(reject, error));
-      if (subscriber.signal.aborted) cancel();
+      // A synchronous fetch interceptor can abort before registration.
+      if (signals.some(signal => signal.aborted)) cancel();
     });
   }
   close() { this.lifetime.abort(); this.cache.clear(); }
