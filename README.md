@@ -146,3 +146,11 @@ The field mapping and selection behavior derive from the MIT-licensed
 [Orrery importer](https://github.com/sn3p/Orrery/blob/1968ca40f02b36a7190153ebcda4c706c30e0e7b/data/data_to_json.py).
 Keep the MPC header and [attribution notice](orrery_data/NOTICE.txt) with
 redistributed artifacts; the code license does not relicense upstream data.
+
+## Comet trajectories
+
+The separate [comet v1 contract](docs/comets.md) provides validated Horizons
+trajectories for Halley, Encke and Tempel–Tuttle, one file per selected object.
+Use `python3 -m orrery_data refresh-comets` for manual acquisition/export and
+`python3 -m orrery_data verify-comets` for offline verification. The existing
+asteroid contract and weekly refresh schedule remain unchanged.
