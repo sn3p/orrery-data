@@ -89,3 +89,116 @@ test('rehashed malformed provenance is rejected at the index boundary', async t 
     await assert.rejects(CometSource.openLatest(base + 'latest.json'), /provenance/);
   }
 });
+
+test('concurrent readers share object verification and one cancellation preserves other readers', async t => {
+  let release, transportSignal;
+  const calls = await fixture(t, async (relative, options) => {
+    if (relative.startsWith('objects/')) {
+      transportSignal = options.signal;
+      await new Promise(resolve => { release = resolve; });
+    }
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  const controller = new AbortController();
+  const cancelled = source.load('1P', { signal: controller.signal });
+  const first = source.load('1P'), second = source.load('1P');
+  const rejection = assert.rejects(cancelled, { name: 'AbortError' });
+  controller.abort();
+  await rejection;
+  assert.equal(transportSignal.aborted, false);
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 1);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a, b);
+  assert.equal(await source.load('1P'), a);
+  assert.equal(source.pending.size, 0);
+  source.close();
+});
+
+test('all cancelled readers abort shared work and permit retry before stale work settles', async t => {
+  const gates = [];
+  const calls = await fixture(t, async (relative, options) => {
+    if (relative.startsWith('objects/')) await new Promise(resolve => gates.push({ release: resolve, signal: options.signal }));
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  const a = new AbortController(), b = new AbortController();
+  const first = source.load('2P', { signal: a.signal }), second = source.load('2P', { signal: b.signal });
+  const rejected = [assert.rejects(first, { name: 'AbortError' }), assert.rejects(second, { name: 'AbortError' })];
+  a.abort(); assert.equal(gates[0].signal.aborted, false);
+  b.abort(); assert.equal(gates[0].signal.aborted, true);
+  await Promise.all(rejected);
+  assert.equal(source.pending.size, 0);
+  const retry = source.load('2P');
+  assert.equal(gates.length, 2);
+  gates[0].release(); gates[1].release();
+  assert.equal((await retry).id, '2P');
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 2);
+  assert.equal(source.pending.size, 0);
+  source.close();
+});
+
+test('shared failures evict the request and source close cancels every reader', async t => {
+  let corrupt = true, release, transportSignal;
+  const calls = await fixture(t, async (relative, options) => {
+    if (relative.startsWith('objects/')) {
+      transportSignal = options.signal;
+      await new Promise(resolve => { release = resolve; });
+      if (corrupt) return new Response('{}');
+    }
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  const failures = [assert.rejects(source.load('55P')), assert.rejects(source.load('55P'))];
+  release(); await Promise.all(failures);
+  assert.equal(calls.filter(v => v.startsWith('objects/')).length, 1);
+  assert.equal(source.pending.size, 0);
+  corrupt = false;
+  const closed = [assert.rejects(source.load('55P'), { name: 'AbortError' }),
+    assert.rejects(source.load('55P'), { name: 'AbortError' })];
+  source.close(); assert.equal(transportSignal.aborted, true);
+  await Promise.all(closed);
+  release();
+  assert.equal(source.cache.size, 0);
+  assert.equal(source.pending.size, 0);
+});
+
+test('a pre-aborted reader never starts or joins object work', async t => {
+  const calls = await fixture(t);
+  const source = await CometSource.openLatest(base + 'latest.json');
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(source.load('1P', { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(calls.length, 2);
+  assert.equal(source.pending.size, 0);
+  source.close();
+});
+
+test('shared discovery transport preserves asteroid fixtures and rejects bounded descriptor errors', async t => {
+  const { default: CatalogSource } = await import('../consumer/CatalogSource.js');
+  const directory = path.resolve('tests/fixtures/browser-v1/ties');
+  const requests = [];
+  let fault;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ url: String(url), options });
+    options.signal?.throwIfAborted();
+    const name = new URL(url).pathname.replace('/data/', '');
+    return new Response(name === 'latest.json' && fault ? fault : await fs.readFile(path.join(directory, name)));
+  });
+  const source = await CatalogSource.openLatest('https://example.test/data/latest.json');
+  const rows = [];
+  for await (const event of source.read({ start: 0, end: source.info.counts.discovery_export })) {
+    if (event.type === 'batch') rows.push(...event.records);
+  }
+  const expected = JSON.parse(await fs.readFile('tests/fixtures/consumer-v1/ties/full/catalog.json'));
+  assert.deepEqual(rows, expected);
+  assert.equal(requests[0].options.cache, 'no-cache');
+  assert.equal(requests[0].options.redirect, 'error');
+  source.close();
+  fault = ' '.repeat(4097);
+  await assert.rejects(CatalogSource.openLatest('https://example.test/data/latest.json'), /latest descriptor size/);
+  fault = '{"browser_contract_version":1,"browser_contract_version":1,"index":{}}';
+  await assert.rejects(CatalogSource.openLatest('https://example.test/data/latest.json'), /duplicate JSON key/);
+  const controller = new AbortController(); controller.abort();
+  const count = requests.length;
+  await assert.rejects(CatalogSource.openLatest('https://example.test/data/latest.json', { signal: controller.signal }),
+    { name: 'AbortError' });
+  assert.equal(requests.length, count);
+});
