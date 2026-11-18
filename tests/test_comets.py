@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -102,7 +103,7 @@ class CometTests(unittest.TestCase):
             with self.assertRaises(DataError): comets.refresh_comets(self.root / 'cache', self.output)
         with writer_lock(self.root / '.data-browser-lock'), patch.object(comets, 'acquire') as acquire:
             with self.assertRaises(DataError): comets.refresh_comets(self.root / 'cache', self.output)
-            acquire.assert_not_called()
+            acquire.assert_called_once()
         after = {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
         self.assertEqual(before, after)
         comets.verify_comets(self.output)
@@ -147,10 +148,50 @@ class CometTests(unittest.TestCase):
             same = comets.refresh_comets(self.root / 'cache', self.output)
             self.assertEqual(same['status'], 'unchanged')
             self.assertEqual(first['pin'], same['pin'])
-            records['1P-vectors'][1]['header'] += '\nModel changed'
+            old_header = records['1P-vectors'][1]['header']
+            current_eop = re.search(r'(?m)^EOP file\s*:\s*(\S+)', old_header)[1]
+            next_eop = 'eop.991231.p000401' if current_eop != 'eop.991231.p000401' else 'eop.000101.p000402'
+            records['1P-vectors'][1]['header'] = old_header.replace(current_eop, next_eop)
+            self.assertNotEqual(old_header, records['1P-vectors'][1]['header'])
             changed = comets.refresh_comets(self.root / 'cache', self.output)
             self.assertEqual(changed['status'], 'updated')
             self.assertNotEqual(changed['pin'], same['pin'])
+
+    def test_resolved_cli_paths_short_site_lock_and_refresh_serialization(self):
+        from contextlib import chdir
+        from orrery_data.cli import main
+        expected_site_lock = self.root / '.data-browser-lock'
+        def acquiring(*args, **kwargs):
+            # The site remains available during upstream acquisition.
+            with writer_lock(expected_site_lock):
+                pass
+            return {}
+        def candidate(records, stage, previous):
+            self.assertFalse(stage.is_relative_to(self.output.parent))
+            # Installation does hold the canonical shared site lock.
+            with self.assertRaises(DataError):
+                with writer_lock(expected_site_lock): pass
+            shutil.copytree(self.output, stage, dirs_exist_ok=True)
+        for spelling in ('comets', './comets', str(self.output)):
+            with self.subTest(spelling=spelling), chdir(self.output.parent), \
+                 patch.object(comets, 'acquire', side_effect=acquiring), \
+                 patch.object(comets, 'build_candidate', side_effect=candidate), \
+                 patch('sys.stdout', new_callable=io.StringIO) as stdout:
+                self.assertEqual(main(['refresh-comets', '--output', spelling, '--cache', str(self.root / 'cache'), '--offline']), 0)
+                self.assertEqual(json.loads(stdout.getvalue())['status'], 'unchanged')
+        # Another comet refresh must not overtake one acquiring from another cache.
+        with writer_lock(self.root / '.data-comets-refresh-lock'), patch.object(comets, 'acquire') as acquire:
+            with self.assertRaises(DataError): comets.refresh_comets(self.root / 'other-cache', self.output)
+            acquire.assert_not_called()
+
+    def test_cache_symlink_rejected_without_mutating_target(self):
+        target = self.root / 'retained'
+        target.mkdir()
+        cache = self.root / 'cache-link'
+        cache.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(DataError, 'cache cannot be a symlink'):
+            comets.refresh_comets(cache, self.output, offline=True)
+        self.assertEqual(list(target.iterdir()), [])
 
     def test_pointer_last_and_interrupted_orphan_recovery(self):
         stage = self.root / 'candidate'; shutil.copytree(self.output, stage)

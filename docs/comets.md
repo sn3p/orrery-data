@@ -16,8 +16,8 @@ python3 -m orrery_data refresh-comets --refresh
 # Rebuild and validate with no network access (requires the saved raw cache).
 python3 -m orrery_data refresh-comets --offline
 python3 -m orrery_data verify-comets --directory data/comets
-# Verify both products; this retains the asteroid summary shape for automation.
-python3 -m orrery_data verify-browser --directory data
+# Verify the complete site; asteroid-only verification remains verify-browser.
+python3 -m orrery_data verify-site --directory data
 python3 scripts/prepare_browser_site.py --output .context/pages-site
 ```
 
@@ -29,13 +29,20 @@ The public projection can be verified without the raw cache, but cannot reproduc
 all independent midpoint checks from its representative reference subset alone.
 Ordinary builds and tests never query JPL.
 
-A cache lock serializes acquisition. When using `data/comets`, both producers and
-the Pages stager share `.data-browser-lock`. Build/validate the whole comet
+A cache lock serializes acquisition. A separate per-output comet refresh lock
+prevents older acquisitions from overtaking newer ones, including across caches.
+Paths are resolved before deriving locks and staging destinations. When using
+`data/comets`, both producers and the Pages stager share `.data-browser-lock`
+only during local verification/installation; upstream acquisition leaves it free.
+Build/validate the whole comet
 candidate before installation; install immutable assets, then atomically replace
 `latest.json`, then prune obsolete managed files. Failure before installation
 preserves the previous projection. An interrupted install can leave managed
 orphans: rerun the command to finish pruning. Public staging rejects those orphans
-until recovery. A valid pointer always references already-installed bytes;
+until recovery. Asteroid inventory/export and `verify-browser` do not read comet
+payloads, so abandoned comet files cannot block asteroid generation. The
+`verify-site` boundary validates each product once and rejects incomplete or
+corrupt comet trees before deployment. A valid pointer always references already-installed bytes;
 the authoring directory is not a live server. Unknown files and symlinks are
 rejected, never deleted. The existing non-force Git push still rejects stale
 scheduled MPC candidates; no stale generated output is rebased automatically.
@@ -136,7 +143,10 @@ model/EOP details, serialized state bytes and validation results. Only operation
 request banners are removed from the normalized header. If all scientific data
 is equal, preserve the prior public acquisition provenance, while the cache
 records the newest raw response. A changed solution/header/model remains a real
-public change even when rounded states match. There is no blanket removal of dates.
+public change even when rounded states match. In particular, an EOP file or
+coverage change deliberately produces a new pin; equal numeric rows alone do not
+establish equal scientific provenance. Regression coverage exercises actual
+date-stamped EOP header changes. There is no blanket removal of dates.
 
 Live JPL returned API 1.2 while its documentation lists 1.3 on 2026-11-18. Both
 explicit versions are accepted and recorded; unknown versions fail. Acquisition
@@ -157,8 +167,11 @@ const position = interpolateComet(comet.series, 2461362.5);
 source.close(); // abort pending work and release cached objects
 ```
 
-Descriptor and index load first; objects load only when selected. Failed or
-cancelled loads do not enter the cache. `close()` invalidates outstanding reads.
+Descriptor and index load first; objects load only when selected. Concurrent
+loads of one object share the download and verification. Cancelling one caller
+does not cancel other subscribers; cancelling all callers aborts shared work
+and permits an immediate retry. Failed or wholly cancelled loads do not enter
+the cache. `close()` invalidates outstanding reads.
 The caller owns selection/renderer generation guards: a late response must not
 re-enable an unselected comet. Retry under the same pin, or explicitly create a
 new source and replace the generation. Old hashed URLs may disappear after a

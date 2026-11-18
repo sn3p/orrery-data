@@ -33,7 +33,7 @@ def main():
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
     with writer_lock(ROOT / '.data-browser-lock'):
-        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-browser', '--directory', ROOT / 'data'],
+        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', ROOT / 'data'],
                                 cwd=ROOT, capture_output=True, text=True)
         if result.returncode:
             print(result.stderr, file=sys.stderr)

@@ -12,6 +12,8 @@ import unittest
 from unittest.mock import patch
 
 from orrery_data.browser import sync_candidate, verify_browser
+from orrery_data.site import verify_site
+from orrery_data.formats import DataError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,6 +25,36 @@ class CometPublication(unittest.TestCase):
         self.root = Path(temp.name)
         self.output = self.root / 'data/comets'
         shutil.copytree(ROOT / 'data/comets', self.output)
+
+    def test_orphan_comets_do_not_block_asteroid_update_but_block_publication(self):
+        orphan = self.output / 'objects' / ('0' * 64 + '.json')
+        orphan.write_text('{}')
+        before = {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
+        # Exercise the real orchestration CLI, exporter and post-install verifier.
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/update_browser.py'),
+                                 '--from-bundle', str(ROOT / 'tests/fixtures/consumer-v1/ties'),
+                                 '--output', str(self.output.parent)], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreater(json.loads(result.stdout)['records'], 0)
+        verify_browser(self.output.parent)
+        self.assertEqual(before, {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
+        with self.assertRaises(DataError): verify_site(self.output.parent)
+        for name in ('orrery_data', 'scripts'):
+            shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns('__pycache__'))
+        staged = self.root / 'pages'
+        failed = subprocess.run([sys.executable, str(self.root / 'scripts/prepare_browser_site.py'),
+                                 '--output', str(staged)], cwd=self.root, capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('Comet inventory differs', failed.stderr)
+        self.assertFalse(staged.exists())
+        # Site verification visits the comet product once, independently of asteroid files.
+        orphan.unlink()
+        with patch('orrery_data.site.verify_comets', wraps=__import__('orrery_data.comets', fromlist=['verify_comets']).verify_comets) as verify:
+            verify_site(self.output.parent)
+            verify.assert_called_once_with(self.output)
+        shutil.rmtree(self.output)
+        self.output.symlink_to(ROOT / 'data/comets', target_is_directory=True)
+        with self.assertRaises(DataError): verify_browser(self.output.parent)
 
     def test_asteroid_export_preserves_comets_and_site_reconciles_both(self):
         data = self.output.parent

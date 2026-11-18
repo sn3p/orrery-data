@@ -238,3 +238,5 @@ node_modules/
 .sqlite-build-*/
 
 .comets-*/
+
+.*-refresh-lock/

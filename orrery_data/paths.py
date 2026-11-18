@@ -89,3 +89,28 @@ def validate_append_path(path, *, label="Append destination"):
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
         raise DataError(f"{label} must be a regular file with exactly one link")
     return resolved
+
+
+def managed_tree(directory, pattern, *, children=(), reserved=(), label='Output'):
+    """List one product's regular files without entering other owned namespaces.
+
+    Reserved directories must be real directories, but their payload validation
+    belongs to their own product verifier and the complete-site boundary.
+    """
+    directory = Path(directory)
+    if not directory.exists() and not directory.is_symlink():
+        return set()
+    if not stat.S_ISDIR(directory.lstat().st_mode):
+        raise DataError(f'{label} must be a real directory')
+    names = set()
+    for path in directory.iterdir():
+        real_directory = stat.S_ISDIR(path.lstat().st_mode)
+        if path.name in reserved and real_directory:
+            continue
+        entries = list(path.iterdir()) if path.name in children and real_directory else [path]
+        for item in entries:
+            name = item.relative_to(directory).as_posix()
+            if not stat.S_ISREG(item.lstat().st_mode) or not pattern.fullmatch(name):
+                raise DataError(f'Unexpected {label.lower()} entry: {name}')
+            names.add(name)
+    return names

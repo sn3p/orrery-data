@@ -3,14 +3,14 @@
 import math
 from pathlib import Path
 import re
-import stat
 import tempfile
 
 from .browser import check_reference, reference, sync_candidate
 from .formats import DataError
+from .contracts import obj, array, rule, literal, TEXT, NONEMPTY, FILE_FIELDS, UTC, INDEX_NUMBER
 from .horizons import TARGETS, START, STEP, COUNT, acquire, query
-from .paths import validate_disjoint_paths, validate_writable_path
-from .storage import read_json, write_json, verify_file, writer_lock, utc_timestamp
+from .paths import validate_disjoint_paths, validate_writable_path, managed_tree
+from .storage import read_json, write_json, verify_file, writer_lock
 
 CONVENTIONS = {'center': 'Sun', 'frame': 'Ecliptic J2000', 'time': 'UT',
                'position_units': 'AU', 'velocity_units': 'AU/day',
@@ -21,41 +21,36 @@ TOLERANCE = 0.000052
 MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|objects/[a-f0-9]{64}\.json)')
 
 
-def fields(value, names, label):
-    if not isinstance(value, dict) or set(value) != set(names):
-        raise DataError(f'Invalid {label} fields')
-
-
 def number(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+REFERENCE = obj({'url': TEXT, **FILE_FIELDS})
+SERIES = obj({'start': literal(START), 'step': literal(STEP), 'states': array(
+    rule(lambda row: isinstance(row, list) and len(row) == 6 and all(number(v) for v in row), 'six finite numbers'))})
+OBJECT = obj({'comet_contract_version': literal(1), 'id': NONEMPTY,
+              'conventions': obj({key: literal(value) for key, value in CONVENTIONS.items()}), 'series': SERIES})
+LATEST = obj({'comet_contract_version': literal(1), 'index': REFERENCE})
+SOURCE = obj({**{key: NONEMPTY for key in ('url', 'sha256', 'target', 'solution', 'header', 'api_version')},
+              'retrieved_at': UTC})
+VALIDATION = obj({'method': literal('all-midpoints-final-serialized'), 'samples': literal(COUNT - 1),
+                  'max_error_au': INDEX_NUMBER, 'worst_jd': INDEX_NUMBER, 'tolerance_au': literal(TOLERANCE),
+                  'references': array(rule(lambda row: isinstance(row, list) and len(row) == 4
+                                           and all(number(v) for v in row), 'JD and three finite positions'))})
+ENTRY = obj({'id': NONEMPTY, 'name': NONEMPTY, 'coverage': array(INDEX_NUMBER), 'data': REFERENCE,
+             'provenance': obj({'vectors': SOURCE, 'midpoints': SOURCE}), 'validation': VALIDATION})
+INDEX = obj({'comet_contract_version': literal(1), 'objects': array(ENTRY)})
+
+
 def managed_files(directory):
-    directory = Path(directory)
-    if not directory.exists() and not directory.is_symlink():
-        return set()
-    if not stat.S_ISDIR(directory.lstat().st_mode):
-        raise DataError('Comet output must be a real directory')
-    names = set()
-    for path in directory.iterdir():
-        entries = list(path.iterdir()) if path.name == 'objects' and stat.S_ISDIR(path.lstat().st_mode) else [path]
-        for item in entries:
-            name = item.relative_to(directory).as_posix()
-            if not stat.S_ISREG(item.lstat().st_mode) or not MANAGED.fullmatch(name):
-                raise DataError(f'Unexpected comet output entry: {name}')
-            names.add(name)
-    return names
+    return managed_tree(directory, MANAGED, children=('objects',), label='Comet output')
 
 
 def validate_series(series):
-    fields(series, ('start', 'step', 'states'), 'series')
-    if series['start'] != START or series['step'] != STEP:
-        raise DataError('Unsupported comet grid')
+    SERIES(series, 'series')
     states = series['states']
-    if not isinstance(states, list) or len(states) != COUNT:
+    if len(states) != COUNT:
         raise DataError('Invalid comet state count')
-    if any(not isinstance(row, list) or len(row) != 6 or not all(number(v) for v in row) for row in states):
-        raise DataError('Invalid comet state')
 
 
 def interpolate(series, jd):
@@ -72,15 +67,13 @@ def interpolate(series, jd):
 
 
 def validate_object(value, object_id):
-    fields(value, ('comet_contract_version', 'id', 'conventions', 'series'), 'object')
-    if (type(value['comet_contract_version']) is not int or value['comet_contract_version'] != 1
-            or value['id'] != object_id or value['conventions'] != CONVENTIONS):
-        raise DataError('Unsupported comet object contract/identity/conventions')
-    validate_series(value['series'])
+    OBJECT(value, 'object')
+    if value['id'] != object_id or len(value['series']['states']) != COUNT:
+        raise DataError('Invalid comet identity or state count')
 
 
 def read_reference(directory, ref, prefix, cap):
-    fields(ref, ('url', 'sha256', 'bytes'), 'reference')
+    REFERENCE(ref, 'reference')
     if not isinstance(ref['sha256'], str) or not re.fullmatch(r'[a-f0-9]{64}', ref['sha256']):
         raise DataError('Invalid comet reference hash')
     check_reference(ref, prefix, '.json')
@@ -96,27 +89,17 @@ def verify_comets(directory, *, allow_orphans=False):
     if 'latest.json' not in names or (directory / 'latest.json').stat().st_size > 4096:
         raise DataError('Missing or oversized comet descriptor')
     latest = read_json(directory / 'latest.json')
-    fields(latest, ('comet_contract_version', 'index'), 'descriptor')
-    if type(latest['comet_contract_version']) is not int or latest['comet_contract_version'] != 1:
-        raise DataError('Unsupported comet contract')
+    LATEST(latest, 'descriptor')
     index = read_reference(directory, latest['index'], 'index-', MAX_INDEX_BYTES)
-    fields(index, ('comet_contract_version', 'objects'), 'index')
-    if type(index['comet_contract_version']) is not int or index['comet_contract_version'] != 1:
-        raise DataError('Unsupported comet index')
+    INDEX(index, 'index')
     if not isinstance(index['objects'], list) or [v.get('id') for v in index['objects'] if isinstance(v, dict)] != list(TARGETS):
         raise DataError('Comet v1 requires the three reviewed seed objects in order')
     expected = {'latest.json', latest['index']['url']}
     for entry in index['objects']:
-        fields(entry, ('id', 'name', 'coverage', 'data', 'provenance', 'validation'), 'catalogue entry')
         if entry['name'] != TARGETS[entry['id']] or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
             raise DataError('Invalid comet metadata/coverage')
         provenance = entry['provenance']
-        fields(provenance, ('vectors', 'midpoints'), 'provenance')
         for kind, source in provenance.items():
-            fields(source, ('url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version'), 'source')
-            if any(not isinstance(v, str) or not v for v in source.values()):
-                raise DataError('Invalid comet provenance')
-            utc_timestamp(source['retrieved_at'], 'Horizons retrieval')
             if source['url'] != query(entry['id'], kind == 'midpoints') or source['api_version'] not in ('1.2', '1.3'):
                 raise DataError('Invalid source query or API version')
             if source['target'] != entry['name'] or not re.fullmatch(r'JPL#[A-Za-z0-9/._-]+', source['solution']):
@@ -126,7 +109,6 @@ def verify_comets(directory, *, allow_orphans=False):
         if provenance['vectors']['solution'] != provenance['midpoints']['solution']:
             raise DataError('Mixed Horizons solutions')
         validation = entry['validation']
-        fields(validation, ('method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references'), 'validation')
         if (validation['method'] != 'all-midpoints-final-serialized' or validation['samples'] != COUNT - 1
                 or validation['tolerance_au'] != TOLERANCE or not number(validation['max_error_au'])
                 or not 0 <= validation['max_error_au'] <= TOLERANCE):
@@ -199,24 +181,29 @@ def build_candidate(records, stage, previous=None):
 
 def refresh_comets(cache, output, *, refresh=False, offline=False):
     cache, output = Path(cache), Path(output)
-    validate_writable_path(output, label='Comet output')
-    validate_disjoint_paths(output, (cache,), label='Comet output')
+    # Check the lexical target before resolving aliases for all locks/staging.
     managed_files(output)
+    output = validate_writable_path(output, label='Comet output')
+    validate_disjoint_paths(cache, (output,), label='Horizons cache')
     output.parent.mkdir(parents=True, exist_ok=True)
-    # When installed at data/comets, share the asteroid writer's site lock.
-    lock = output.parent.parent / ('.' + output.parent.name + '-browser-lock')
-    with writer_lock(lock):
-        previous = None
-        if (output / 'latest.json').exists():
-            # Managed orphans left after pointer installation can be pruned by rerun.
-            verify_comets(output, allow_orphans=True)
-            pin = read_json(output / 'latest.json')['index']
-            previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
+    site = output.parent
+    lock = site.parent / ('.' + site.name + '-browser-lock')
+    refresh_lock = site.parent / ('.' + site.name + '-' + output.name + '-refresh-lock')
+    # Serialize comet refreshes even with different caches, but let asteroid
+    # writers and site publication proceed during the slow upstream requests.
+    with writer_lock(refresh_lock):
         records = acquire(cache, refresh=refresh, offline=offline)
-        with tempfile.TemporaryDirectory(prefix='.comets-', dir=output.parent.parent) as temp:
-            stage = Path(temp)
-            build_candidate(records, stage, previous)
-            changes = sync_candidate(stage, output, inventory=managed_files)
-            result = verify_comets(output)
+        with writer_lock(lock):
+            managed_files(output)
+            previous = None
+            if (output / 'latest.json').exists():
+                verify_comets(output, allow_orphans=True)
+                pin = read_json(output / 'latest.json')['index']
+                previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
+            with tempfile.TemporaryDirectory(prefix='.comets-', dir=site.parent) as temp:
+                stage = Path(temp)
+                build_candidate(records, stage, previous)
+                changes = sync_candidate(stage, output, inventory=managed_files)
+                result = verify_comets(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',
             'changes': changes}
