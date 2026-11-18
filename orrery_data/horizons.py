@@ -2,19 +2,19 @@
 
 import hashlib
 import math
-import os
+import http.client
 from pathlib import Path
 import re
 import stat
+import ssl
 import time
-import tempfile
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from . import __version__
 from .formats import DataError
-from .storage import atomic_json, loads_json, now, read_json, writer_lock, utc_timestamp
+from .storage import atomic_bytes, atomic_json, loads_json, now, read_json, writer_lock, utc_timestamp
 from .paths import validate_writable_path
 
 ENDPOINT = 'https://ssd.jpl.nasa.gov/api/horizons.api'
@@ -88,16 +88,28 @@ def download(url, timeout=90):
             with urlopen(request, timeout=timeout) as response:
                 if response.status != 200 or response.headers.get('Content-Encoding', 'identity') != 'identity':
                     raise DataError('Unexpected Horizons HTTP response')
+                length = response.headers.get('Content-Length')
+                if length is not None:
+                    if not re.fullmatch(r'[0-9]+', length):
+                        raise DataError('Invalid Horizons Content-Length')
+                    length = int(length)
+                    if length > MAX_RESPONSE:
+                        raise DataError('Horizons response exceeds size limit')
                 raw = response.read(MAX_RESPONSE + 1)
                 if len(raw) > MAX_RESPONSE:
                     raise DataError('Horizons response exceeds size limit')
+                if length is not None and len(raw) < length:
+                    raise http.client.IncompleteRead(raw, length - len(raw))
+                if length is not None and len(raw) > length:
+                    raise DataError('Horizons body exceeds declared Content-Length')
                 return raw
         except HTTPError as exc:
             code = exc.code
             exc.close()
             if code not in (429, 500, 502, 503, 504) or attempt == 2:
                 raise
-        except (URLError, TimeoutError):
+        except (URLError, TimeoutError, ConnectionError, http.client.IncompleteRead,
+                http.client.RemoteDisconnected, ssl.SSLEOFError):
             if attempt == 2:
                 raise
         time.sleep(2 ** (attempt + 1))
@@ -151,15 +163,7 @@ def acquire(cache, *, refresh=False, offline=False):
                         if not stat.S_ISREG(target.lstat().st_mode) or target.read_bytes() != raw:
                             raise DataError('Corrupt retained Horizons response')
                     else:
-                        fd, name = tempfile.mkstemp(prefix='.response-', dir=cache)
-                        try:
-                            with os.fdopen(fd, 'wb') as stream:
-                                stream.write(raw)
-                                stream.flush()
-                                os.fsync(stream.fileno())
-                            Path(name).replace(target)
-                        finally:
-                            Path(name).unlink(missing_ok=True)
+                        atomic_bytes(target, raw)
                     atomic_json(record_path, record)
                 rows, provenance = parse_response(raw, object_id, midpoint)
                 records[key] = (rows, {**record, **provenance})
