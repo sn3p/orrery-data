@@ -1,9 +1,11 @@
 import { validatePin, validateIndex, validateRecords, parseJSON, freeze,
   countThrough, requireValue, validateLatest } from "./contract.js";
 
-import { aborted, check, linkCancellation, fetchLatest, fetchVerified } from './transport.js';
+import { aborted, check, linkCancellation, fetchLatest, fetchVerified as fetchProductVerified } from './transport.js';
 // Preserve the existing public helper export for adapter consumers.
-export { fetchVerified } from './transport.js';
+export function fetchVerified(ref, url, signal) {
+  return fetchProductVerified(ref, url, signal);
+}
 // Digest completion is a microtask. Keep file parsing and consumer preparation
 // in separate tasks: otherwise individually bounded phases can combine into a
 // long task. The processing slot remains held across these scheduling points.
