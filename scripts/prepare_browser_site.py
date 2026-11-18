@@ -8,8 +8,12 @@ import shutil
 import subprocess
 import sys
 from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from orrery_data.storage import writer_lock
 # Keep in sync with the workflow's non-data push paths. The CLI imports the
 # producer package transitively; no installation or external config is needed.
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
@@ -28,34 +32,48 @@ def main():
     source = (ROOT / 'data').resolve()
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
-    result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-browser', '--directory', ROOT / 'data'],
-                            cwd=ROOT, capture_output=True, text=True)
-    if result.returncode:
-        print(result.stderr, file=sys.stderr)
-        return result.returncode
-    verified = json.loads(result.stdout)
-    force = args.force
-    if args.publication_base is not None:
-        comparison = subprocess.run(
-            ['git', 'diff', '--quiet', '--no-ext-diff', args.publication_base, 'HEAD', '--', *PUBLICATION_PATHS],
-            cwd=ROOT, capture_output=True)
-        # An unavailable base (for example a first/force push) must not silently
-        # skip a publication-code change. Local data has already passed verification.
-        force = force or comparison.returncode != 0
-    unchanged = False
-    if args.latest_url and not force:
-        try:
-            with urlopen(args.latest_url, timeout=20) as response:
-                current = json.loads(response.read(4097))
-            unchanged = current == json.loads((ROOT / 'data/latest.json').read_text())
-        except (OSError, ValueError):
-            # Unavailable/unconfigured host: prepare a complete candidate normally.
-            pass
-    if not unchanged:
-        shutil.copytree(ROOT / 'data', output)
-        (output / '.nojekyll').write_text('')
-    print(json.dumps({**verified, 'status': 'unchanged' if unchanged else 'prepared', 'output': str(output)}))
-    return 0
+    with writer_lock(ROOT / '.data-browser-lock'):
+        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', ROOT / 'data'],
+                                cwd=ROOT, capture_output=True, text=True)
+        if result.returncode:
+            print(result.stderr, file=sys.stderr)
+            return result.returncode
+        verified = json.loads(result.stdout)
+        force = args.force
+        if args.publication_base is not None:
+            comparison = subprocess.run(
+                ['git', 'diff', '--quiet', '--no-ext-diff', args.publication_base, 'HEAD', '--', *PUBLICATION_PATHS],
+                cwd=ROOT, capture_output=True)
+            # An unavailable base (for example a first/force push) must not silently
+            # skip a publication-code change. Local data has already passed verification.
+            force = force or comparison.returncode != 0
+        unchanged = False
+        if args.latest_url and not force:
+            try:
+                with urlopen(args.latest_url, timeout=20) as response:
+                    current = json.loads(response.read(4097))
+                unchanged = current == json.loads((ROOT / 'data/latest.json').read_text())
+                comet_descriptor = ROOT / 'data/comets/latest.json'
+                if unchanged:
+                    local_comets = json.loads(comet_descriptor.read_text()) if comet_descriptor.exists() else None
+                    try:
+                        with urlopen(urljoin(args.latest_url, 'comets/latest.json'), timeout=20) as response:
+                            remote_comets = json.loads(response.read(4097))
+                    except HTTPError as exc:
+                        if exc.code != 404:
+                            raise
+                        exc.close()
+                        remote_comets = None
+                    unchanged = remote_comets == local_comets
+            except (OSError, ValueError):
+                # Unavailable/unconfigured host: prepare a complete candidate normally.
+                unchanged = False
+        if not unchanged:
+            shutil.copytree(ROOT / 'data', output)
+            (output / '.nojekyll').write_text('')
+        print(json.dumps({**verified, 'status': 'unchanged' if unchanged else 'prepared', 'output': str(output)}))
+        return 0
+
 
 
 if __name__ == '__main__':

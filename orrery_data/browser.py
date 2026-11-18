@@ -3,13 +3,12 @@
 from pathlib import Path
 import re
 import shutil
-import stat
 import tempfile
 
 from .contracts import validate_contract, obj, literal, TEXT, FILE_FIELDS
 from .formats import DataError
 from .indexed import verify_indexed, MAX_INDEX_BYTES, MAX_CHUNK_BYTES
-from .paths import validate_disjoint_paths, validate_writable_path
+from .paths import validate_disjoint_paths, validate_writable_path, managed_tree
 from .pipeline import validate_snapshot_counts
 from .records import validate_catalog_record
 from .storage import read_json, write_json, file_info, verify_file, writer_lock
@@ -29,25 +28,8 @@ def check_reference(ref, prefix, suffix):
 
 
 def managed_files(directory):
-    """Refuse unrelated trees; interrupted updates may leave managed orphans."""
-    if not directory.exists():
-        if directory.is_symlink():
-            raise DataError('Browser output cannot be a symlink')
-        return set()
-    if not stat.S_ISDIR(directory.lstat().st_mode):
-        raise DataError('Browser output must be a real directory')
-    names = set()
-    for path in directory.iterdir():
-        if path.name == 'chunks' and stat.S_ISDIR(path.lstat().st_mode):
-            entries = list(path.iterdir())
-        else:
-            entries = [path]
-        for item in entries:
-            name = item.relative_to(directory).as_posix()
-            if not stat.S_ISREG(item.lstat().st_mode) or not MANAGED.fullmatch(name):
-                raise DataError(f'Unexpected browser output entry: {name}')
-            names.add(name)
-    return names
+    """Own asteroid files; comets have an independent verifier and inventory."""
+    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets',), label='Browser output')
 
 
 def verify_browser(directory, index_sha256=None):
@@ -187,13 +169,13 @@ def build_candidate(bundle, stage, previous=None):
     return verify_browser(stage)
 
 
-def sync_candidate(stage, output):
+def sync_candidate(stage, output, *, inventory=managed_files):
     """Authoring-tree update: immutable files first, pointer last, then prune.
 
     A crash may leave extra managed files; rerun to finish. Deployment always
     verifies a complete committed tree, never a live authoring directory.
     """
-    old, new = managed_files(output), managed_files(stage)
+    old, new = inventory(output), inventory(stage)
     added, changed, unchanged = [], [], []
     for name in sorted(new):
         if name not in old:

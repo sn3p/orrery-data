@@ -119,13 +119,28 @@ def parser():
     browser_verify = commands.add_parser("verify-browser")
     browser_verify.add_argument("--directory", type=Path, default=Path("data"))
     browser_verify.add_argument("--index-sha256")
+    site_verify = commands.add_parser("verify-site", help="verify the complete asteroid and optional comet site")
+    site_verify.add_argument("--directory", type=Path, default=Path("data"))
+    comet = commands.add_parser("refresh-comets", help="validate cached Horizons responses and export; network only for missing inputs or --refresh")
+    comet.add_argument("--cache", type=Path, default=Path(".data/horizons"))
+    comet.add_argument("--output", type=Path, default=Path("data/comets"))
+    comet.add_argument("--offline", action="store_true", help="require all validated saved responses; never access the network")
+    comet.add_argument("--refresh", action="store_true", help="explicitly reacquire all six Horizons queries")
+    comet_verify = commands.add_parser("verify-comets")
+    comet_verify.add_argument("--directory", type=Path, default=Path("data/comets"))
     return root
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        if args.command == "check":
+        if args.command == "refresh-comets":
+            from .comets import refresh_comets
+            result = refresh_comets(args.cache, args.output, refresh=args.refresh, offline=args.offline)
+        elif args.command == "verify-comets":
+            from .comets import verify_comets
+            result = verify_comets(args.directory)
+        elif args.command == "check":
             result = check(args.store, {name: getattr(args, name + "_url") for name in URLS}, args.timeout)
         elif args.command == "refresh":
             if bool(args.mpcorb) != bool(args.numbered):
@@ -158,6 +173,9 @@ def main(argv=None):
             result = verify_indexed(args.bundle, args.index_sha256)
         elif args.command == "export-browser":
             result = export_browser(args.bundle, args.output)
+        elif args.command == "verify-site":
+            from .site import verify_site
+            result = verify_site(args.directory)
         elif args.command == "verify-browser":
             result = verify_browser(args.directory, args.index_sha256)
         elif args.command == "export":

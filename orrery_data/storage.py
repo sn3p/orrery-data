@@ -140,16 +140,21 @@ def write_json(path, value):
     path.write_text(encode(value) + "\n", encoding="utf-8")
 
 
-def atomic_json(path, value):
+def atomic_bytes(path, value):
+    """Install complete bytes atomically on the destination filesystem."""
     fd, name = tempfile.mkstemp(prefix=".pointer-", dir=path.parent)
     try:
-        with os.fdopen(fd, "w") as stream:
-            stream.write(encode(value) + "\n")
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
+
+
+def atomic_json(path, value):
+    atomic_bytes(path, (encode(value) + "\n").encode("utf-8"))
 
 
 @contextmanager
