@@ -1,0 +1,136 @@
+import { fetchVerified } from './CatalogSource.js';
+import { parseJSON, freeze } from './contract.js';
+
+const START = 2444239.5, STEP = 4, COUNT = 10958;
+const IDS = ['1P', '2P', '55P'];
+const NAMES = ['1P/Halley', '2P/Encke', '55P/Tempel-Tuttle'];
+const CONVENTIONS = { center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
+  velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' };
+const requireValue = (condition, label) => { if (!condition) throw new Error(`Invalid comet ${label}`); };
+const fields = (value, names) => requireValue(value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).sort().join(',') === [...names].sort().join(','), 'fields');
+const check = signal => { if (signal?.aborted) throw new DOMException('Comet read cancelled.', 'AbortError'); };
+const decode = bytes => parseJSON(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+function reference(ref, prefix, max) {
+  fields(ref, ['url', 'sha256', 'bytes']);
+  requireValue(/^[a-f0-9]{64}$/.test(ref.sha256) && ref.url === `${prefix}${ref.sha256}.json`
+    && Number.isSafeInteger(ref.bytes) && ref.bytes > 0 && ref.bytes <= max, 'reference');
+}
+function sourceQuery(id, midpoint) {
+  const params = { format: 'json', COMMAND: `'DES=${id}; CAP;'`, EPHEM_TYPE: "'VECTORS'",
+    CENTER: "'500@10'", START_TIME: midpoint ? "'1980-01-03'" : "'1980-01-01'",
+    STOP_TIME: midpoint ? "'2099-12-30'" : "'2100-01-01'", STEP_SIZE: "'4 d'",
+    TIME_TYPE: "'UT'", OUT_UNITS: "'AU-D'", REF_PLANE: "'ECLIPTIC'", REF_SYSTEM: "'ICRF'",
+    VEC_TABLE: "'2'", CSV_FORMAT: "'YES'", VEC_CORR: "'NONE'", OBJ_DATA: "'YES'" };
+  return 'https://ssd.jpl.nasa.gov/api/horizons.api?' + new URLSearchParams(params);
+}
+function utcTimestamp(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().replace('.000Z', 'Z') === value;
+}
+function version(value) { requireValue(value.comet_contract_version === 1, 'contract version'); }
+export function validateComet(value, id) {
+  fields(value, ['comet_contract_version', 'id', 'conventions', 'series']); version(value);
+  requireValue(value.id === id && IDS.includes(id), 'identity');
+  fields(value.conventions, Object.keys(CONVENTIONS));
+  requireValue(Object.entries(CONVENTIONS).every(([k, v]) => value.conventions[k] === v), 'conventions');
+  fields(value.series, ['start', 'step', 'states']);
+  const { start, step, states } = value.series;
+  requireValue(start === START && step === STEP && Array.isArray(states) && states.length === COUNT
+    && states.every(row => Array.isArray(row) && row.length === 6 && row.every(Number.isFinite)), 'states');
+  return value;
+}
+export function interpolateComet(series, jd) {
+  const offset = (jd - series.start) / series.step;
+  requireValue(Number.isFinite(jd) && offset >= 0 && offset <= series.states.length - 1, 'date coverage');
+  const index = Math.min(Math.floor(offset), series.states.length - 2), t = offset - index;
+  const a = series.states[index], b = series.states[index + 1], h = series.step;
+  return [0, 1, 2].map(k => (2*t**3-3*t*t+1)*a[k] + (t**3-2*t*t+t)*h*a[k+3]
+    + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3]);
+}
+
+// A source pins one index. A new visit/retry creates a new source; close aborts
+// outstanding reads. Selection and renderer generation remain the app's concern.
+export default class CometSource {
+  static async openLatest(url, { signal } = {}) {
+    const location = new URL(url);
+    const loopback = ['localhost', 'localhost.', '[::1]'].includes(location.hostname)
+      || /^127(?:\.\d{1,3}){3}$/.test(location.hostname);
+    requireValue((location.protocol === 'https:' || (location.protocol === 'http:' && loopback))
+      && !location.username && !location.password, 'latest URL');
+    check(signal);
+    const response = await fetch(location, { signal, cache: 'no-cache', redirect: 'error' });
+    requireValue(response.ok, 'descriptor response');
+    const reader = response.body.getReader(), bytes = new Uint8Array(4096);
+    let length = 0;
+    try {
+      while (true) {
+        check(signal);
+        const { value, done } = await reader.read();
+        if (done) break;
+        requireValue(length + value.length <= bytes.length, 'descriptor size');
+        bytes.set(value, length); length += value.length;
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    const latest = decode(bytes.subarray(0, length));
+    fields(latest, ['comet_contract_version', 'index']); version(latest);
+    reference(latest.index, 'index-', 256 * 1024);
+    const indexURL = new URL(latest.index.url, location).href;
+    const index = decode(await fetchVerified(latest.index, indexURL, signal));
+    fields(index, ['comet_contract_version', 'objects']); version(index);
+    requireValue(Array.isArray(index.objects) && index.objects.length === IDS.length, 'catalogue');
+    index.objects.forEach((entry, i) => {
+      fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
+      requireValue(entry.id === IDS[i] && entry.name === NAMES[i] && Array.isArray(entry.coverage)
+        && entry.coverage.length === 2 && entry.coverage[0] === START
+        && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
+      reference(entry.data, 'objects/', 2 * 1024 * 1024);
+      fields(entry.provenance, ['vectors', 'midpoints']);
+      for (const [kind, source] of Object.entries(entry.provenance)) {
+        fields(source, ['url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version']);
+        requireValue(Object.values(source).every(v => typeof v === 'string' && v.length)
+          && ['1.2', '1.3'].includes(source.api_version) && utcTimestamp(source.retrieved_at)
+          && source.url === sourceQuery(entry.id, kind === 'midpoints')
+          && source.target === entry.name && /^JPL#[A-Za-z0-9\/._-]+$/.test(source.solution)
+          && /^[a-f0-9]{64}$/.test(source.sha256), 'provenance');
+      }
+      requireValue(entry.provenance.vectors.solution === entry.provenance.midpoints.solution, 'solution');
+      const v = entry.validation;
+      fields(v, ['method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references']);
+      requireValue(v.method === 'all-midpoints-final-serialized' && v.samples === COUNT - 1
+        && v.tolerance_au === 0.000052 && Number.isFinite(v.max_error_au)
+        && v.max_error_au >= 0 && v.max_error_au <= v.tolerance_au && Array.isArray(v.references)
+        && v.references.length > 0 && v.references.every(r => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
+        && v.references.some(r => r[0] === v.worst_jd), 'validation');
+    });
+    check(signal);
+    return new CometSource(indexURL, latest.index.sha256, index);
+  }
+  constructor(url, sourceId, info) {
+    Object.defineProperties(this, { url: { value: url }, sourceId: { value: sourceId, enumerable: true },
+      info: { value: freeze(info), enumerable: true } });
+    this.lifetime = new AbortController();
+    this.cache = new Map();
+  }
+  async load(id, { signal } = {}) {
+    check(signal); check(this.lifetime.signal);
+    const entry = this.info.objects.find(v => v.id === id);
+    requireValue(entry, 'selection');
+    if (this.cache.has(id)) return this.cache.get(id);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const signals = [signal, this.lifetime.signal].filter(Boolean);
+    signals.forEach(s => s.addEventListener('abort', abort, { once: true }));
+    try {
+      const value = validateComet(decode(await fetchVerified(entry.data,
+        new URL(entry.data.url, this.url).href, controller.signal)), id);
+      for (const row of entry.validation.references) requireValue(
+        Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
+        'interpolation tolerance');
+      check(signal); check(this.lifetime.signal);
+      this.cache.set(id, freeze(value));
+      return value;
+    } finally { signals.forEach(s => s.removeEventListener('abort', abort)); }
+  }
+  close() { this.lifetime.abort(); this.cache.clear(); }
+}

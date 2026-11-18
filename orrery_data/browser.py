@@ -38,6 +38,10 @@ def managed_files(directory):
         raise DataError('Browser output must be a real directory')
     names = set()
     for path in directory.iterdir():
+        if path.name == 'comets':
+            from .comets import verify_comets
+            verify_comets(path)
+            continue
         if path.name == 'chunks' and stat.S_ISDIR(path.lstat().st_mode):
             entries = list(path.iterdir())
         else:
@@ -187,13 +191,13 @@ def build_candidate(bundle, stage, previous=None):
     return verify_browser(stage)
 
 
-def sync_candidate(stage, output):
+def sync_candidate(stage, output, *, inventory=managed_files):
     """Authoring-tree update: immutable files first, pointer last, then prune.
 
     A crash may leave extra managed files; rerun to finish. Deployment always
     verifies a complete committed tree, never a live authoring directory.
     """
-    old, new = managed_files(output), managed_files(stage)
+    old, new = inventory(output), inventory(stage)
     added, changed, unchanged = [], [], []
     for name in sorted(new):
         if name not in old:
