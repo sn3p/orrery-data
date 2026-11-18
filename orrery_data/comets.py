@@ -9,7 +9,7 @@ from .browser import check_reference, reference, sync_candidate
 from .formats import DataError
 from .contracts import obj, array, rule, literal, TEXT, NONEMPTY, FILE_FIELDS, UTC, INDEX_NUMBER
 from .horizons import TARGETS, START, STEP, COUNT, acquire, query
-from .paths import validate_disjoint_paths, validate_writable_path, managed_tree
+from .paths import validate_disjoint_paths, validate_writable_path, managed_tree, validate_same_filesystem
 from .storage import read_json, write_json, verify_file, writer_lock
 
 CONVENTIONS = {'center': 'Sun', 'frame': 'Ecliptic J2000', 'time': 'UT',
@@ -182,11 +182,14 @@ def build_candidate(records, stage, previous=None):
 def refresh_comets(cache, output, *, refresh=False, offline=False):
     cache, output = Path(cache), Path(output)
     # Check the lexical target before resolving aliases for all locks/staging.
-    managed_files(output)
+    names = managed_files(output)
     output = validate_writable_path(output, label='Comet output')
-    validate_disjoint_paths(cache, (output,), label='Horizons cache')
-    output.parent.mkdir(parents=True, exist_ok=True)
     site = output.parent
+    # A failed acquisition must not leave locks/raw inputs in either product.
+    validate_disjoint_paths(cache, (site,), label='Horizons cache')
+    destinations = (site, output, output / 'objects', *(output / name for name in names))
+    validate_same_filesystem(site.parent, destinations, label='Comet output')
+    site.mkdir(parents=True, exist_ok=True)
     lock = site.parent / ('.' + site.name + '-browser-lock')
     refresh_lock = site.parent / ('.' + site.name + '-' + output.name + '-refresh-lock')
     # Serialize comet refreshes even with different caches, but let asteroid
@@ -194,7 +197,9 @@ def refresh_comets(cache, output, *, refresh=False, offline=False):
     with writer_lock(refresh_lock):
         records = acquire(cache, refresh=refresh, offline=offline)
         with writer_lock(lock):
-            managed_files(output)
+            names = managed_files(output)
+            validate_same_filesystem(site.parent, (site, output, output / 'objects',
+                                                   *(output / name for name in names)), label='Comet output')
             previous = None
             if (output / 'latest.json').exists():
                 verify_comets(output, allow_orphans=True)

@@ -114,3 +114,21 @@ def managed_tree(directory, pattern, *, children=(), reserved=(), label='Output'
                 raise DataError(f'Unexpected {label.lower()} entry: {name}')
             names.add(name)
     return names
+
+
+def validate_same_filesystem(staging_parent, destinations, *, label):
+    """Preflight atomic renames, using existing ancestors for future paths."""
+    def device(path):
+        path = Path(path)
+        while True:
+            try:
+                return path.stat().st_dev
+            except FileNotFoundError:
+                if path.parent == path:
+                    raise
+                path = path.parent
+
+    expected = device(staging_parent)
+    for destination in destinations:
+        if device(destination) != expected:
+            raise DataError(f'{label} and staging parent must be on the same filesystem: {destination}')

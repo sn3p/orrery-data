@@ -22,7 +22,10 @@ python3 scripts/prepare_browser_site.py --output .context/pages-site
 ```
 
 `--cache` defaults to ignored `.data/horizons`; `--output` to `data/comets`.
-Keep this cache for offline regeneration. It retains exact HTTP bodies named by
+The cache must be disjoint from the entire public site (the parent of the comet
+output), including sibling product directories and resolved aliases. Invalid
+overlap is rejected before any lock or input is written. Keep this cache for
+offline regeneration. It retains exact HTTP bodies named by
 SHA-256 and query records with retrieval timestamps. Saved queries are explicitly
 reused, without an implied freshness guarantee; `--offline` rejects missing input.
 The public projection can be verified without the raw cache, but cannot reproduce
@@ -31,7 +34,12 @@ Ordinary builds and tests never query JPL.
 
 A cache lock serializes acquisition. A separate per-output comet refresh lock
 prevents older acquisitions from overtaking newer ones, including across caches.
-Paths are resolved before deriving locks and staging destinations. When using
+Paths are resolved before deriving locks and staging destinations. Atomic
+installation requires the site, comet tree and its existing files to share the
+staging parent’s filesystem. Different filesystems are rejected before acquisition;
+place the site inside a directory on the destination volume so its parent can
+hold staging files on that same volume. This preserves pointer-last atomic
+renames without placing temporary candidates in the public tree. When using
 `data/comets`, both producers and the Pages stager share `.data-browser-lock`
 only during local verification/installation; upstream acquisition leaves it free.
 Build/validate the whole comet
