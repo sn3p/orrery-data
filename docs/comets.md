@@ -156,6 +156,8 @@ requests, following [JPL fair use](https://ssd-api.jpl.nasa.gov/doc/).
 
 ## Consumer migration
 
+Copy `consumer/CometSource.js`, `consumer/contract.js` and `consumer/transport.js`
+together; see the [consumer migration files and attribution](../consumer/README.md).
 `consumer/CometSource.js` is a reference adapter using existing verified-fetch,
 strict JSON and immutable metadata helpers. Open once per source generation:
 
