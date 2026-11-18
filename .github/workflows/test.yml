@@ -1,7 +1,20 @@
 name: Test pipeline
-on: [push, pull_request]
+on:
+  # Branch pushes are covered by their pull request; testing both ran every suite twice.
+  push:
+    branches: [master]
+  pull_request:
+  # Run on demand for a branch without a pull request.
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  # Groups are repository-wide, so the workflow name keeps them from clashing with
+  # other workflows. Only runs for the same pull request share a group, so a newer
+  # push cancels the unfinished run. Master and manual runs get their own group and
+  # always complete.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest

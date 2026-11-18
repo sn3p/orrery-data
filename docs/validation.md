@@ -14,6 +14,9 @@ gzip determinism, stored corruption, missing provenance, count-decrease guards,
 concurrent writers, expected source hashes, validator outcomes, malformed HTTP,
 partial downloads, corrupt/truncated gzip and previous-output retention.
 CI runs this suite on Python 3.11–3.13 with no live-source dependency.
+It runs automatically on pull requests and on pushes to `master`. A branch without
+a pull request, or a pull request with merge conflicts (GitHub skips those), is
+tested only on request: `gh workflow run test.yml --ref <branch>`.
 
 SQLite regressions also use real CLI processes: complete field/provenance
 round trips, case-sensitive authority lookups, distinct W/w values, null dates,
