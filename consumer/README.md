@@ -5,18 +5,19 @@
 [Orrery3D f8c914c](https://github.com/sn3p/Orrery3D/tree/f8c914c96534abf94ed9b33c55f389e13b2d2faf/src/js/catalog).
 Copyright (c) 2016 Matthijs Kuiper; see the repository [MIT license](../LICENSE).
 
-Copy these files together when migrating both reference adapters (keep their
+Copy these files together when migrating the reference adapters (keep their
 relative paths):
 
 ```text
 CatalogSource.js
 CometSource.js
+CometCatalogSource.js
 contract.js
 transport.js
 ```
 
 For asteroid-only use, `CometSource.js` may be omitted. For comet-only use,
-`CatalogSource.js` may be omitted. Both adapters require `contract.js` and
+`CatalogSource.js` may be omitted. All adapters require `contract.js` and
 `transport.js`. `CometSource.js` is OrreryData's comet adapter under the same
 repository MIT license. Keep the attribution and license with copied code.
 
@@ -39,3 +40,8 @@ Errors and cancellation messages retain the product context: comet failures say
 wording. Both adapters share bounded transport, while the public
 `CatalogSource.js` export `fetchVerified(ref, url, signal)` remains an asteroid
 compatibility wrapper with the same three-argument API.
+
+For the six-object v2 catalogue use `CometCatalogSource.js` and the separate
+`comets-v2/latest.json` endpoint; see [v2 contract and handoff](../docs/comets-v2.md).
+The existing `CometSource.js` continues to accept only v1. Either comet reader
+can be omitted when not used; both require `contract.js` and `transport.js`.

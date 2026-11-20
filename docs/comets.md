@@ -3,7 +3,9 @@
 OrreryData now has a separate, manually refreshed comet product. Asteroid
 `latest.json`, discovery ordering, rows and weekly schedule remain compatible.
 The initial reviewed selection is 1P/Halley, 2P/Encke and 55P/Tempel-Tuttle.
-Orrery app adoption and further targets are separate work. No comet schedule
+Orrery v1 adoption shipped in PR110 (`f55f237b`). The separate
+[six-object v2 catalogue](comets-v2.md) retains this endpoint unchanged;
+Orrery v2 adoption remains separate work. No comet schedule
 is enabled in this milestone.
 
 ## Commands and ownership
