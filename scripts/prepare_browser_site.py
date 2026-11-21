@@ -53,11 +53,13 @@ def main():
                 with urlopen(args.latest_url, timeout=20) as response:
                     current = json.loads(response.read(4097))
                 unchanged = current == json.loads((ROOT / 'data/latest.json').read_text())
-                comet_descriptor = ROOT / 'data/comets/latest.json'
-                if unchanged:
+                for product in ('comets', 'comets-v2'):
+                    if not unchanged:
+                        break
+                    comet_descriptor = ROOT / 'data' / product / 'latest.json'
                     local_comets = json.loads(comet_descriptor.read_text()) if comet_descriptor.exists() else None
                     try:
-                        with urlopen(urljoin(args.latest_url, 'comets/latest.json'), timeout=20) as response:
+                        with urlopen(urljoin(args.latest_url, product + '/latest.json'), timeout=20) as response:
                             remote_comets = json.loads(response.read(4097))
                     except HTTPError as exc:
                         if exc.code != 404:

@@ -74,7 +74,9 @@ class CometPublication(unittest.TestCase):
         remote = {'https://example.test/sub/latest.json': (data / 'latest.json').read_bytes(),
                   'https://example.test/sub/comets/latest.json': (self.output / 'latest.json').read_bytes()}
         def open_remote(url, timeout):
-            if url not in remote: raise OSError('missing remote product')
+            if url not in remote:
+                from urllib.error import HTTPError
+                raise HTTPError(url, 404, 'missing', {}, None)
             return io.BytesIO(remote[url])
         def invoke(name):
             out = self.root / name

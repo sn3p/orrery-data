@@ -128,13 +128,26 @@ def parser():
     comet.add_argument("--refresh", action="store_true", help="explicitly reacquire all six Horizons queries")
     comet_verify = commands.add_parser("verify-comets")
     comet_verify.add_argument("--directory", type=Path, default=Path("data/comets"))
+    comet = commands.add_parser("refresh-comets-v2", help="validate cached Horizons responses and export; network only for missing inputs or --refresh")
+    comet.add_argument("--cache", type=Path, default=Path(".data/horizons"))
+    comet.add_argument("--output", type=Path, default=Path("data/comets-v2"))
+    comet.add_argument("--offline", action="store_true", help="require all validated saved responses; never access the network")
+    comet.add_argument("--refresh", action="store_true", help="explicitly reacquire all twelve Horizons queries")
+    comet_verify = commands.add_parser("verify-comets-v2")
+    comet_verify.add_argument("--directory", type=Path, default=Path("data/comets-v2"))
     return root
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        if args.command == "refresh-comets":
+        if args.command == "refresh-comets-v2":
+            from .comets_v2 import refresh_comets
+            result = refresh_comets(args.cache, args.output, refresh=args.refresh, offline=args.offline)
+        elif args.command == "verify-comets-v2":
+            from .comets_v2 import verify_comets
+            result = verify_comets(args.directory)
+        elif args.command == "refresh-comets":
             from .comets import refresh_comets
             result = refresh_comets(args.cache, args.output, refresh=args.refresh, offline=args.offline)
         elif args.command == "verify-comets":
