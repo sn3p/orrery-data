@@ -12,11 +12,13 @@ relative paths):
 CatalogSource.js
 CometSource.js
 CometCatalogSource.js
+cometSourceCore.js
 contract.js
 transport.js
 ```
 
-For asteroid-only use, `CometSource.js` may be omitted. For comet-only use,
+For asteroid-only use, both comet adapters and `cometSourceCore.js` may be omitted.
+For comet-only use,
 `CatalogSource.js` may be omitted. All adapters require `contract.js` and
 `transport.js`. `CometSource.js` is OrreryData's comet adapter under the same
 repository MIT license. Keep the attribution and license with copied code.
@@ -44,4 +46,6 @@ compatibility wrapper with the same three-argument API.
 For the six-object v2 catalogue use `CometCatalogSource.js` and the separate
 `comets-v2/latest.json` endpoint; see [v2 contract and handoff](../docs/comets-v2.md).
 The existing `CometSource.js` continues to accept only v1. Either comet reader
-can be omitted when not used; both require `contract.js` and `transport.js`.
+can be omitted when not used; both require `cometSourceCore.js`, `contract.js`
+and `transport.js`. The core shares interpolation, validation, verified loading
+and cancellation; each entry module selects its own wire contract.

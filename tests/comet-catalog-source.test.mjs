@@ -341,3 +341,28 @@ test('a rehashed object must still match its selected catalogue identity', async
   await assert.rejects(source.load('1P'), /identity/);
   source.close();
 });
+
+test('v1 and v2 adapters keep separate contracts and lifetimes in one process', async t => {
+  const { default: LegacySource } = await import('../consumer/CometSource.js');
+  t.mock.method(globalThis, 'fetch', async url => {
+    const pathname = new URL(url).pathname;
+    const version2 = pathname.startsWith('/sub/comets-v2/');
+    const prefix = version2 ? '/sub/comets-v2/' : '/sub/comets/';
+    return new Response(await fs.readFile(path.join(version2 ? 'data/comets-v2' : 'data/comets', pathname.slice(prefix.length))));
+  });
+  const legacyURL = 'https://example.test/sub/comets/latest.json';
+  const latestURL = 'https://example.test/sub/comets-v2/latest.json';
+  const [legacy, current] = await Promise.all([LegacySource.openLatest(legacyURL), CometSource.openLatest(latestURL)]);
+  assert.equal(legacy.info.objects.length, 3);
+  assert.equal(current.info.objects.length, 6);
+  await assert.rejects(LegacySource.openLatest(latestURL), /contract version/);
+  await assert.rejects(CometSource.openLatest(legacyURL), /contract version/);
+  await assert.rejects(legacy.load('67P'), /selection/);
+  const [oldHalley, newHalley] = await Promise.all([legacy.load('1P'), current.load('1P')]);
+  assert.equal(oldHalley.comet_contract_version, 1);
+  assert.equal(newHalley.comet_contract_version, 2);
+  assert.deepEqual(oldHalley.series, newHalley.series);
+  legacy.close();
+  assert.equal((await current.load('67P')).id, '67P');
+  current.close();
+});

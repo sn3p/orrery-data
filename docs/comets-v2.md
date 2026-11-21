@@ -111,8 +111,8 @@ schedules refresh, changes the asteroid contract or removes bundled fallbacks.
 
 ## Consumer handoff
 
-Copy `CometCatalogSource.js`, `contract.js`, `transport.js` and the MIT license
-from the same revision. `CometSource.js` remains the strict v1 reader.
+Copy `CometCatalogSource.js`, `cometSourceCore.js`, `contract.js`, `transport.js`
+and the MIT license from the same revision. `CometSource.js` remains the strict v1 reader.
 
 ```js
 import CometCatalogSource, { interpolateComet } from './CometCatalogSource.js';
@@ -130,3 +130,13 @@ separate Orrery PR must make both selectors/renderers catalogue-driven and test
 selection, focus, window shifts, loading/error/retry, cancellation and renderer
 switches. Keep v1 and bundled rollback until that adoption is explicitly verified.
 No Orrery3D adoption, search UI, meteor streams or scheduling is included.
+
+## Shared implementation
+
+Both Python entry modules delegate to `comet_product.py` for schema checks,
+interpolation, final-byte numerical validation and locked atomic installation.
+The v1 contract fixes the original selection; the v2 contract accepts catalogue
+membership independently of the producer's curated acquisition targets. Both
+JavaScript entry modules use `cometSourceCore.js` for validation, interpolation
+and the pinned loading/cancellation lifecycle. Removing v1 later removes its
+entry modules and data, while retaining the shared implementation.
