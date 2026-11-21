@@ -11,12 +11,32 @@ objects. Earlier deployment-unconfirmed handoff statements are superseded.
 `comets/latest.json` and every referenced v1 asset remain unchanged. V2 lives at
 `comets-v2/latest.json`; it uses `comet_contract_version: 2` in descriptor, index
 and objects. All other field names, strict validation, conventions, limits and
-hash/relative-URL rules are those of v1. V2 deliberately fixes the reviewed
-catalogue in order: `1P`, `2P`, `55P`, `9P`, `10P`, `67P`. Unknown versions,
-identities, ordering, fields or grids fail closed. Further selection/grid
-changes require a reviewed contract revision. Catalogue metadata is available
-before selected objects are loaded; no app colours or selection defaults are
-part of this product.
+hash/relative-URL rules are those of v1. V2 accepts a nonempty catalogue with
+unique numbered periodic-comet IDs (`[1-9][0-9]*P`) in producer-defined order.
+Names must start with that ID plus `/`, have a nonempty suffix, no leading or
+trailing whitespace and no ASCII control characters. Provenance targets must
+match the name; queries and object IDs must match the entry ID. Unknown schema
+versions, fields, grids and invalid/duplicate identities fail closed.
+
+The producer's reviewed selection currently contains `1P`, `2P`, `55P`, `9P`,
+`10P`, `67P`. This selection is acquisition policy, not a reader allowlist.
+Adding, removing or reordering reviewed objects within the existing conventions,
+grid and size limits is a data update, not a new schema version. Each addition
+still requires source-backed identity, complete coverage and independent numerical
+validation. Different grids/conventions or structural changes require a reviewed
+contract change. Consumers discover entries from `source.info.objects` rather
+than assuming six objects or a fixed order; app colours/defaults remain app-owned.
+
+## Transition to one supported product
+
+The two endpoints are temporary migration scaffolding, not a public API support
+commitment. The intended end state is one catalogue, one reader and one supported
+schema. First publish this compatible producer change; next migrate both Orrery
+renderers/selectors in a separate PR and verify the deployed app. Then remove the
+v1 product, reader and obsolete commands in a reviewed cleanup. Keep the v2 URL
+or explicitly coordinate a move back to `comets`; the final path is undecided.
+A schema-version field can remain in the one product without hosting parallel
+versions. This PR does not remove v1, migrate Orrery or authorize deployment.
 
 All six cover UT JD `[2444239.5, 2488067.5]`, 1980-01-01 through 2099-12-30,
 with 10,958 states spaced four days apart. Horizons requests stop at 2100-01-01;

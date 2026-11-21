@@ -8,8 +8,9 @@ const requireValue = (ok, label) => requireProductValue(ok, label, 'comet');
 const fields = (value, expected) => keys(value, expected, [], 'comet');
 
 const START = 2444239.5, STEP = 4, COUNT = 10958;
-const IDS = ['1P', '2P', '55P', '9P', '10P', '67P'];
-const NAMES = ['1P/Halley', '2P/Encke', '55P/Tempel-Tuttle', '9P/Tempel 1', '10P/Tempel 2', '67P/Churyumov-Gerasimenko'];
+const validId = id => typeof id === 'string' && /^[1-9][0-9]*P$/.test(id) && id.endsWith('P');
+const validName = (name, id) => typeof name === 'string' && name.startsWith(id + '/')
+  && name.length > id.length + 1 && name === name.trim() && !/[\x00-\x1f\x7f]/.test(name);
 const CONVENTIONS = { center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
   velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' };
 function reference(ref, prefix, max) {
@@ -32,7 +33,7 @@ function utcTimestamp(value) {
 function version(value) { requireValue(value.comet_contract_version === 2, 'contract version'); }
 export function validateComet(value, id) {
   fields(value, ['comet_contract_version', 'id', 'conventions', 'series']); version(value);
-  requireValue(value.id === id && IDS.includes(id), 'identity');
+  requireValue(value.id === id && validId(id), 'identity');
   fields(value.conventions, Object.keys(CONVENTIONS));
   requireValue(Object.entries(CONVENTIONS).every(([k, v]) => value.conventions[k] === v), 'conventions');
   fields(value.series, ['start', 'step', 'states']);
@@ -62,10 +63,13 @@ export default class CometSource {
     check(signal);
     const index = decode(bytes);
     fields(index, ['comet_contract_version', 'objects']); version(index);
-    requireValue(Array.isArray(index.objects) && index.objects.length === IDS.length, 'catalogue');
-    index.objects.forEach((entry, i) => {
+    requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
+    const seen = new Set();
+    index.objects.forEach(entry => {
       fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
-      requireValue(entry.id === IDS[i] && entry.name === NAMES[i] && Array.isArray(entry.coverage)
+      requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
+      seen.add(entry.id);
+      requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
         && entry.coverage.length === 2 && entry.coverage[0] === START
         && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
       reference(entry.data, 'objects/', 2 * 1024 * 1024);

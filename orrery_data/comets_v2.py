@@ -72,9 +72,19 @@ def interpolate(series, jd):
             + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3] for k in range(3)]
 
 
+def valid_id(value):
+    return isinstance(value, str) and re.fullmatch(r'[1-9][0-9]*P', value) is not None
+
+
+def valid_name(name, object_id):
+    return (isinstance(name, str) and name.startswith(object_id + '/')
+            and len(name) > len(object_id) + 1 and name == name.strip()
+            and not any(ord(c) < 32 or ord(c) == 127 for c in name))
+
+
 def validate_object(value, object_id):
     OBJECT(value, 'object')
-    if value['id'] != object_id or len(value['series']['states']) != COUNT:
+    if not valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
         raise DataError('Invalid comet identity or state count')
 
 
@@ -98,11 +108,15 @@ def verify_comets(directory, *, allow_orphans=False):
     LATEST(latest, 'descriptor')
     index = read_reference(directory, latest['index'], 'index-', MAX_INDEX_BYTES)
     INDEX(index, 'index')
-    if not isinstance(index['objects'], list) or [v.get('id') for v in index['objects'] if isinstance(v, dict)] != list(TARGETS):
-        raise DataError('Comet v2 requires the six reviewed catalogue objects in order')
+    if not index['objects']:
+        raise DataError('Comet catalogue must not be empty')
+    seen = set()
     expected = {'latest.json', latest['index']['url']}
     for entry in index['objects']:
-        if entry['name'] != TARGETS[entry['id']] or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
+        if not valid_id(entry['id']) or entry['id'] in seen:
+            raise DataError('Invalid or duplicate comet identity')
+        seen.add(entry['id'])
+        if not valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
             raise DataError('Invalid comet metadata/coverage')
         provenance = entry['provenance']
         for kind, source in provenance.items():
@@ -170,10 +184,10 @@ def build_candidate(records, stage, previous=None):
         # Reuse the prior acquisition provenance only when all scientific headers,
         # queries, serialized states and numerical results are identical.
         if previous:
-            old = next(v for v in previous['objects'] if v['id'] == object_id)
+            old = next((v for v in previous['objects'] if v['id'] == object_id), None)
             def scientific(item):
                 return {k: v for k, v in item.items() if k not in ('sha256', 'retrieved_at')}
-            if (old['data'] == ref and old['validation'] == entry['validation']
+            if (old is not None and old['data'] == ref and old['validation'] == entry['validation']
                     and all(scientific(old['provenance'][k]) == scientific(v) for k, v in entry['provenance'].items())):
                 entry['provenance'] = old['provenance']
         index['objects'].append(entry)

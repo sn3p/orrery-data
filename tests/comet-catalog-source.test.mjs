@@ -271,3 +271,73 @@ test('comet adapter errors keep comet context at discovery, selection and load b
   source.close();
   await assert.rejects(source.load('1P'), { name: 'AbortError', message: 'Comet read cancelled.' });
 });
+
+// Rehashed structural fixtures test extensibility, not scientific evidence for a new object.
+async function catalogueFixture(t, transform) {
+  const { createHash } = await import('node:crypto');
+  const latest = JSON.parse(await fs.readFile(path.join(root, 'latest.json')));
+  const index = JSON.parse(await fs.readFile(path.join(root, latest.index.url)));
+  const files = new Map();
+  const ref = (value, prefix) => {
+    const bytes = Buffer.from(JSON.stringify(value));
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const url = `${prefix}${sha256}.json`; files.set(url, bytes);
+    return { url, sha256, bytes: bytes.length };
+  };
+  await transform(index, ref);
+  latest.index = ref(index, 'index-');
+  files.set('latest.json', JSON.stringify(latest));
+  t.mock.method(globalThis, 'fetch', async url => {
+    const name = new URL(url).href.slice(base.length);
+    return new Response(files.get(name) ?? await fs.readFile(path.join(root, name)));
+  });
+}
+
+test('membership and order come from the pin, including a new supported identity', async t => {
+  for (const count of [1, 6, 7]) {
+    await catalogueFixture(t, async (index, ref) => {
+      if (count === 7) {
+        const entry = structuredClone(index.objects[0]);
+        const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));
+        entry.id = value.id = '999P'; entry.name = '999P/Synthetic fixture';
+        for (const source of Object.values(entry.provenance)) {
+          source.target = entry.name;
+          const url = new URL(source.url); url.searchParams.set('COMMAND', "'DES=999P; CAP;'");
+          source.url = url.href;
+        }
+        entry.data = ref(value, 'objects/'); index.objects.push(entry);
+      }
+      index.objects = index.objects.slice(0, count).reverse();
+    });
+    const source = await CometSource.openLatest(base + 'latest.json');
+    assert.equal(source.info.objects.length, count);
+    assert.equal(source.info.objects[0].id, count === 7 ? '999P' : count === 6 ? '67P' : '1P');
+    for (const entry of source.info.objects) assert.equal((await source.load(entry.id)).id, entry.id);
+    source.close();
+  }
+});
+
+test('empty, duplicate and malformed identities fail even with valid content hashes', async t => {
+  const mutations = [index => { index.objects = []; }, index => { index.objects.push(index.objects[0]); }];
+  for (const [key, value] of [['id', '01P'], ['id','1P;'], ['id','1P\n'], ['id', true], ['name','2P/Wrong'],
+    ['name','1P/'], ['name','1P/Bad\nname'], ['name','1P/Name ']]) {
+    mutations.push(index => { index.objects[0][key] = value; });
+  }
+  mutations.push(index => { index.objects[0].provenance.vectors.target = '1P/Wrong'; });
+  for (const mutate of mutations) {
+    await catalogueFixture(t, mutate);
+    await assert.rejects(CometSource.openLatest(base + 'latest.json'));
+  }
+});
+
+test('a rehashed object must still match its selected catalogue identity', async t => {
+  await catalogueFixture(t, async (index, ref) => {
+    const entry = index.objects[0];
+    const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));
+    value.id = '999P';
+    entry.data = ref(value, 'objects/');
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  await assert.rejects(source.load('1P'), /identity/);
+  source.close();
+});
