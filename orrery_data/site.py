@@ -7,9 +7,17 @@ from .comets import verify_comets
 from .comets_v2 import verify_comets as verify_comets_v2
 
 
+def verify_optional_product(directory, verifier):
+    if directory.exists() or directory.is_symlink():
+        return verifier(directory)
+    return None
+
+
 def verify_site(directory):
     directory = Path(directory)
     asteroids = verify_browser(directory)
-    comets = directory / 'comets'
-    v2 = directory / 'comets-v2'
-    return {**asteroids, 'comets_v2': verify_comets_v2(v2) if v2.exists() or v2.is_symlink() else None, 'comets': verify_comets(comets) if comets.exists() or comets.is_symlink() else None}
+    return {
+        **asteroids,
+        'comets_v2': verify_optional_product(directory / 'comets-v2', verify_comets_v2),
+        'comets': verify_optional_product(directory / 'comets', verify_comets),
+    }

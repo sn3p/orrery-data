@@ -366,3 +366,22 @@ test('v1 and v2 adapters keep separate contracts and lifetimes in one process', 
   assert.equal((await current.load('67P')).id, '67P');
   current.close();
 });
+
+test('shared identity fixtures agree with producer whitespace and ID rules', async t => {
+  const cases = JSON.parse(await fs.readFile('tests/fixtures/comet-identities.json'));
+  for (const item of cases) {
+    await catalogueFixture(t, index => {
+      const entry = index.objects[0]; entry.id = item.id; entry.name = item.name;
+      for (const source of Object.values(entry.provenance)) {
+        source.target = item.name;
+        const url = new URL(source.url); url.searchParams.set('COMMAND', `'DES=${item.id}; CAP;'`);
+        source.url = url.href;
+      }
+      index.objects = [entry];
+    });
+    if (item.valid) (await CometSource.openLatest(base + 'latest.json')).close();
+    else await assert.rejects(CometSource.openLatest(base + 'latest.json'));
+  }
+  // Without multiline mode, the anchored regex rejects a trailing line terminator.
+  assert.equal(/^[1-9][0-9]*P$/.test('1P\n'), false);
+});

@@ -34,7 +34,9 @@ The public projection can be verified without the raw cache, but cannot reproduc
 all independent midpoint checks from its representative reference subset alone.
 Ordinary builds and tests never query JPL.
 
-A cache lock serializes acquisition. A separate per-output comet refresh lock
+A cache lock excludes competing access. Product refreshes share a per-site
+Horizons acquisition lock across versions and caches; competing commands fail
+fast and can be retried after the current acquisition. A separate per-output comet refresh lock
 prevents older acquisitions from overtaking newer ones, including across caches.
 Paths are resolved before deriving locks and staging destinations. Atomic
 installation requires the site, comet tree and its existing files to share the

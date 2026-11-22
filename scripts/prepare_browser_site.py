@@ -19,6 +19,36 @@ from orrery_data.storage import writer_lock
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
 
 
+def remote_descriptor(url, *, optional=False):
+    """Read a bounded descriptor; only optional products may be absent."""
+    try:
+        with urlopen(url, timeout=20) as response:
+            return json.loads(response.read(4097))
+    except HTTPError as exc:
+        if not optional or exc.code != 404:
+            raise
+        exc.close()
+        return None
+
+
+def published_site_matches(source, latest_url):
+    """Every product must match, including optional product presence/removal."""
+    descriptors = ('latest.json', 'comets/latest.json', 'comets-v2/latest.json')
+    try:
+        for name in descriptors:
+            optional = name != 'latest.json'
+            path = source / name
+            local = None if optional and not path.exists() else json.loads(path.read_text())
+            url = urljoin(latest_url, name) if optional else latest_url
+            remote = remote_descriptor(url, optional=optional)
+            if local != remote:
+                return False
+        return True
+    except (OSError, ValueError):
+        # Unavailable/unconfigured host: prepare a complete candidate normally.
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True, help='new, empty staging directory')
@@ -47,29 +77,8 @@ def main():
             # An unavailable base (for example a first/force push) must not silently
             # skip a publication-code change. Local data has already passed verification.
             force = force or comparison.returncode != 0
-        unchanged = False
-        if args.latest_url and not force:
-            try:
-                with urlopen(args.latest_url, timeout=20) as response:
-                    current = json.loads(response.read(4097))
-                unchanged = current == json.loads((ROOT / 'data/latest.json').read_text())
-                for product in ('comets', 'comets-v2'):
-                    if not unchanged:
-                        break
-                    comet_descriptor = ROOT / 'data' / product / 'latest.json'
-                    local_comets = json.loads(comet_descriptor.read_text()) if comet_descriptor.exists() else None
-                    try:
-                        with urlopen(urljoin(args.latest_url, product + '/latest.json'), timeout=20) as response:
-                            remote_comets = json.loads(response.read(4097))
-                    except HTTPError as exc:
-                        if exc.code != 404:
-                            raise
-                        exc.close()
-                        remote_comets = None
-                    unchanged = remote_comets == local_comets
-            except (OSError, ValueError):
-                # Unavailable/unconfigured host: prepare a complete candidate normally.
-                unchanged = False
+        unchanged = bool(args.latest_url and not force
+                         and published_site_matches(source, args.latest_url))
         if not unchanged:
             shutil.copytree(ROOT / 'data', output)
             (output / '.nojekyll').write_text('')

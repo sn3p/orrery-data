@@ -8,6 +8,7 @@ import tempfile
 from .browser import check_reference, reference, sync_candidate
 from .formats import DataError
 from .contracts import obj, array, rule, literal, TEXT, NONEMPTY, FILE_FIELDS, UTC, INDEX_NUMBER
+from . import horizons
 from .horizons import START, STEP, COUNT, query
 from .paths import validate_disjoint_paths, validate_writable_path, managed_tree, validate_same_filesystem
 from .storage import read_json, write_json, verify_file, writer_lock
@@ -53,7 +54,7 @@ class CometContract:
     def validate_selection(self, entries):
         if self.fixed_targets is not None:
             if [entry['id'] for entry in entries] != list(self.fixed_targets):
-                raise DataError('Comet v1 requires the three reviewed seed objects in order')
+                raise DataError(f'Comet v{self.version} requires fixed selection: ' + ', '.join(self.fixed_targets))
         elif not entries:
             raise DataError('Comet catalogue must not be empty')
 
@@ -91,9 +92,15 @@ def valid_id(value):
     return isinstance(value, str) and re.fullmatch(r'[1-9][0-9]*P', value) is not None
 
 
+# Explicit union of ECMAScript/Python edge whitespace; neither runtime's trim policy.
+EDGE_WHITESPACE = ('\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f '
+                   '\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005'
+                   '\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff')
+
+
 def valid_name(name, object_id):
     return (isinstance(name, str) and name.startswith(object_id + '/')
-            and len(name) > len(object_id) + 1 and name == name.strip()
+            and len(name) > len(object_id) + 1 and name == name.strip(EDGE_WHITESPACE)
             and not any(ord(c) < 32 or ord(c) == 127 for c in name))
 
 
@@ -213,6 +220,16 @@ def build_candidate(records, stage, previous=None, *, contract, targets):
     verify_comets(stage, contract=contract)
 
 
+def descriptor_bytes(path):
+    if not path.exists():
+        return None
+    with path.open('rb') as stream:
+        content = stream.read(4097)
+    if len(content) > 4096:
+        raise DataError('Oversized comet descriptor')
+    return content
+
+
 def refresh_comets(cache, output, *, acquire_records, build, verify):
     cache, output = Path(cache), Path(output)
     # Check the lexical target before resolving aliases for all locks/staging.
@@ -226,23 +243,61 @@ def refresh_comets(cache, output, *, acquire_records, build, verify):
     site.mkdir(parents=True, exist_ok=True)
     lock = site.parent / ('.' + site.name + '-browser-lock')
     refresh_lock = site.parent / ('.' + site.name + '-' + output.name + '-refresh-lock')
-    # Serialize comet refreshes even with different caches, but let asteroid
-    # writers and site publication proceed during the slow upstream requests.
+    acquisition_lock = site.parent / ('.' + site.name + '-horizons-lock')
+    # Competing writers fail fast. The product lock prevents refresh overtaking;
+    # the acquisition lock also excludes the other comet version across caches.
     with writer_lock(refresh_lock):
-        records = acquire_records()
+        with writer_lock(acquisition_lock):
+            records = acquire_records()
         with writer_lock(lock):
             names = managed_files(output)
             validate_same_filesystem(site.parent, (site, output, output / 'objects',
                                                    *(output / name for name in names)), label='Comet output')
             previous = None
-            if (output / 'latest.json').exists():
+            descriptor = output / 'latest.json'
+            prior_descriptor = descriptor_bytes(descriptor)
+            if prior_descriptor is not None:
                 verify(output, allow_orphans=True)
-                pin = read_json(output / 'latest.json')['index']
+                pin = read_json(descriptor)['index']
                 previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
-            with tempfile.TemporaryDirectory(prefix='.comets-', dir=site.parent) as temp:
-                stage = Path(temp)
-                build(records, stage, previous)
+        # The output refresh lock stays held; asteroid writers and publication
+        # can proceed while the new candidate is built and numerically verified.
+        with tempfile.TemporaryDirectory(prefix='.comets-', dir=site.parent) as temp:
+            stage = Path(temp)
+            build(records, stage, previous)
+            with writer_lock(lock):
+                names = managed_files(output)
+                validate_same_filesystem(site.parent, (site, output, output / 'objects',
+                                                       *(output / name for name in names)), label='Comet output')
+                current_descriptor = descriptor_bytes(descriptor)
+                if current_descriptor != prior_descriptor:
+                    raise DataError('Comet descriptor changed during candidate preparation; retry')
                 changes = sync_candidate(stage, output, inventory=managed_files)
                 result = verify(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',
             'changes': changes}
+
+
+class CometProduct:
+    """Bind one wire contract and curated acquisition policy to shared operations."""
+
+    def __init__(self, contract, targets):
+        self.contract = contract
+        self.targets = targets
+
+    def acquire(self, cache, *, refresh=False, offline=False):
+        return horizons.acquire(cache, refresh=refresh, offline=offline, targets=self.targets)
+
+    def validate_object(self, value, object_id):
+        return validate_object(value, object_id, contract=self.contract)
+
+    def verify_comets(self, directory, *, allow_orphans=False):
+        return verify_comets(directory, contract=self.contract, allow_orphans=allow_orphans)
+
+    def build_candidate(self, records, stage, previous=None):
+        return build_candidate(records, stage, previous, contract=self.contract, targets=self.targets)
+
+    def refresh_comets(self, cache, output, *, refresh=False, offline=False):
+        return refresh_comets(cache, output,
+                              acquire_records=lambda: self.acquire(cache, refresh=refresh, offline=offline),
+                              build=self.build_candidate, verify=self.verify_comets)

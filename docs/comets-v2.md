@@ -13,8 +13,10 @@ objects. Earlier deployment-unconfirmed handoff statements are superseded.
 and objects. All other field names, strict validation, conventions, limits and
 hash/relative-URL rules are those of v1. V2 accepts a nonempty catalogue with
 unique numbered periodic-comet IDs (`[1-9][0-9]*P`) in producer-defined order.
-Names must start with that ID plus `/`, have a nonempty suffix, no leading or
-trailing whitespace and no ASCII control characters. Provenance targets must
+Names must start with that ID plus `/`, have a nonempty suffix, no ASCII
+control characters and no edge whitespace from the explicitly shared set in
+`comet-identities.json` (including U+0085 and U+FEFF). Both runtimes use that
+set rather than their different built-in trim rules. Provenance targets must
 match the name; queries and object IDs must match the entry ID. Unknown schema
 versions, fields, grids and invalid/duplicate identities fail closed.
 
@@ -44,8 +46,10 @@ the actual last state defines coverage. Positions/velocities are Sun-centred,
 Ecliptic J2000, AU and AU/day, UT, geometric (`NONE`). Cubic Hermite interpolation
 rejects extrapolation. No closed-orbit, physical-survival, tail or continuous
 error-bound claim is made. Interpolation differences are not physical uncertainty.
-The original three series, provenance and validation are preserved exactly;
-only their v2 object envelope/version (and therefore content hash) changes.
+The initial v2 release preserved the original three series, provenance and
+validation exactly; only their v2 object envelope/version (and therefore content
+hash) changed. Subsequent explicit v2 refreshes may advance their scientific
+solutions independently of v1.
 
 ## Selection and measured evidence
 
@@ -73,9 +77,11 @@ Total: 6,627,126 decoded bytes; 2,770,744 independently gzip-compressed bytes. L
 Each maximum is measured from final serialized 12-significant-digit values.
 Acceptance remains `0.000052 AU`. The committed gzip fixture contains every
 independent midpoint position for all six objects, with original source metadata;
-`test_comet_v2_evidence.py` checks grid coverage, exact reported maxima and seed
-series/provenance preservation offline. Representative references remain in the
-public index for reference-reader checks. Full raw HTTP responses are retained
+`test_comet_v2_evidence.py` checks grid coverage and exact reported maxima
+against the current v2 product offline. A separate producer regression checks
+that projection preserves supplied seed series/provenance; it does not require
+future v2 solutions to stay equal to the independently refreshed v1 product.
+Representative references remain in the public index for reference-reader checks. Full raw HTTP responses are retained
 outside the public tree; the position fixture does not replace raw acquisition
 responses for regeneration.
 
@@ -85,10 +91,22 @@ responses for regeneration.
 python3 -m orrery_data refresh-comets-v2 --offline
 python3 -m orrery_data refresh-comets-v2       # acquire only missing cached inputs
 python3 -m orrery_data refresh-comets-v2 --refresh  # explicitly reacquire twelve queries
+# After any v2 refresh, regenerate the matching committed evidence offline.
+python3 scripts/rebuild_comet_evidence.py
 python3 -m orrery_data verify-comets-v2 --directory data/comets-v2
 python3 -m orrery_data verify-site --directory data
 python3 scripts/prepare_browser_site.py --output .context/pages-site-new
 ```
+
+Commit refreshed `data/comets-v2` and `tests/fixtures/comet-v2-midpoints.json.gz`
+together. The evidence command reads the exact raw SHA-256 files pinned by the
+published index, so newer cache query records cannot silently substitute another
+acquisition. It reparses both vector and independent midpoint responses, checks
+provenance, serialized states, maxima/worst dates and public reference rows,
+then atomically replaces the fixture. Missing/corrupt/mismatched inputs preserve
+the previous fixture and fail; restore the retained pinned responses or finish a
+valid explicit refresh before retrying. It never queries Horizons. Its optional
+`--directory`, `--cache` and `--output` paths support retained offline inputs.
 
 The default cache remains `.data/horizons`, and must be disjoint from the whole
 site. The v1 command remains unchanged and manages only `data/comets`.
@@ -140,3 +158,12 @@ membership independently of the producer's curated acquisition targets. Both
 JavaScript entry modules use `cometSourceCore.js` for validation, interpolation
 and the pinned loading/cancellation lifecycle. Removing v1 later removes its
 entry modules and data, while retaining the shared implementation.
+
+Refresh coordination: both versions share a per-site Horizons acquisition lock,
+including when different caches are used. The existing nonblocking writer-lock
+policy rejects a competing acquisition before it can request data; retry after
+the current refresh finishes. Product refresh locks prevent overtaking. Candidate
+construction and full numerical verification run outside the site publication
+lock; previous-product checks and installation verification retain that lock.
+The descriptor is checked again before installation to reject stale preparation.
+These checks protect different states and are intentionally retained.

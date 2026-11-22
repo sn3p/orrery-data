@@ -72,7 +72,7 @@ class Catalogue(unittest.TestCase):
             records[entry['id']+'-midpoints'] = (checks[entry['id']+'-midpoints']['rows'], entry['provenance']['midpoints'])
         targets = comets.TARGETS.copy()
         for selection in [dict(list(targets.items())[:3]), targets, dict(reversed(list(targets.items())))]:
-            with patch.object(comets, 'TARGETS', selection), patch.object(comets, 'acquire', return_value=records), patch('sys.stdout', new_callable=io.StringIO):
+            with patch.object(comets.PRODUCT, 'targets', selection), patch.object(comets.PRODUCT, 'acquire', return_value=records), patch('sys.stdout', new_callable=io.StringIO):
                 self.assertEqual(main(['refresh-comets-v2','--offline','--cache',str(self.root/'cache'),'--output',str(self.output)]), 0)
             result = comets.verify_comets(self.output)
             index = read_json(self.output / result['pin']['url'])

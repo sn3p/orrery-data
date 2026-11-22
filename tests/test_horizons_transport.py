@@ -96,7 +96,7 @@ class HorizonsTransport(unittest.TestCase):
             responses = [Response(error=ConnectionResetError('reset')) for _ in range(3)]
             with patch.object(horizons, 'urlopen', side_effect=responses), \
                  patch.object(horizons.time, 'sleep'):
-                with self.assertRaises(ConnectionResetError): horizons.acquire(cache, refresh=True)
+                with self.assertRaises(ConnectionResetError): horizons.acquire(cache, refresh=True, targets=horizons.TARGETS)
             self.assertEqual(record.read_bytes(), previous)
             self.assertEqual(list(cache.glob('*.raw')), [])
             self.assertEqual(list(cache.glob('.pointer-*')), [])

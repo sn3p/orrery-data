@@ -33,8 +33,7 @@ def query(object_id, midpoint=False):
     return ENDPOINT + '?' + urlencode(params)
 
 
-def parse_response(raw, object_id, midpoint=False, *, targets=None):
-    targets = TARGETS if targets is None else targets
+def parse_response(raw, object_id, midpoint=False, *, targets):
     if len(raw) > MAX_RESPONSE:
         raise DataError('Horizons response exceeds size limit')
     envelope = loads_json(raw)
@@ -117,13 +116,15 @@ def download(url, timeout=90):
     raise AssertionError('unreachable')
 
 
-def acquire(cache, *, refresh=False, offline=False, targets=None):
-    """One lock serializes the selected requests; explicit refresh bypasses saved bytes.
+def acquire(cache, *, refresh=False, offline=False, targets):
+    """The cache lock excludes competing access; requests within a call are serial.
+
+    Product refreshes also hold their shared site acquisition lock across caches.
+    Explicit refresh bypasses saved bytes.
 
     Raw records install individually; the accepted public product is only advanced
     after every source and numerical check succeeds. No cache age implies freshness.
     """
-    targets = TARGETS if targets is None else targets
     cache = Path(cache)
     validate_writable_path(cache, label='Horizons cache')
     if cache.is_symlink():

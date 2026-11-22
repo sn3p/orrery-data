@@ -8,9 +8,13 @@ const requireValue = (ok, label) => requireProductValue(ok, label, 'comet');
 const fields = (value, expected) => keys(value, expected, [], 'comet');
 
 const START = 2444239.5, STEP = 4, COUNT = 10958;
-const validId = id => typeof id === 'string' && /^[1-9][0-9]*P$/.test(id) && id.endsWith('P');
+const validId = id => typeof id === 'string' && /^[1-9][0-9]*P$/.test(id);
+// Match the producer's explicit whitespace set, independent of runtime trim rules.
+const EDGE_WHITESPACE = '\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f '
+  + '\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005'
+  + '\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
 const validName = (name, id) => typeof name === 'string' && name.startsWith(id + '/')
-  && name.length > id.length + 1 && name === name.trim() && !/[\x00-\x1f\x7f]/.test(name);
+  && name.length > id.length + 1 && !EDGE_WHITESPACE.includes(name[0]) && !EDGE_WHITESPACE.includes(name.at(-1)) && !/[\x00-\x1f\x7f]/.test(name);
 const CONVENTIONS = { center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
   velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' };
 function reference(ref, prefix, max) {
