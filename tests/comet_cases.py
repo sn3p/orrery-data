@@ -137,9 +137,13 @@ class CometCases(CometFixture):
         before = {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
         with patch.object(self.product, 'acquire', side_effect=DataError('second object failed')):
             with self.assertRaises(DataError): self.comets.refresh_comets(self.root / 'cache', self.output)
-        with writer_lock(self.root / '.data-browser-lock'), patch.object(self.product, 'acquire') as acquire:
+        def candidate(records, stage, previous):
+            shutil.copytree(self.output, stage, dirs_exist_ok=True)
+        with writer_lock(self.root / '.data-browser-lock'), patch.object(self.product, 'acquire') as acquire, \
+             patch.object(self.product, 'build_candidate', side_effect=candidate) as build:
             with self.assertRaises(DataError): self.comets.refresh_comets(self.root / 'cache', self.output)
             acquire.assert_called_once()
+            build.assert_called_once()
         after = {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
         self.assertEqual(before, after)
         self.comets.verify_comets(self.output)

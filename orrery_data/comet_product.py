@@ -12,7 +12,7 @@ from .contracts import obj, array, rule, literal, TEXT, NONEMPTY, FILE_FIELDS, U
 from . import horizons
 from .horizons import START, STEP, COUNT, query
 from .paths import validate_disjoint_paths, validate_writable_path, managed_tree, validate_same_filesystem
-from .storage import read_json, write_json, verify_file, writer_lock, site_lock_path
+from .storage import read_json, loads_json, write_json, verify_file, writer_lock, site_lock_path
 
 CONVENTIONS = {'center': 'Sun', 'frame': 'Ecliptic J2000', 'time': 'UT',
                'position_units': 'AU', 'velocity_units': 'AU/day',
@@ -125,12 +125,14 @@ def read_reference(directory, ref, prefix, cap):
     return read_json(directory / ref['url'])
 
 
-def verify_comets(directory, *, contract, allow_orphans=False):
+def inspect_comets(directory, *, contract, allow_orphans=False, descriptor=None):
+    """Validate a product and return its report and the same validated index."""
     directory = Path(directory)
     names = managed_files(directory)
     if 'latest.json' not in names or (directory / 'latest.json').stat().st_size > 4096:
         raise DataError('Missing or oversized comet descriptor')
-    latest = read_json(directory / 'latest.json')
+    latest = (read_json(directory / 'latest.json') if descriptor is None
+              else loads_json(descriptor))
     contract.latest_schema(latest, 'descriptor')
     index = read_reference(directory, latest['index'], 'index-', MAX_INDEX_BYTES)
     contract.index_schema(index, 'index')
@@ -138,7 +140,7 @@ def verify_comets(directory, *, contract, allow_orphans=False):
     seen = set()
     expected = {'latest.json', latest['index']['url']}
     for entry in index['objects']:
-        if not valid_id(entry['id']) or entry['id'] in seen:
+        if not contract.valid_id(entry['id']) or entry['id'] in seen:
             raise DataError('Invalid or duplicate comet identity')
         seen.add(entry['id'])
         if not contract.valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
@@ -174,7 +176,12 @@ def verify_comets(directory, *, contract, allow_orphans=False):
     if not expected <= names or (not allow_orphans and names != expected):
         raise DataError('Comet inventory differs from pinned index')
     return {'path': str(directory), 'pin': latest['index'], 'objects': len(index['objects']),
-            'files': len(names), 'bytes': sum((directory / n).stat().st_size for n in names)}
+            'files': len(names), 'bytes': sum((directory / n).stat().st_size for n in names)}, index
+
+
+def verify_comets(directory, *, contract, allow_orphans=False):
+    report, _ = inspect_comets(directory, contract=contract, allow_orphans=allow_orphans)
+    return report
 
 
 def serialize_states(rows):
@@ -252,7 +259,7 @@ def preflight_output(output):
                                          *(output / name for name in names)), label="Comet output")
 
 
-def refresh_comets(cache, output, *, acquire_records, build, verify):
+def refresh_comets(cache, output, *, acquire_records, build, verify, inspect):
     cache, output = Path(cache), Path(output)
     # Check the lexical target before resolving aliases for all locks/staging.
     managed_files(output)
@@ -270,32 +277,27 @@ def refresh_comets(cache, output, *, acquire_records, build, verify):
     with writer_lock(refresh_lock):
         with writer_lock(acquisition_lock):
             records = acquire_records()
-        with writer_lock(lock):
-            preflight_output(output)
-            descriptor = output / 'latest.json'
-            prior_descriptor = descriptor_bytes(descriptor)
-        # The product refresh lock excludes other writers of this product.
-        # Read/validate the old product without blocking unrelated site writers.
+        # The product lock excludes cooperating comet writers; unrelated site
+        # writers preserve this namespace. Pin all previous reads to one snapshot.
+        preflight_output(output)
+        descriptor = output / 'latest.json'
+        prior_descriptor = descriptor_bytes(descriptor)
         previous = None
         if prior_descriptor is not None:
-            verify(output, allow_orphans=True)
-            pin = read_json(descriptor)['index']
-            previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
+            _, previous = inspect(output, allow_orphans=True, descriptor=prior_descriptor)
         # The output refresh lock stays held; asteroid writers and publication
         # can proceed while the new candidate is built and numerically verified.
         with tempfile.TemporaryDirectory(prefix='.comets-', dir=site.parent) as temp:
             stage = Path(temp)
-            result = build(records, stage, previous)
+            build(records, stage, previous)
             with writer_lock(lock):
                 preflight_output(output)
                 current_descriptor = descriptor_bytes(descriptor)
                 if current_descriptor != prior_descriptor:
                     raise DataError('Comet descriptor changed during candidate preparation; retry')
                 changes = sync_candidate(stage, output, inventory=managed_files)
-                # sync_candidate compares file hashes, installs verified stage
-                # bytes, removes orphans and writes the pointer last. Re-parsing
-                # that identical product would repeat candidate validation.
-                result = {**result, 'path': str(output)}
+                # Report the installed tree, independently of a builder's return.
+                result = verify(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',
             'changes': changes}
 
@@ -311,7 +313,7 @@ class CometProduct:
         self.verify_comets = partial(verify_comets, contract=contract)
 
     def build_candidate(self, records, stage, previous=None):
-        # Selection can change between refreshes without changing the contract.
+        # V2 selection can change between refreshes; v1 still enforces its fixed selection.
         return build_candidate(records, stage, previous, contract=self.contract, targets=self.targets)
 
     def acquire(self, cache, *, refresh=False, offline=False):
@@ -320,4 +322,5 @@ class CometProduct:
     def refresh_comets(self, cache, output, *, refresh=False, offline=False):
         return refresh_comets(cache, output,
                               acquire_records=lambda: self.acquire(cache, refresh=refresh, offline=offline),
-                              build=self.build_candidate, verify=self.verify_comets)
+                              build=self.build_candidate, verify=self.verify_comets,
+                              inspect=partial(inspect_comets, contract=self.contract))

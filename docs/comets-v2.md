@@ -164,8 +164,10 @@ including when different caches are used. The existing nonblocking writer-lock
 policy rejects a competing acquisition before it can request data; retry after
 the current refresh finishes. Product refresh locks prevent overtaking. Previous-product
 verification, candidate construction and full candidate verification run outside
-the site publication lock. Installation compares hashes and moves verified candidate
-bytes, so it does not repeat full product validation.
+the site publication lock. Installation and verification of the installed product
+hold that lock. The result describes the installed tree, independently of the
+builder return value. Previous-product validation uses the captured descriptor
+and returns its already-validated index without a second index read.
 The descriptor is checked again before installation to reject stale preparation.
 Inventory and filesystem preflight use one shared helper, called before acquisition,
 after acquisition, and before installation to catch destination changes.

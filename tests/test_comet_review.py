@@ -28,27 +28,82 @@ class ReviewRegressions(unittest.TestCase):
                 with self.assertRaisesRegex(DataError, 'identity'):
                     comets.validate_object(value, entry['id'])
 
-    def test_refresh_verifies_old_and_candidate_outside_site_lock(self):
+    def test_refresh_ignores_builder_return_and_checks_installed_tree(self):
+        for builder_result in (None, {'pin': 'wrong', 'bytes': -1}):
+            with self.subTest(builder_result=builder_result), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve(); output = root / 'data/comets-v2'
+                shutil.copytree(ROOT / 'data/comets-v2', output)
+                orphan = 'objects/' + '0' * 64 + '.json'
+                (output / orphan).write_text('{}')
+                def build(records, stage, previous):
+                    with writer_lock(site_lock_path(output.parent)):
+                        shutil.copytree(output, stage, dirs_exist_ok=True)
+                        (stage / orphan).unlink()
+                    return builder_result
+                with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
+                     patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build):
+                    result = comets_v2.refresh_comets(root / 'cache', output, offline=True)
+                self.assertEqual(result['status'], 'updated')
+                self.assertEqual(result['changes']['deleted'], [orphan])
+                self.assertEqual({k: result[k] for k in ('path', 'pin', 'objects', 'files', 'bytes')}, comets_v2.verify_comets(output))
+
+    def test_installed_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); output = root / 'data/comets-v2'
             shutil.copytree(ROOT / 'data/comets-v2', output)
-            original_verify = comet_product.verify_comets
-            checked = []
-            def verify(directory, **kwargs):
-                with writer_lock(site_lock_path(output.parent)):
-                    checked.append(Path(directory))
-                    return original_verify(directory, **kwargs)
             def build(records, stage, previous):
                 shutil.copytree(output, stage, dirs_exist_ok=True)
-                return verify(stage, contract=comets_v2.CONTRACT)
+                return comets_v2.verify_comets(stage)
+            sync = comet_product.sync_candidate
+            def corrupt_after_install(*args, **kwargs):
+                changes = sync(*args, **kwargs)
+                next((output / 'objects').iterdir()).write_text('{}')
+                return changes
             with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
-                 patch.object(comets_v2.PRODUCT, 'verify_comets', side_effect=lambda p, **kw: verify(p, contract=comets_v2.CONTRACT, **kw)), \
-                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build):
+                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build), \
+                 patch.object(comet_product, 'sync_candidate', side_effect=corrupt_after_install):
+                with self.assertRaises(DataError):
+                    comets_v2.refresh_comets(root / 'cache', output, offline=True)
+
+    def test_previous_index_uses_snapshot_once_without_site_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); output = root / 'data/comets-v2'
+            shutil.copytree(ROOT / 'data/comets-v2', output)
+            descriptor = output / 'latest.json'
+            original = descriptor.read_bytes()
+            snapshot = comet_product.descriptor_bytes
+            inspect = comet_product.inspect_comets
+            def snapshot_then_edit(path):
+                value = snapshot(path)
+                if snapshot_mock.call_count == 1:
+                    path.write_bytes(b'changed during previous-product read')
+                return value
+            def inspect_previous(directory, **kwargs):
+                if kwargs.get('descriptor') is not None:
+                    with writer_lock(site_lock_path(output.parent)), \
+                         patch.object(comet_product, 'read_reference', wraps=comet_product.read_reference) as read:
+                        result = inspect(directory, **kwargs)
+                    self.assertEqual(sum(call.args[2] == 'index-' for call in read.call_args_list), 1)
+                    descriptor.write_bytes(original)
+                    return result
+                return inspect(directory, **kwargs)
+            def build(records, stage, previous):
+                self.assertEqual(previous, read_json(output / json.loads(original)['index']['url']))
+                shutil.copytree(output, stage, dirs_exist_ok=True)
+            with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
+                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build), \
+                 patch.object(comet_product, 'descriptor_bytes', side_effect=snapshot_then_edit) as snapshot_mock, \
+                 patch.object(comet_product, 'inspect_comets', side_effect=inspect_previous):
                 result = comets_v2.refresh_comets(root / 'cache', output, offline=True)
-            self.assertEqual(len(checked), 2)
-            self.assertEqual(checked[0], output)
             self.assertEqual(result['status'], 'unchanged')
-            self.assertEqual({k: result[k] for k in ('path', 'pin', 'objects', 'files', 'bytes')}, original_verify(output, contract=comets_v2.CONTRACT))
+
+    def test_previous_snapshot_rejects_duplicate_keys_and_nonfinite_json(self):
+        root = ROOT / 'data/comets-v2'
+        original = (root / 'latest.json').read_bytes()
+        for prefix in (b'{"comet_contract_version":2,', b'{"unexpected":NaN,'):
+            with self.subTest(prefix=prefix), self.assertRaises(DataError):
+                comet_product.inspect_comets(root, contract=comets_v2.CONTRACT,
+                                             descriptor=prefix + original[1:])
 
     def test_descriptor_snapshot_is_bounded(self):
         with tempfile.TemporaryDirectory() as temporary:
