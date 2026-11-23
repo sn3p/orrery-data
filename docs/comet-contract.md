@@ -1,24 +1,24 @@
 # Comet catalogue wire format and scientific provenance
 
-The supported product uses schema 2 at `comets-v2/latest.json`.
-See [catalogue operation and retirement notes](comets-v2.md).
+The supported product uses schema 2 at `comets/latest.json`.
+See [catalogue operation](comets.md).
 
 ## Commands and ownership
 
 ```sh
 # First acquisition: twelve serial Horizons queries; subsequent calls reuse saved responses.
-python3 -m orrery_data refresh-comets-v2
+python3 -m orrery_data refresh-comets
 # Explicitly reacquire all twelve queries after deciding an upstream check is needed.
-python3 -m orrery_data refresh-comets-v2 --refresh
+python3 -m orrery_data refresh-comets --refresh
 # Rebuild and validate with no network access (requires the saved raw cache).
-python3 -m orrery_data refresh-comets-v2 --offline
-python3 -m orrery_data verify-comets-v2 --directory data/comets-v2
+python3 -m orrery_data refresh-comets --offline
+python3 -m orrery_data verify-comets --directory data/comets
 # Verify the complete site; asteroid-only verification remains verify-browser.
 python3 -m orrery_data verify-site --directory data
 python3 scripts/prepare_browser_site.py --output .context/pages-site
 ```
 
-`--cache` defaults to ignored `.data/horizons`; `--output` to `data/comets-v2`.
+`--cache` defaults to ignored `.data/horizons`; `--output` to `data/comets`.
 The cache must be disjoint from the entire public site (the parent of the comet
 output), including sibling product directories and resolved aliases. Invalid
 overlap is rejected before any lock or input is written. Keep this cache for
@@ -39,7 +39,7 @@ staging parent’s filesystem. Different filesystems are rejected before acquisi
 place the site inside a directory on the destination volume so its parent can
 hold staging files on that same volume. This preserves pointer-last atomic
 renames without placing temporary candidates in the public tree. When using
-`data/comets-v2`, both producers and the Pages stager share `.data-browser-lock`
+`data/comets`, both producers and the Pages stager share `.data-browser-lock`
 to coordinate publication. Comet refresh holds it during installation and the
 installed-product check; acquisition, previous-product validation and candidate
 construction leave it free. The product refresh lock excludes competing comet writers.
@@ -66,7 +66,7 @@ can therefore retry a failed comet deployment without harvesting comets again.
 An asteroid refresh never changes comet files. A comet refresh never changes
 asteroid files. Removing the comet product is not a supported refresh operation. An active optional-product removal is detected by remote/local presence comparison.
 Retiring its contract and publication code forces complete replacement through the
-merge workflow; see [retirement recovery](comets-v2.md#v1-retirement).
+merge workflow; see [publication recovery](comets.md#publication).
 Future comet scheduling must coordinate with the existing data-writer workflow
 and retain its data-only validation and non-force-push checks.
 
@@ -81,14 +81,14 @@ content hash. No arbitrary paths, redirects for discovery, credentials or
 non-HTTPS discovery outside loopback are supported by the reference consumer.
 
 ```text
-comets-v2/latest.json                  # <= 4 KiB
-comets-v2/index-<sha256>.json           # <= 256 KiB
-comets-v2/objects/<sha256>.json         # <= 2 MiB per object
+comets/latest.json                  # <= 4 KiB
+comets/index-<sha256>.json           # <= 256 KiB
+comets/objects/<sha256>.json         # <= 2 MiB per object
 ```
 
 Descriptor: exactly `{comet_contract_version: 2, index: <reference>}`.
 Index: exactly `{comet_contract_version: 2, objects: [...]}`.
-Membership and order come from the catalogue; see [selection rules](comets-v2.md). Each entry has exactly:
+Membership and order come from the catalogue; see [selection rules](comets.md). Each entry has exactly:
 
 - `id`: stable periodic-comet designation; `name`: full source-backed name.
 - `coverage`: `[2444239.5, 2488067.5]`, actual inclusive UT Julian days.
@@ -143,7 +143,7 @@ uses sampled integrated positions; the marker interpolation tolerance does not
 establish screen-space polyline accuracy. Rendered appearance and app display windows are separate application concerns.
 
 The table above records the original three-object acquisition as historical scientific evidence.
-Current product sizes and the full six-object evidence are in [the catalogue documentation](comets-v2.md).
+Current product sizes and the full six-object evidence are in [the catalogue documentation](comets.md).
 
 Raw response hashes and retrieval clocks are acquisition identity. Scientific
 identity retains target/solution, API version, query, all scientific headers,
@@ -172,7 +172,7 @@ strict JSON and immutable metadata helpers. Open once per source generation:
 
 ```js
 import CometCatalogSource, { interpolateComet } from './consumer/CometCatalogSource.js';
-const source = await CometCatalogSource.openLatest(`${baseURL}/comets-v2/latest.json`, { signal });
+const source = await CometCatalogSource.openLatest(`${baseURL}/comets/latest.json`, { signal });
 const comet = await source.load('1P', { signal });
 const position = interpolateComet(comet.series, 2461362.5);
 source.close(); // abort pending work and release cached objects
@@ -188,13 +188,13 @@ re-enable an unselected comet. Retry under the same pin, or explicitly create a
 new source and replace the generation. Old hashed URLs may disappear after a
 new deployment: offer reload/retry, never silently mix indices/solutions.
 
-Orrery's separate bundled fallback is unaffected by producer retirement.
+Orrery retains its separate bundled fallback.
 Preserve independent asteroid/comet visibility, focus/path controls, selection
 across renderer changes, boundary-shifted path windows and error/retry states.
 Producer verification remains distinct from deployed application acceptance.
 
 Tests: `python3 -m unittest discover -s tests -p 'test_comet*.py' -v` and
 `npm run test:comets` run offline without servers or images. The committed
-`data/comets-v2` is the real numerical contract fixture. `tests/fixtures/horizons-1p.json`
+`data/comets` is the real numerical contract fixture. `tests/fixtures/horizons-1p.json`
 is a three-row excerpt of a retained raw response used for malformed-response
 regressions; its original headers deliberately retain the full requested range.

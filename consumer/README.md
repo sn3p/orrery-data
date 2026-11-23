@@ -35,15 +35,15 @@ to its existing buffering/error UI with a reload action. Do not transparently
 replace the source or append new-source rows into an existing scene. This
 reference is tested through real HTTP and browser workflows in this repository.
 
-Comet migration follows the separate [comet contract](../docs/comets-v2.md).
+Comet migration follows the separate [comet contract](../docs/comets.md).
 Errors and cancellation messages retain the product context: comet failures say
 “Comet”/“comet”; the asteroid adapter retains its existing “Catalogue”/“catalogue”
 wording. Both adapters share bounded transport, while the public
 `CatalogSource.js` export `fetchVerified(ref, url, signal)` remains an asteroid
 compatibility wrapper with the same three-argument API.
 
-For the six-object v2 catalogue use `CometCatalogSource.js` and the separate
-`comets-v2/latest.json` endpoint; see [v2 contract and handoff](../docs/comets-v2.md).
+For the comet catalogue use `CometCatalogSource.js` and the separate
+`comets/latest.json` endpoint; see [catalogue contract](../docs/comets.md).
 The comet reader requires `cometSourceCore.js`, `contract.js` and `transport.js`.
-The retired v1 reader is no longer distributed. The core retains interpolation,
+The core retains interpolation,
 validation, verified loading and cancellation for the supported catalogue.

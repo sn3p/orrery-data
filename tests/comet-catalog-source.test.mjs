@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import CometSource, { interpolateComet } from '../consumer/CometCatalogSource.js';
 
-const root = path.resolve('data/comets-v2');
-const base = 'https://example.test/sub/comets-v2/';
+const root = path.resolve('data/comets');
+const base = 'https://example.test/sub/comets/';
 async function fixture(t, fault) {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {

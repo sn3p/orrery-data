@@ -1,4 +1,4 @@
-"""Retired v1 cannot enter a new site; publication uses the existing force policy."""
+"""The site publishes only the current catalogue using the existing force policy."""
 from contextlib import chdir
 import importlib.util
 import io
@@ -26,21 +26,21 @@ class Retirement(unittest.TestCase):
             shutil.copytree(ROOT/name, self.root/name, ignore=shutil.ignore_patterns('__pycache__'))
         self.data = self.root/'data'
         shutil.copytree(ROOT/'tests/fixtures/browser-v1/ties', self.data)
-        shutil.copytree(ROOT/'data/comets-v2', self.data/'comets-v2')
+        shutil.copytree(ROOT/'data/comets', self.data/'comets')
 
-    def test_real_staging_excludes_v1_and_preserves_every_supported_byte(self):
+    def test_real_staging_excludes_versioned_product_and_preserves_every_supported_byte(self):
         output = self.root/'pages'
         run = subprocess.run([sys.executable, str(self.root/'scripts/prepare_browser_site.py'),
                               '--output', str(output)], cwd=self.root, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(json.loads(run.stdout)['comets_v2']['objects'], 6)
+        self.assertEqual(json.loads(run.stdout)['comets']['objects'], 6)
         expected = {str(p.relative_to(self.data)): p.read_bytes() for p in self.data.rglob('*') if p.is_file()}
         actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob('*') if p.is_file()}
         self.assertEqual(actual, {**expected, '.nojekyll': b''})
-        self.assertFalse((output/'comets').exists())
+        self.assertFalse((output/'comets-v2').exists())
 
-    def test_leftover_v1_namespace_blocks_real_publication(self):
-        legacy = self.data/'comets'; legacy.mkdir(); (legacy/'latest.json').write_text('{}')
+    def test_leftover_versioned_namespace_blocks_real_publication(self):
+        legacy = self.data/'comets-v2'; legacy.mkdir(); (legacy/'latest.json').write_text('{}')
         with self.assertRaises(DataError): verify_site(self.data)
         output = self.root/'pages'
         run = subprocess.run([sys.executable, str(self.root/'scripts/prepare_browser_site.py'),
@@ -53,11 +53,11 @@ class Retirement(unittest.TestCase):
         requests = []
         def opening(url, timeout):
             requests.append(url)
-            self.assertNotIn('/comets/', url, 'retired redirects/CDN bodies must not affect reconciliation')
+            self.assertNotIn('/comets-v2/', url, 'retired redirects/CDN bodies must not affect reconciliation')
             return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
         with patch.object(site,'urlopen',side_effect=opening):
             self.assertTrue(site.published_site_matches(self.data,base+'latest.json'))
-        self.assertEqual(requests, [base+'latest.json',base+'comets-v2/latest.json'])
+        self.assertEqual(requests, [base+'latest.json',base+'comets/latest.json'])
 
     def test_publication_code_change_and_explicit_retry_force_complete_replacement(self):
         def git(*args):
@@ -82,8 +82,8 @@ class Retirement(unittest.TestCase):
                  patch('sys.stdout',new_callable=io.StringIO) as stdout:
                 self.assertEqual(site.main(),0)
                 self.assertEqual(json.loads(stdout.getvalue())['status'],'prepared')
-            self.assertFalse((self.root/name/'comets').exists())
-            self.assertTrue((self.root/name/'comets-v2/latest.json').is_file())
+            self.assertFalse((self.root/name/'comets-v2').exists())
+            self.assertTrue((self.root/name/'comets/latest.json').is_file())
         # Normal scheduled/manual reconciliation uses current products only.
         with chdir(self.root), patch.object(site,'ROOT',self.root), \
              patch.object(site,'urlopen',side_effect=lambda url,timeout: io.BytesIO(
@@ -95,8 +95,8 @@ class Retirement(unittest.TestCase):
             self.assertEqual(json.loads(stdout.getvalue())['status'],'unchanged')
 
     def test_retired_commands_fail_without_creating_output(self):
-        for command in ('refresh-comets','verify-comets'):
+        for command in ('refresh-comets-v2','verify-comets-v2'):
             run=subprocess.run([sys.executable,'-m','orrery_data',command],cwd=self.root,capture_output=True,text=True)
             self.assertEqual(run.returncode,2,run.stderr)
             self.assertIn('invalid choice',run.stderr)
-        self.assertFalse((self.data/'comets').exists())
+        self.assertFalse((self.data/'comets-v2').exists())

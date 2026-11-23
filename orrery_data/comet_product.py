@@ -302,7 +302,7 @@ class CometProduct:
         self.verify_comets = partial(verify_comets, contract=contract)
 
     def build_candidate(self, records, stage, previous=None):
-        # V2 selection can change between refreshes; v1 still enforces its fixed selection.
+        # Catalogue membership can change between refreshes.
         return build_candidate(records, stage, previous, contract=self.contract, targets=self.targets)
 
     def acquire(self, cache, *, refresh=False, offline=False):

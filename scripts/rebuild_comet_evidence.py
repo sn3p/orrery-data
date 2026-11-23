@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild comet v2 midpoint evidence from the exact pinned raw inputs, offline."""
+"""Rebuild comet midpoint evidence from the exact pinned raw inputs, offline."""
 
 import argparse
 import gzip
@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from orrery_data import comets_v2 as comets
+from orrery_data import comets
 from orrery_data.comet_product import serialize_states, measure_interpolation
 from orrery_data.formats import DataError
 from orrery_data.horizons import parse_response, read_raw
@@ -66,9 +66,9 @@ def rebuild(directory, cache, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--directory', type=Path, default=ROOT / 'data/comets-v2')
+    parser.add_argument('--directory', type=Path, default=ROOT / 'data/comets')
     parser.add_argument('--cache', type=Path, default=ROOT / '.data/horizons')
-    parser.add_argument('--output', type=Path, default=ROOT / 'tests/fixtures/comet-v2-midpoints.json.gz')
+    parser.add_argument('--output', type=Path, default=ROOT / 'tests/fixtures/comet-midpoints.json.gz')
     args = parser.parse_args()
     try:
         print(json.dumps(rebuild(args.directory, args.cache, args.output)))

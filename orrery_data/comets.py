@@ -1,4 +1,4 @@
-"""Comet v2 entry points; shared mechanics live in comet_product."""
+"""Comet entry points; shared mechanics live in comet_product."""
 
 from .comet_product import CometContract, CometProduct
 from .comet_product import (START, STEP, COUNT, TOLERANCE, CONVENTIONS, interpolate,
