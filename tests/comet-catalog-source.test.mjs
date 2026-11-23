@@ -342,23 +342,32 @@ test('a rehashed object must still match its selected catalogue identity', async
   source.close();
 });
 
-test('retired descriptor is rejected before fetching its valid index', async t => {
-  const calls = await fixture(t, async name => {
+test('cached schema-1 descriptor is rejected and discovery recovers after revalidation', async t => {
+  let stale = true;
+  const calls = await fixture(t, async (name, options) => {
     if (name !== 'latest.json') return null;
+    assert.equal(options.cache, 'no-cache', 'discovery must revalidate the reused URL');
+    if (!stale) return null;
     const latest = JSON.parse(await fs.readFile(path.join(root, name)));
     latest.comet_contract_version = 1;
     return new Response(JSON.stringify(latest));
   });
   await assert.rejects(CometSource.openLatest(base + 'latest.json'), /contract version/);
-  assert.deepEqual(calls, ['latest.json']);
+  assert.deepEqual(calls, ['latest.json'], 'reject stale schema before fetching assets');
+  stale = false;
+  const source = await CometSource.openLatest(base + 'latest.json');
+  t.after(() => source.close());
+  assert.equal((await source.load('1P')).id, '1P');
+  assert.deepEqual(calls.slice(0, 2), ['latest.json', 'latest.json']);
+  assert.equal(calls.length, 4, 'retry fetches the current index and selected object');
 });
 
-test('rehashed retired index is rejected', async t => {
+test('rehashed schema-1 index is rejected', async t => {
   await catalogueFixture(t, index => { index.comet_contract_version = 1; });
   await assert.rejects(CometSource.openLatest(base + 'latest.json'), /contract version/);
 });
 
-test('rehashed retired object is rejected and never cached', async t => {
+test('rehashed schema-1 object is rejected and never cached', async t => {
   await catalogueFixture(t, async (index, ref) => {
     const entry = index.objects[0];
     const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));

@@ -14,11 +14,11 @@ from orrery_data.formats import DataError
 from orrery_data.site import verify_site
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('retirement_site', ROOT/'scripts/prepare_browser_site.py')
+spec = importlib.util.spec_from_file_location('catalogue_site', ROOT/'scripts/prepare_browser_site.py')
 site = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(site)
 
-class Retirement(unittest.TestCase):
+class SitePublication(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
@@ -48,16 +48,37 @@ class Retirement(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertFalse(output.exists())
 
-    def test_equal_active_products_never_request_retired_urls(self):
+    def test_equal_products_request_only_active_descriptors(self):
         base = 'https://example.test/sub/'
         requests = []
         def opening(url, timeout):
             requests.append(url)
-            self.assertNotIn('/comets-v2/', url, 'retired redirects/CDN bodies must not affect reconciliation')
             return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
         with patch.object(site,'urlopen',side_effect=opening):
             self.assertTrue(site.published_site_matches(self.data,base+'latest.json'))
         self.assertEqual(requests, [base+'latest.json',base+'comets/latest.json'])
+
+    def test_cached_schema1_descriptor_triggers_complete_publication(self):
+        base = 'https://example.test/sub/'
+        current = json.loads((self.data/'comets/latest.json').read_text())
+        stale = dict(current, comet_contract_version=1)
+        requests = []
+        def opening(url, timeout):
+            requests.append(url)
+            if url == base+'comets/latest.json':
+                return io.BytesIO(json.dumps(stale).encode())
+            return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
+        output = self.root/'replacement'
+        with patch.object(site, 'ROOT', self.root), patch.object(site, 'urlopen', side_effect=opening), \
+             patch.object(sys, 'argv', ['prepare', '--output', str(output), '--latest-url', base+'latest.json']), \
+             patch('sys.stdout', new_callable=io.StringIO) as stdout:
+            self.assertEqual(site.main(), 0)
+            self.assertEqual(json.loads(stdout.getvalue())['status'], 'prepared')
+        self.assertEqual(requests, [base+'latest.json', base+'comets/latest.json'])
+        self.assertEqual(json.loads((output/'comets/latest.json').read_text()), current)
+        expected = {str(p.relative_to(self.data)): p.read_bytes() for p in self.data.rglob('*') if p.is_file()}
+        actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob('*') if p.is_file()}
+        self.assertEqual(actual, {**expected, '.nojekyll': b''})
 
     def test_publication_code_change_and_explicit_retry_force_complete_replacement(self):
         def git(*args):
@@ -68,8 +89,8 @@ class Retirement(unittest.TestCase):
         git('add','scripts/prepare_browser_site.py');git('commit','--quiet','-m','before')
         before=git('rev-parse','HEAD')
         script=self.root/'scripts/prepare_browser_site.py'
-        script.write_text(script.read_text()+'\n# Retirement publication change\n')
-        git('add',str(script));git('commit','--quiet','-m','retirement')
+        script.write_text(script.read_text()+'\n# Publication code change\n')
+        git('add',str(script));git('commit','--quiet','-m','publication')
         # A later unrelated commit must not hide the publication change.
         (self.root/'README.md').write_text('notes')
         git('add','README.md');git('commit','--quiet','-m','notes')
@@ -94,7 +115,7 @@ class Retirement(unittest.TestCase):
             self.assertEqual(site.main(),0)
             self.assertEqual(json.loads(stdout.getvalue())['status'],'unchanged')
 
-    def test_retired_commands_fail_without_creating_output(self):
+    def test_removed_versioned_commands_fail_without_creating_output(self):
         for command in ('refresh-comets-v2','verify-comets-v2'):
             run=subprocess.run([sys.executable,'-m','orrery_data',command],cwd=self.root,capture_output=True,text=True)
             self.assertEqual(run.returncode,2,run.stderr)
