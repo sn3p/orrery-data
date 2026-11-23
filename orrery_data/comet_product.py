@@ -41,11 +41,10 @@ ENTRY = obj({'id': NONEMPTY, 'name': NONEMPTY, 'coverage': array(INDEX_NUMBER), 
 
 
 class CometContract:
-    """Wire version and optional fixed selection, independent of acquisition policy."""
+    """Wire version and catalogue validation, independent of acquisition policy."""
 
-    def __init__(self, version, fixed_targets=None):
+    def __init__(self, version):
         self.version = version
-        self.fixed_targets = dict(fixed_targets) if fixed_targets is not None else None
         self.object_schema = obj({'comet_contract_version': literal(version), 'id': NONEMPTY,
                            'conventions': obj({key: literal(value) for key, value in CONVENTIONS.items()}),
                            'series': SERIES})
@@ -53,19 +52,9 @@ class CometContract:
         self.index_schema = obj({'comet_contract_version': literal(version), 'objects': array(ENTRY)})
 
     def validate_selection(self, entries):
-        if self.fixed_targets is not None:
-            if [entry['id'] for entry in entries] != list(self.fixed_targets):
-                raise DataError(f'Comet v{self.version} requires fixed selection: ' + ', '.join(self.fixed_targets))
-        elif not entries:
+        if not entries:
             raise DataError('Comet catalogue must not be empty')
 
-    def valid_id(self, object_id):
-        return valid_id(object_id) and (self.fixed_targets is None or object_id in self.fixed_targets)
-
-    def valid_name(self, name, object_id):
-        if self.fixed_targets is not None:
-            return name == self.fixed_targets.get(object_id)
-        return valid_name(name, object_id)
 
 
 def managed_files(directory):
@@ -110,7 +99,7 @@ def valid_name(name, object_id):
 
 def validate_object(value, object_id, *, contract):
     contract.object_schema(value, 'object')
-    if not contract.valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
+    if not valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
         raise DataError('Invalid comet identity or state count')
 
 
@@ -140,10 +129,10 @@ def inspect_comets(directory, *, contract, allow_orphans=False, descriptor=None)
     seen = set()
     expected = {'latest.json', latest['index']['url']}
     for entry in index['objects']:
-        if not contract.valid_id(entry['id']) or entry['id'] in seen:
+        if not valid_id(entry['id']) or entry['id'] in seen:
             raise DataError('Invalid or duplicate comet identity')
         seen.add(entry['id'])
-        if not contract.valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
+        if not valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
             raise DataError('Invalid comet metadata/coverage')
         provenance = entry['provenance']
         for kind, source in provenance.items():
@@ -273,7 +262,7 @@ def refresh_comets(cache, output, *, acquire_records, build, verify, inspect):
     refresh_lock = site.parent / ('.' + site.name + '-' + output.name + '-refresh-lock')
     acquisition_lock = site.parent / ('.' + site.name + '-horizons-lock')
     # Competing writers fail fast. The product lock prevents refresh overtaking;
-    # the acquisition lock also excludes the other comet version across caches.
+    # the acquisition lock also excludes other outputs using different caches.
     with writer_lock(refresh_lock):
         with writer_lock(acquisition_lock):
             records = acquire_records()

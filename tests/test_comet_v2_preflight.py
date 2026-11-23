@@ -4,7 +4,7 @@ from comet_cases import PreflightCases
 
 
 class CometPreflight(PreflightCases, unittest.TestCase):
-    version = 2
+    pass
 
 
 if __name__ == '__main__':

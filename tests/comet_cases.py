@@ -1,7 +1,7 @@
-"""Shared boundary cases instantiated against both comet contract entry points.
+"""Boundary cases for the supported comet catalogue.
 
 These mixins deliberately do not inherit TestCase: discovery runs each boundary
-only through the explicit v1/v2 classes in test_comet*.py.
+only through the explicit classes in test_comet_v2*.py.
 """
 
 from contextlib import chdir
@@ -20,7 +20,7 @@ import tempfile
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from orrery_data import comets, comets_v2, horizons
+from orrery_data import comets_v2, horizons
 from orrery_data.browser import sync_candidate, verify_browser
 from orrery_data.cli import main
 from orrery_data.formats import DataError
@@ -35,7 +35,7 @@ ONE_TARGET = {'1P': '1P/Halley'}
 class CometFixture:
     @property
     def comets(self):
-        return comets if self.version == 1 else comets_v2
+        return comets_v2
 
     @property
     def product(self):
@@ -43,7 +43,7 @@ class CometFixture:
 
     @property
     def product_name(self):
-        return 'comets' if self.version == 1 else 'comets-v2'
+        return 'comets-v2'
 
     @property
     def refresh_command(self):
@@ -55,7 +55,7 @@ class CometFixture:
 
     @property
     def verifier_name(self):
-        return 'verify_comets' if self.version == 1 else 'verify_comets_v2'
+        return 'verify_comets_v2'
 
 
 class CometCases(CometFixture):
@@ -86,7 +86,7 @@ class CometCases(CometFixture):
     def test_corruption_unknown_files_symlinks_and_versions(self):
         latest = self.output / 'latest.json'
         original = latest.read_bytes()
-        for value in [True, 3 - self.version, str(self.version)]:
+        for value in [True, 1, 3, "2"]:
             pointer = json.loads(original); pointer['comet_contract_version'] = value
             write_json(latest, pointer)
             with self.assertRaises(DataError): self.comets.verify_comets(self.output)
@@ -326,8 +326,6 @@ class PublicationCases(CometFixture):
         self.root = Path(temp.name)
         self.output = self.root / 'data' / self.product_name
         shutil.copytree(ROOT / 'data' / self.product_name, self.output)
-        if self.version == 2:
-            shutil.copytree(ROOT / 'data/comets', self.output.parent / 'comets')
 
     def test_orphan_comets_do_not_block_asteroid_update_but_block_publication(self):
         orphan = self.output / 'objects' / ('0' * 64 + '.json')
@@ -378,8 +376,6 @@ class PublicationCases(CometFixture):
         product_url = base_url + self.product_name + '/latest.json'
         remote = {base_url + 'latest.json': (data / 'latest.json').read_bytes(),
                   product_url: (self.output / 'latest.json').read_bytes()}
-        if self.version == 2:
-            remote[base_url + 'comets/latest.json'] = (data / 'comets/latest.json').read_bytes()
         def open_remote(url, timeout):
             if url not in remote:
                 raise HTTPError(url, 404, 'missing', {}, None)
@@ -417,7 +413,7 @@ class PublicationCases(CometFixture):
         (data / 'latest.json').write_text('{}')
         discovery = 'https://example.test/sub/custom-descriptor.json?pin=test'
         remote = {discovery: b'{}'}
-        for name in ('comets', 'comets-v2'):
+        for name in ('comets-v2',):
             descriptor = data / name / 'latest.json'
             if descriptor.exists():
                 remote['https://example.test/sub/' + name + '/latest.json'] = descriptor.read_bytes()

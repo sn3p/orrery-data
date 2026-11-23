@@ -1,17 +1,12 @@
 # Curated comet catalogue v2
 
-This is the producer/reference-reader successor to [v1](comets.md). It is not an
-Orrery selector or renderer migration. Reconciliation on 2026-11-20 confirmed
-OrreryData PR10 merged at `9cee185`, Orrery PR110 at `f55f237b`, and hosted v1
-assets matching the repository. Hosted Orrery still requires v1's exact three
-objects. Earlier deployment-unconfirmed handoff statements are superseded.
+The supported comet product is `comets-v2/latest.json`, using
+`comet_contract_version: 2` in descriptor, index and objects. See the
+[wire format, scientific provenance and recovery contract](comet-contract.md).
 
-## Compatibility and contract
+## Catalogue contract
 
-`comets/latest.json` and every referenced v1 asset remain unchanged. V2 lives at
-`comets-v2/latest.json`; it uses `comet_contract_version: 2` in descriptor, index
-and objects. All other field names, strict validation, conventions, limits and
-hash/relative-URL rules are those of v1. V2 accepts a nonempty catalogue with
+V2 accepts a nonempty catalogue with
 unique numbered periodic-comet IDs (`[1-9][0-9]*P`) in producer-defined order.
 Names must start with that ID plus `/`, have a nonempty suffix, no ASCII
 control characters and no edge whitespace from the explicitly shared set in
@@ -29,16 +24,33 @@ validation. Different grids/conventions or structural changes require a reviewed
 contract change. Consumers discover entries from `source.info.objects` rather
 than assuming six objects or a fixed order; app colours/defaults remain app-owned.
 
-## Transition to one supported product
+## V1 retirement
 
-The two endpoints are temporary migration scaffolding, not a public API support
-commitment. The intended end state is one catalogue, one reader and one supported
-schema. First publish this compatible producer change; next migrate both Orrery
-renderers/selectors in a separate PR and verify the deployed app. Then remove the
-v1 product, reader and obsolete commands in a reviewed cleanup. Keep the v2 URL
-or explicitly coordinate a move back to `comets`; the final path is undecided.
-A schema-version field can remain in the one product without hosting parallel
-versions. This PR does not remove v1, migrate Orrery or authorize deployment.
+Orrery's catalogue adoption and startup-switch fix shipped in PR111/PR112;
+deployed Pixi and Three acceptance passed on 2026-11-23. The old `comets/`
+product, v1 reader and `refresh-comets`/`verify-comets` commands are removed.
+Breaking old clients is explicitly accepted; no compatibility redirect is provided.
+Keep the existing v2 URL: retirement does not require another consumer migration.
+Asteroid publication and Orrery's separate bundled rollback are unchanged.
+
+A complete Pages artifact contains only asteroid data and the optional v2 catalogue.
+Local verification rejects a leftover `comets/` directory. This retirement changes
+publication code, so the existing merge workflow's `--publication-base` comparison
+forces a complete-site replacement even when active data pins match. Routine
+reconciliation requests only active product descriptors; it does not probe retired
+URLs or infer deployment failure from cached legacy responses or redirects.
+
+If the retirement deployment fails, rerun all jobs of that push workflow (which retains
+its original publication base), or manually dispatch the publisher with `force=true`.
+A later scheduled MPC run does not repair a retirement-only failure when active
+pins already match. No remote deletion is claimed until an authorized publication
+replaces the deployed site. CDN/browser caches and old visits may retain old bytes
+until expiry; no purge or client audit is part of this change.
+
+Historical v1 source/data remain in Git at `5d55c602e53cdb8edf9d75e19bdfa682d1f6a452`.
+Original source headers and acquisition provenance remain in the current v2 index;
+all-six independent midpoint evidence remains committed. Raw responses and prior
+hosted acceptance evidence remain retained outside worktrees in local feature memory.
 
 All six cover UT JD `[2444239.5, 2488067.5]`, 1980-01-01 through 2099-12-30,
 with 10,958 states spaced four days apart. Horizons requests stop at 2100-01-01;
@@ -49,7 +61,7 @@ error-bound claim is made. Interpolation differences are not physical uncertaint
 The initial v2 release preserved the original three series, provenance and
 validation exactly; only their v2 object envelope/version (and therefore content
 hash) changed. Subsequent explicit v2 refreshes may advance their scientific
-solutions independently of v1.
+solutions without a cross-version equality requirement.
 
 ## Selection and measured evidence
 
@@ -80,7 +92,7 @@ independent midpoint position for all six objects, with original source metadata
 `test_comet_v2_evidence.py` checks grid coverage and exact reported maxima
 against the current v2 product offline. A separate producer regression checks
 that projection preserves supplied seed series/provenance; it does not require
-future v2 solutions to stay equal to the independently refreshed v1 product.
+future solutions to stay equal to a historical seed product.
 Representative references remain in the public index for reference-reader checks. Full raw HTTP responses are retained
 outside the public tree; the position fixture does not replace raw acquisition
 responses for regeneration.
@@ -109,28 +121,25 @@ valid explicit refresh before retrying. It never queries Horizons. Its optional
 `--directory`, `--cache` and `--output` paths support retained offline inputs.
 
 The default cache remains `.data/horizons`, and must be disjoint from the whole
-site. The v1 command remains unchanged and manages only `data/comets`.
-V2 defaults to `data/comets-v2`. Existing v1 output rejects a v2 refresh rather
-than being silently migrated. Avoid custom nested product layouts: the complete
-site contract recognizes only these sibling product roots. Ordinary builds,
+site. The default output is `data/comets-v2`. Avoid custom nested product layouts:
+the complete site recognizes only the v2 sibling product root. Ordinary builds,
 tests and verification are offline. Missing/corrupt cache fails offline replay;
 reacquire explicitly only when source refresh is intended.
 
 The producer verifies the complete candidate before installation. Site locking,
 separate output refresh locking, same-filesystem preflight, immutable assets
 before pointer, unknown-file/symlink rejection and interrupted-orphan recovery
-follow v1. Rerun a failed refresh to prune managed orphans; unknown files require
+follow the [recovery contract](comet-contract.md). Rerun a failed refresh to prune managed orphans; unknown files require
 operator investigation. A failed acquisition or numerical validation preserves
 the previous product. Complete-site verification rejects corrupt/incomplete
-products; asteroid-only refresh remains independent and preserves both comet
-trees. Publication compares all three descriptors, including absent/removed
-products, and stages the entire site on any difference. Nothing here deploys,
+products; asteroid-only refresh remains independent and preserves the v2 comet
+tree. Publication compares both active descriptors, and stages the entire site on any difference. Nothing here deploys,
 schedules refresh, changes the asteroid contract or removes bundled fallbacks.
 
 ## Consumer handoff
 
 Copy `CometCatalogSource.js`, `cometSourceCore.js`, `contract.js`, `transport.js`
-and the MIT license from the same revision. `CometSource.js` remains the strict v1 reader.
+and the MIT license from the same revision.
 
 ```js
 import CometCatalogSource, { interpolateComet } from './CometCatalogSource.js';
@@ -143,23 +152,19 @@ source.close();
 
 V2 retains pinning, verified lazy loading, shared-request cancellation, cache
 retry, close/disposal and no extrapolation. Consumers own selection and generation
-guards; failures must expose retry/reload without mixing pins. A subsequent
-separate Orrery PR must make both selectors/renderers catalogue-driven and test
-selection, focus, window shifts, loading/error/retry, cancellation and renderer
-switches. Keep v1 and bundled rollback until that adoption is explicitly verified.
+guards; failures must expose retry/reload without mixing pins. Application acceptance covers selection, focus, window shifts, loading/error/retry,
+cancellation and renderer switches. Bundled rollback remains an application decision.
 No Orrery3D adoption, search UI, meteor streams or scheduling is included.
 
 ## Shared implementation
 
-Both Python entry modules delegate to `comet_product.py` for schema checks,
+The Python catalogue entry module delegates to `comet_product.py` for schema checks,
 interpolation, final-byte numerical validation and locked atomic installation.
-The v1 contract fixes the original selection; the v2 contract accepts catalogue
-membership independently of the producer's curated acquisition targets. Both
-JavaScript entry modules use `cometSourceCore.js` for validation, interpolation
-and the pinned loading/cancellation lifecycle. Removing v1 later removes its
-entry modules and data, while retaining the shared implementation.
+The catalogue contract accepts membership independently of curated acquisition targets.
+The JavaScript entry module uses `cometSourceCore.js` for validation, interpolation
+and the pinned loading/cancellation lifecycle. These implementations remain in use.
 
-Refresh coordination: both versions share a per-site Horizons acquisition lock,
+Refresh coordination: outputs share a per-site Horizons acquisition lock,
 including when different caches are used. The existing nonblocking writer-lock
 policy rejects a competing acquisition before it can request data; retry after
 the current refresh finishes. Product refresh locks prevent overtaking. Previous-product

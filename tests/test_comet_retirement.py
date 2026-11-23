@@ -1,0 +1,102 @@
+"""Retired v1 cannot enter a new site; publication uses the existing force policy."""
+from contextlib import chdir
+import importlib.util
+import io
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from orrery_data.formats import DataError
+from orrery_data.site import verify_site
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('retirement_site', ROOT/'scripts/prepare_browser_site.py')
+site = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(site)
+
+class Retirement(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        for name in ('orrery_data', 'scripts'):
+            shutil.copytree(ROOT/name, self.root/name, ignore=shutil.ignore_patterns('__pycache__'))
+        self.data = self.root/'data'
+        shutil.copytree(ROOT/'tests/fixtures/browser-v1/ties', self.data)
+        shutil.copytree(ROOT/'data/comets-v2', self.data/'comets-v2')
+
+    def test_real_staging_excludes_v1_and_preserves_every_supported_byte(self):
+        output = self.root/'pages'
+        run = subprocess.run([sys.executable, str(self.root/'scripts/prepare_browser_site.py'),
+                              '--output', str(output)], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout)['comets_v2']['objects'], 6)
+        expected = {str(p.relative_to(self.data)): p.read_bytes() for p in self.data.rglob('*') if p.is_file()}
+        actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob('*') if p.is_file()}
+        self.assertEqual(actual, {**expected, '.nojekyll': b''})
+        self.assertFalse((output/'comets').exists())
+
+    def test_leftover_v1_namespace_blocks_real_publication(self):
+        legacy = self.data/'comets'; legacy.mkdir(); (legacy/'latest.json').write_text('{}')
+        with self.assertRaises(DataError): verify_site(self.data)
+        output = self.root/'pages'
+        run = subprocess.run([sys.executable, str(self.root/'scripts/prepare_browser_site.py'),
+                              '--output', str(output)], capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertFalse(output.exists())
+
+    def test_equal_active_products_never_request_retired_urls(self):
+        base = 'https://example.test/sub/'
+        requests = []
+        def opening(url, timeout):
+            requests.append(url)
+            self.assertNotIn('/comets/', url, 'retired redirects/CDN bodies must not affect reconciliation')
+            return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
+        with patch.object(site,'urlopen',side_effect=opening):
+            self.assertTrue(site.published_site_matches(self.data,base+'latest.json'))
+        self.assertEqual(requests, [base+'latest.json',base+'comets-v2/latest.json'])
+
+    def test_publication_code_change_and_explicit_retry_force_complete_replacement(self):
+        def git(*args):
+            return subprocess.check_output(['git','-c','user.name=Test','-c','user.email=test@example.invalid',
+                '-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null',*args],cwd=self.root,text=True).strip()
+        git('init','--quiet')
+        (self.root/'.gitignore').write_text('__pycache__/\n')
+        git('add','scripts/prepare_browser_site.py');git('commit','--quiet','-m','before')
+        before=git('rev-parse','HEAD')
+        script=self.root/'scripts/prepare_browser_site.py'
+        script.write_text(script.read_text()+'\n# Retirement publication change\n')
+        git('add',str(script));git('commit','--quiet','-m','retirement')
+        # A later unrelated commit must not hide the publication change.
+        (self.root/'README.md').write_text('notes')
+        git('add','README.md');git('commit','--quiet','-m','notes')
+        for name,args in [('merge',['--publication-base',before]),
+                          ('rerun',['--publication-base',before]),('manual',['--force'])]:
+            with self.subTest(name=name), chdir(self.root), patch.object(site,'ROOT',self.root), \
+                 patch.object(site,'urlopen',side_effect=AssertionError('force must not consult cached hosting')), \
+                 patch.object(sys,'argv',['prepare','--output',str(self.root/name),
+                    '--latest-url','https://example.test/sub/latest.json',*args]), \
+                 patch('sys.stdout',new_callable=io.StringIO) as stdout:
+                self.assertEqual(site.main(),0)
+                self.assertEqual(json.loads(stdout.getvalue())['status'],'prepared')
+            self.assertFalse((self.root/name/'comets').exists())
+            self.assertTrue((self.root/name/'comets-v2/latest.json').is_file())
+        # Normal scheduled/manual reconciliation uses current products only.
+        with chdir(self.root), patch.object(site,'ROOT',self.root), \
+             patch.object(site,'urlopen',side_effect=lambda url,timeout: io.BytesIO(
+                (self.data/url.removeprefix('https://example.test/sub/')).read_bytes())), \
+             patch.object(sys,'argv',['prepare','--output',str(self.root/'unchanged'),
+                 '--latest-url','https://example.test/sub/latest.json','--publication-base',git('rev-parse','HEAD')]), \
+             patch('sys.stdout',new_callable=io.StringIO) as stdout:
+            self.assertEqual(site.main(),0)
+            self.assertEqual(json.loads(stdout.getvalue())['status'],'unchanged')
+
+    def test_retired_commands_fail_without_creating_output(self):
+        for command in ('refresh-comets','verify-comets'):
+            run=subprocess.run([sys.executable,'-m','orrery_data',command],cwd=self.root,capture_output=True,text=True)
+            self.assertEqual(run.returncode,2,run.stderr)
+            self.assertIn('invalid choice',run.stderr)
+        self.assertFalse((self.data/'comets').exists())

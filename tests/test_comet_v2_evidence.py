@@ -45,9 +45,8 @@ class NumericalEvidence(unittest.TestCase):
             self.assertLessEqual(max(errors), comets.TOLERANCE)
 
     def test_seed_projection_preserves_supplied_series_and_provenance(self):
-        # Preservation is a producer property, not a requirement that future v2
-        # refreshes remain equal to the independently managed current v1 product.
-        root = ROOT / 'data/comets'
+        # Projection must preserve supplied source series and provenance.
+        root = ROOT / 'data/comets-v2'
         index = product_index(root)
         records, originals = {}, {}
         for entry in index['objects']:

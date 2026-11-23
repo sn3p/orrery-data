@@ -149,8 +149,8 @@ redistributed artifacts; the code license does not relicense upstream data.
 
 ## Comet trajectories
 
-The separate [comet v1 contract](docs/comets.md) provides validated Horizons
-trajectories for Halley, Encke and Tempel–Tuttle, one file per selected object.
-Use `python3 -m orrery_data refresh-comets` for manual acquisition/export and
-`python3 -m orrery_data verify-comets` for offline verification. The existing
+The separate [comet catalogue](docs/comets-v2.md) provides validated Horizons
+trajectories for six curated comets, one file per selected object.
+Use `python3 -m orrery_data refresh-comets-v2` for manual acquisition/export and
+`python3 -m orrery_data verify-comets-v2` for offline verification. The existing
 asteroid contract and weekly refresh schedule remain unchanged.
