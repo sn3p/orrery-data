@@ -3,7 +3,9 @@
 OrreryData now has a separate, manually refreshed comet product. Asteroid
 `latest.json`, discovery ordering, rows and weekly schedule remain compatible.
 The initial reviewed selection is 1P/Halley, 2P/Encke and 55P/Tempel-Tuttle.
-Orrery app adoption and further targets are separate work. No comet schedule
+Orrery v1 adoption shipped in PR110 (`f55f237b`). The separate
+[six-object v2 catalogue](comets-v2.md) retains this endpoint unchanged;
+Orrery v2 adoption remains separate work. No comet schedule
 is enabled in this milestone.
 
 ## Commands and ownership
@@ -32,7 +34,9 @@ The public projection can be verified without the raw cache, but cannot reproduc
 all independent midpoint checks from its representative reference subset alone.
 Ordinary builds and tests never query JPL.
 
-A cache lock serializes acquisition. A separate per-output comet refresh lock
+A cache lock excludes competing access. Product refreshes share a per-site
+Horizons acquisition lock across versions and caches; competing commands fail
+fast and can be retried after the current acquisition. A separate per-output comet refresh lock
 prevents older acquisitions from overtaking newer ones, including across caches.
 Paths are resolved before deriving locks and staging destinations. Atomic
 installation requires the site, comet tree and its existing files to share the
@@ -41,7 +45,11 @@ place the site inside a directory on the destination volume so its parent can
 hold staging files on that same volume. This preserves pointer-last atomic
 renames without placing temporary candidates in the public tree. When using
 `data/comets`, both producers and the Pages stager share `.data-browser-lock`
-only during local verification/installation; upstream acquisition leaves it free.
+to coordinate publication. Comet refresh holds it during installation and the
+installed-product check; acquisition, previous-product validation and candidate
+construction leave it free. The product refresh lock excludes competing comet writers.
+Browser export holds the shared lock through its build and verification; the Pages
+stager holds it through complete-site verification and copying.
 Build/validate the whole comet
 candidate before installation; install immutable assets, then atomically replace
 `latest.json`, then prune obsolete managed files. Failure before installation
@@ -164,7 +172,8 @@ requests, following [JPL fair use](https://ssd-api.jpl.nasa.gov/doc/).
 
 ## Consumer migration
 
-Copy `consumer/CometSource.js`, `consumer/contract.js` and `consumer/transport.js`
+Copy `consumer/CometSource.js`, `consumer/cometSourceCore.js`,
+`consumer/contract.js` and `consumer/transport.js`
 together; see the [consumer migration files and attribution](../consumer/README.md).
 `consumer/CometSource.js` is a reference adapter using existing verified-fetch,
 strict JSON and immutable metadata helpers. Open once per source generation:

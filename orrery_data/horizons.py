@@ -33,7 +33,7 @@ def query(object_id, midpoint=False):
     return ENDPOINT + '?' + urlencode(params)
 
 
-def parse_response(raw, object_id, midpoint=False):
+def parse_response(raw, object_id, midpoint=False, *, targets):
     if len(raw) > MAX_RESPONSE:
         raise DataError('Horizons response exceeds size limit')
     envelope = loads_json(raw)
@@ -46,7 +46,7 @@ def parse_response(raw, object_id, midpoint=False):
     header, body = result.split('$$SOE')
     body, _ = body.split('$$EOE')
     target = re.search(r'^Target body name:\s*(.*?)\s+\{source: (.*?)\}', header, re.M)
-    if not target or target[1] != TARGETS[object_id] or not re.fullmatch(r'JPL#[A-Za-z0-9/._-]+', target[2]):
+    if not target or target[1] != targets[object_id] or not re.fullmatch(r'JPL#[A-Za-z0-9/._-]+', target[2]):
         raise DataError('Horizons returned the wrong target or missing solution')
     required = (r'Center body name:\s*Sun \(10\)', r'Center-site name:\s*BODY CENTER',
                 r'Output units\s*:\s*AU-D\s*$', r'Output type\s*:\s*GEOMETRIC cartesian states\s*$',
@@ -116,8 +116,26 @@ def download(url, timeout=90):
     raise AssertionError('unreachable')
 
 
-def acquire(cache, *, refresh=False, offline=False):
-    """One lock serializes the six requests; explicit refresh bypasses saved bytes.
+def read_raw(cache, digest):
+    """Read a bounded, regular, content-addressed retained response."""
+    if not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
+        raise DataError('Invalid Horizons raw response hash')
+    path = Path(cache) / (digest + '.raw')
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RESPONSE:
+        raise DataError('Invalid Horizons raw cache file')
+    with path.open('rb') as stream:
+        raw = stream.read(MAX_RESPONSE + 1)
+    if len(raw) > MAX_RESPONSE or hashlib.sha256(raw).hexdigest() != digest:
+        raise DataError('Corrupt Horizons cache')
+    return raw
+
+
+def acquire(cache, *, refresh=False, offline=False, targets):
+    """The cache lock excludes competing access; requests within a call are serial.
+
+    Product refreshes also hold their shared site acquisition lock across caches.
+    Explicit refresh bypasses saved bytes.
 
     Raw records install individually; the accepted public product is only advanced
     after every source and numerical check succeeds. No cache age implies freshness.
@@ -130,7 +148,7 @@ def acquire(cache, *, refresh=False, offline=False):
         raise DataError('Offline acquisition cannot refresh')
     with writer_lock(cache):
         records = {}
-        for object_id in TARGETS:
+        for object_id in targets:
             for midpoint in (False, True):
                 key = object_id + ('-midpoints' if midpoint else '-vectors')
                 url = query(object_id, midpoint)
@@ -146,25 +164,20 @@ def acquire(cache, *, refresh=False, offline=False):
                     utc_timestamp(record['retrieved_at'], 'Horizons retrieval')
                     if record.get('url') != url or not re.fullmatch(r'[a-f0-9]{64}', record.get('sha256', '')):
                         raise DataError('Invalid Horizons cache record')
-                    raw_path = cache / (record['sha256'] + '.raw')
-                    if not stat.S_ISREG(raw_path.lstat().st_mode) or raw_path.stat().st_size > MAX_RESPONSE:
-                        raise DataError('Invalid Horizons raw cache file')
-                    raw = raw_path.read_bytes()
-                    if hashlib.sha256(raw).hexdigest() != record['sha256']:
-                        raise DataError('Corrupt Horizons cache')
+                    raw = read_raw(cache, record['sha256'])
                 else:
                     if offline:
                         raise DataError(f'Missing offline Horizons cache: {key}')
                     raw = download(url)
-                    parse_response(raw, object_id, midpoint)
+                    parse_response(raw, object_id, midpoint, targets=targets)
                     record = {'url': url, 'sha256': hashlib.sha256(raw).hexdigest(), 'retrieved_at': now()}
                     target = cache / (record['sha256'] + '.raw')
                     if target.exists() or target.is_symlink():
-                        if not stat.S_ISREG(target.lstat().st_mode) or target.read_bytes() != raw:
+                        if read_raw(cache, record['sha256']) != raw:
                             raise DataError('Corrupt retained Horizons response')
                     else:
                         atomic_bytes(target, raw)
                     atomic_json(record_path, record)
-                rows, provenance = parse_response(raw, object_id, midpoint)
+                rows, provenance = parse_response(raw, object_id, midpoint, targets=targets)
                 records[key] = (rows, {**record, **provenance})
         return records

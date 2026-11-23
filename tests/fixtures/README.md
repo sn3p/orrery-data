@@ -12,3 +12,18 @@ Original decoded NumberedMPs SHA-256:
 
 Source URLs and attribution: [NOTICE](../../orrery_data/NOTICE.txt).
 Tests construct invalid/changed variants at runtime; large inputs stay outside Git.
+
+## Comet v2 midpoint evidence
+
+`comet-v2-midpoints.json.gz` contains all 10,957 independent Horizons midpoint
+positions per object for the six-object v2 catalogue. Rows are `[UT JD,x,y,z]`
+in AU, with retained query/header/raw-response SHA-256 provenance. It is
+extracted from the raw response hashes pinned by the current published v2 index,
+never from interpolated states. The initial inputs were acquired on 2026-11-18
+(seeds) and 2026-11-20 (additions). Rebuild after a v2 refresh with
+`python3 scripts/rebuild_comet_evidence.py`, then commit the product and evidence
+together. This offline command checks both source series and every midpoint
+against final published values before atomic replacement. Gzip uses mtime=0,
+no filename, and a portable header. Numerical tests compare final committed
+object bytes against every row offline. Raw responses
+remain acquisition inputs, separately retained outside the public product.

@@ -1,6 +1,7 @@
 """Offline transport and atomic persistence regressions; no fixture servers."""
 
 import http.client
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -28,6 +29,27 @@ class Response(io.BytesIO):
 
 
 class HorizonsTransport(unittest.TestCase):
+    def test_retained_raw_is_bounded_regular_and_hash_checked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            raw = b'retained response'
+            digest = hashlib.sha256(raw).hexdigest()
+            path = cache / (digest + '.raw')
+            path.write_bytes(raw)
+            self.assertEqual(horizons.read_raw(cache, digest), raw)
+            with patch.object(horizons, 'MAX_RESPONSE', len(raw) - 1):
+                with self.assertRaises(DataError): horizons.read_raw(cache, digest)
+            path.write_bytes(b'corrupt')
+            with self.assertRaises(DataError): horizons.read_raw(cache, digest)
+            path.unlink()
+            retained = cache / 'retained'; retained.write_bytes(raw)
+            path.symlink_to(retained)
+            with self.assertRaises(DataError): horizons.read_raw(cache, digest)
+            path.unlink(); path.mkdir()
+            with self.assertRaises(DataError): horizons.read_raw(cache, digest)
+            for invalid in ('../retained', '', None):
+                with self.assertRaises(DataError): horizons.read_raw(cache, invalid)
+
     def test_response_read_failures_retry_and_close_before_success(self):
         errors = (ConnectionResetError('reset'), ConnectionAbortedError('aborted'),
                   http.client.IncompleteRead(b'{', 1), http.client.RemoteDisconnected('closed'),
@@ -96,7 +118,7 @@ class HorizonsTransport(unittest.TestCase):
             responses = [Response(error=ConnectionResetError('reset')) for _ in range(3)]
             with patch.object(horizons, 'urlopen', side_effect=responses), \
                  patch.object(horizons.time, 'sleep'):
-                with self.assertRaises(ConnectionResetError): horizons.acquire(cache, refresh=True)
+                with self.assertRaises(ConnectionResetError): horizons.acquire(cache, refresh=True, targets=horizons.TARGETS)
             self.assertEqual(record.read_bytes(), previous)
             self.assertEqual(list(cache.glob('*.raw')), [])
             self.assertEqual(list(cache.glob('.pointer-*')), [])

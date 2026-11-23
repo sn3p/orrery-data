@@ -11,7 +11,7 @@ from .indexed import verify_indexed, MAX_INDEX_BYTES, MAX_CHUNK_BYTES
 from .paths import validate_disjoint_paths, validate_writable_path, managed_tree
 from .pipeline import validate_snapshot_counts
 from .records import validate_catalog_record
-from .storage import read_json, write_json, file_info, verify_file, writer_lock
+from .storage import read_json, write_json, file_info, verify_file, writer_lock, site_lock_path
 
 LATEST = obj({'browser_contract_version': literal(1), 'index': obj({'url': TEXT, **FILE_FIELDS})})
 MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|(?:header|notice)-[a-f0-9]{64}\.txt|chunks/[a-f0-9]{64}\.json)')
@@ -29,7 +29,7 @@ def check_reference(ref, prefix, suffix):
 
 def managed_files(directory):
     """Own asteroid files; comets have an independent verifier and inventory."""
-    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets',), label='Browser output')
+    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets', 'comets-v2'), label='Browser output')
 
 
 def verify_browser(directory, index_sha256=None):
@@ -206,7 +206,7 @@ def export_browser(bundle, output):
     validate_writable_path(output, label='Browser output')
     validate_disjoint_paths(output, (bundle,), label='Browser output')
     managed_files(output)
-    lock = output.parent / ('.' + output.name + '-browser-lock')
+    lock = site_lock_path(output)
     with writer_lock(lock):
         previous = published_index(output)
         with tempfile.TemporaryDirectory(prefix='.browser-', dir=output.parent) as temp:

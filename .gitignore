@@ -240,3 +240,5 @@ node_modules/
 .comets-*/
 
 .*-refresh-lock/
+
+.*-horizons-lock/

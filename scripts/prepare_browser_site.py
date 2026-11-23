@@ -13,10 +13,40 @@ from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.storage import writer_lock
+from orrery_data.storage import writer_lock, site_lock_path
 # Keep in sync with the workflow's non-data push paths. The CLI imports the
 # producer package transitively; no installation or external config is needed.
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
+
+
+def remote_descriptor(url, *, optional=False):
+    """Read a bounded descriptor; only optional products may be absent."""
+    try:
+        with urlopen(url, timeout=20) as response:
+            return json.loads(response.read(4097))
+    except HTTPError as exc:
+        if not optional or exc.code != 404:
+            raise
+        exc.close()
+        return None
+
+
+def published_site_matches(source, latest_url):
+    """Every product must match, including optional product presence/removal."""
+    descriptors = ('latest.json', 'comets/latest.json', 'comets-v2/latest.json')
+    try:
+        for name in descriptors:
+            optional = name != 'latest.json'
+            path = source / name
+            local = None if optional and not path.exists() else json.loads(path.read_text())
+            url = urljoin(latest_url, name) if optional else latest_url
+            remote = remote_descriptor(url, optional=optional)
+            if local != remote:
+                return False
+        return True
+    except (OSError, ValueError):
+        # Unavailable/unconfigured host: prepare a complete candidate normally.
+        return False
 
 
 def main():
@@ -32,7 +62,7 @@ def main():
     source = (ROOT / 'data').resolve()
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
-    with writer_lock(ROOT / '.data-browser-lock'):
+    with writer_lock(site_lock_path(ROOT / 'data')):
         result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', ROOT / 'data'],
                                 cwd=ROOT, capture_output=True, text=True)
         if result.returncode:
@@ -47,27 +77,8 @@ def main():
             # An unavailable base (for example a first/force push) must not silently
             # skip a publication-code change. Local data has already passed verification.
             force = force or comparison.returncode != 0
-        unchanged = False
-        if args.latest_url and not force:
-            try:
-                with urlopen(args.latest_url, timeout=20) as response:
-                    current = json.loads(response.read(4097))
-                unchanged = current == json.loads((ROOT / 'data/latest.json').read_text())
-                comet_descriptor = ROOT / 'data/comets/latest.json'
-                if unchanged:
-                    local_comets = json.loads(comet_descriptor.read_text()) if comet_descriptor.exists() else None
-                    try:
-                        with urlopen(urljoin(args.latest_url, 'comets/latest.json'), timeout=20) as response:
-                            remote_comets = json.loads(response.read(4097))
-                    except HTTPError as exc:
-                        if exc.code != 404:
-                            raise
-                        exc.close()
-                        remote_comets = None
-                    unchanged = remote_comets == local_comets
-            except (OSError, ValueError):
-                # Unavailable/unconfigured host: prepare a complete candidate normally.
-                unchanged = False
+        unchanged = bool(args.latest_url and not force
+                         and published_site_matches(source, args.latest_url))
         if not unchanged:
             shutil.copytree(ROOT / 'data', output)
             (output / '.nojekyll').write_text('')
