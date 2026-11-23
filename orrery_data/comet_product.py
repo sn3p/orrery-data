@@ -173,6 +173,23 @@ def verify_comets(directory, *, contract, allow_orphans=False):
             'files': len(names), 'bytes': sum((directory / n).stat().st_size for n in names)}
 
 
+def serialize_states(rows):
+    """Project source vectors to the precision used by both public products."""
+    return [[float(f'{value:.12g}') for value in row[1:]] for row in rows]
+
+
+def measure_interpolation(series, middle, object_id):
+    """Measure independent midpoints against final serialized states."""
+    errors = [math.dist(interpolate(series, row[0]), row[1:4]) for row in middle]
+    worst = max(range(len(errors)), key=errors.__getitem__)
+    if errors[worst] > TOLERANCE:
+        raise DataError(f'{object_id}: interpolation exceeds {TOLERANCE} AU')
+    return {'method': 'all-midpoints-final-serialized', 'samples': len(errors),
+            'max_error_au': errors[worst], 'worst_jd': middle[worst][0],
+            'tolerance_au': TOLERANCE,
+            'references': [middle[i][:4] for i in sorted({0, len(errors)-1, worst, *range(0, len(errors), 400)})]}
+
+
 def build_candidate(records, stage, previous=None, *, contract, targets):
     (stage / 'objects').mkdir()
     index = {'comet_contract_version': contract.version, 'objects': []}
@@ -181,26 +198,19 @@ def build_candidate(records, stage, previous=None, *, contract, targets):
         middle, check = records[object_id + '-midpoints']
         if source['solution'] != check['solution']:
             raise DataError('Horizons solution changed during acquisition; refresh both queries')
-        series = {'start': START, 'step': STEP,
-                  'states': [[float(f'{v:.12g}') for v in row[1:]] for row in rows]}
+        series = {'start': START, 'step': STEP, 'states': serialize_states(rows)}
         value = {'comet_contract_version': contract.version, 'id': object_id, 'conventions': CONVENTIONS, 'series': series}
         temporary = stage / 'object.json'
         write_json(temporary, value)
         # Measure the bytes actually published, rather than the pre-rounding data.
         series = read_json(temporary)['series']
         validate_series(series)
-        errors = [math.dist(interpolate(series, row[0]), row[1:4]) for row in middle]
-        worst = max(range(len(errors)), key=errors.__getitem__)
-        if errors[worst] > TOLERANCE:
-            raise DataError(f'{object_id}: interpolation exceeds {TOLERANCE} AU')
+        validation = measure_interpolation(series, middle, object_id)
         ref = reference(temporary, 'objects/', '.json')
         temporary.rename(stage / ref['url'])
         entry = {'id': object_id, 'name': name, 'coverage': [START, START + STEP * (COUNT - 1)],
                  'data': ref, 'provenance': {'vectors': source, 'midpoints': check},
-                 'validation': {'method': 'all-midpoints-final-serialized', 'samples': len(errors),
-                                'max_error_au': errors[worst], 'worst_jd': middle[worst][0],
-                                'tolerance_au': TOLERANCE,
-                                'references': [middle[i][:4] for i in sorted({0, len(errors)-1, worst, *range(0, len(errors), 400)})]}}
+                 'validation': validation}
         # Raw hashes/banner clocks identify a retrieval, not a scientific solution.
         # Reuse the prior acquisition provenance only when all scientific headers,
         # queries, serialized states and numerical results are identical.

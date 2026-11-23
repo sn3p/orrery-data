@@ -116,6 +116,21 @@ def download(url, timeout=90):
     raise AssertionError('unreachable')
 
 
+def read_raw(cache, digest):
+    """Read a bounded, regular, content-addressed retained response."""
+    if not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
+        raise DataError('Invalid Horizons raw response hash')
+    path = Path(cache) / (digest + '.raw')
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RESPONSE:
+        raise DataError('Invalid Horizons raw cache file')
+    with path.open('rb') as stream:
+        raw = stream.read(MAX_RESPONSE + 1)
+    if len(raw) > MAX_RESPONSE or hashlib.sha256(raw).hexdigest() != digest:
+        raise DataError('Corrupt Horizons cache')
+    return raw
+
+
 def acquire(cache, *, refresh=False, offline=False, targets):
     """The cache lock excludes competing access; requests within a call are serial.
 
@@ -149,12 +164,7 @@ def acquire(cache, *, refresh=False, offline=False, targets):
                     utc_timestamp(record['retrieved_at'], 'Horizons retrieval')
                     if record.get('url') != url or not re.fullmatch(r'[a-f0-9]{64}', record.get('sha256', '')):
                         raise DataError('Invalid Horizons cache record')
-                    raw_path = cache / (record['sha256'] + '.raw')
-                    if not stat.S_ISREG(raw_path.lstat().st_mode) or raw_path.stat().st_size > MAX_RESPONSE:
-                        raise DataError('Invalid Horizons raw cache file')
-                    raw = raw_path.read_bytes()
-                    if hashlib.sha256(raw).hexdigest() != record['sha256']:
-                        raise DataError('Corrupt Horizons cache')
+                    raw = read_raw(cache, record['sha256'])
                 else:
                     if offline:
                         raise DataError(f'Missing offline Horizons cache: {key}')
@@ -163,7 +173,7 @@ def acquire(cache, *, refresh=False, offline=False, targets):
                     record = {'url': url, 'sha256': hashlib.sha256(raw).hexdigest(), 'retrieved_at': now()}
                     target = cache / (record['sha256'] + '.raw')
                     if target.exists() or target.is_symlink():
-                        if not stat.S_ISREG(target.lstat().st_mode) or target.read_bytes() != raw:
+                        if read_raw(cache, record['sha256']) != raw:
                             raise DataError('Corrupt retained Horizons response')
                     else:
                         atomic_bytes(target, raw)

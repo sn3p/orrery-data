@@ -243,3 +243,9 @@ def acquire(name, stage, url, local, metadata, timeout, cached=None):
     if "decoded_sha256" in metadata and metadata["decoded_sha256"] != info["decoded"]["sha256"]:
         raise DataError(f"{name}: expected decoded checksum does not match")
     return info
+
+
+def site_lock_path(site):
+    """Shared lock identity for all writers/readers of a complete browser site."""
+    site = Path(site).resolve()
+    return site.parent / ('.' + site.name + '-browser-lock')

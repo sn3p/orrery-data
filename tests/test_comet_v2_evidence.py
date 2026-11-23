@@ -113,6 +113,12 @@ class NumericalEvidence(unittest.TestCase):
             raw_paths[0].unlink()
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
             self.assertEqual(fixture.read_bytes(), first)
+            retained = root / 'retained.raw'
+            retained.write_bytes(original_raw)
+            raw_paths[0].symlink_to(retained)
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+            self.assertEqual(fixture.read_bytes(), first)
+            raw_paths[0].unlink()
             # A validly hashed/parsed raw response still must match the published states.
             changed = json.loads(original_raw)
             x = records['1P-vectors'][0][0][1]
