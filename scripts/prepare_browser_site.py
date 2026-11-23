@@ -33,7 +33,7 @@ def remote_descriptor(url, *, optional=False):
 
 def published_site_matches(source, latest_url):
     """Every product must match, including optional product presence/removal."""
-    descriptors = ('latest.json', 'comets/latest.json', 'comets-v2/latest.json')
+    descriptors = ('latest.json', 'comets-v2/latest.json')
     try:
         for name in descriptors:
             optional = name != 'latest.json'
@@ -42,6 +42,15 @@ def published_site_matches(source, latest_url):
             url = urljoin(latest_url, name) if optional else latest_url
             remote = remote_descriptor(url, optional=optional)
             if local != remote:
+                return False
+        # A complete replacement must remove retired v1 even when current pins
+        # match. Only HTTP 404 establishes absence; a 200/null body does not.
+        try:
+            with urlopen(urljoin(latest_url, 'comets/latest.json'), timeout=20):
+                return False
+        except HTTPError as exc:
+            exc.close()
+            if exc.code != 404:
                 return False
         return True
     except (OSError, ValueError):
