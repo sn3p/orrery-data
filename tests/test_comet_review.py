@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orrery_data import comet_product, comets, comets_v2, horizons
+from orrery_data import comet_product, comets_v2, horizons
 from orrery_data.comet_product import CometContract, descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
 from orrery_data.storage import writer_lock, read_json, site_lock_path
@@ -22,11 +22,8 @@ class ReviewRegressions(unittest.TestCase):
             value = read_json(root / entry['data']['url'])
             comets_v2.validate_object(value, entry['id'])
             value['comet_contract_version'] = 1
-            if entry['id'] in comets.TARGETS:
-                comets.validate_object(value, entry['id'])
-            else:
-                with self.assertRaisesRegex(DataError, 'identity'):
-                    comets.validate_object(value, entry['id'])
+            with self.assertRaises(DataError):
+                comets_v2.validate_object(value, entry['id'])
 
     def test_refresh_ignores_builder_return_and_checks_installed_tree(self):
         for builder_result in (None, {'pin': 'wrong', 'bytes': -1}):
@@ -113,10 +110,6 @@ class ReviewRegressions(unittest.TestCase):
             with self.assertRaisesRegex(DataError,'Oversized'):
                 descriptor_bytes(path)
 
-    def test_selection_diagnostic_identifies_actual_contract(self):
-        with self.assertRaisesRegex(DataError, 'Comet v2 requires fixed selection: 9P'):
-            CometContract(2, {'9P': '9P/Tempel 1'}).validate_selection([])
-
     def test_horizons_targets_are_required_before_io(self):
         with patch.object(horizons, 'download') as download:
             with self.assertRaises(TypeError): horizons.acquire('unused')
@@ -128,21 +121,21 @@ class ReviewRegressions(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertEqual(valid_id(case['id']) and valid_name(case['name'], case['id']), case['valid'])
 
-    def test_both_versions_exclude_other_acquisition_even_with_different_caches(self):
+    def test_outputs_exclude_other_acquisition_even_with_different_caches(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for first, second in [(comets, comets_v2), (comets_v2, comets)]:
+            for first, second in [(comets_v2, comets_v2)]:
                 def acquiring(*args, **kwargs):
                     # The publication lock remains free while acquiring.
                     with writer_lock(root / '.data-browser-lock'): pass
                     with patch.object(second.PRODUCT, 'acquire') as competing:
                         with self.assertRaises(DataError):
-                            second.refresh_comets(root/'other-cache',root/f'data/v{second.CONTRACT.version}')
+                            second.refresh_comets(root/'other-cache',root/'data/other-output')
                         competing.assert_not_called()
                     raise DataError('stop after exclusion check')
                 with patch.object(first.PRODUCT, 'acquire', side_effect=acquiring):
                     with self.assertRaisesRegex(DataError, 'stop after exclusion'):
-                        first.refresh_comets(root/'cache',root/f'data/v{first.CONTRACT.version}')
+                        first.refresh_comets(root/'cache',root/'data/comets-v2')
 
     def test_candidate_releases_site_lock_and_rejects_changed_pointer(self):
         with tempfile.TemporaryDirectory() as temporary:

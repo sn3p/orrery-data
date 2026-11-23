@@ -43,12 +43,12 @@ export function interpolateComet(series, jd) {
     + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3]);
 }
 
-// Each adapter closes over its own contract; sources cannot mix wire versions.
-export function createCometSource({ version: contractVersion, targets = null }) {
+// The catalogue adapter pins its wire contract for validation and loading.
+export function createCometSource({ version: contractVersion }) {
   function version(value) { requireValue(value.comet_contract_version === contractVersion, 'contract version'); }
   function validateComet(value, id) {
     fields(value, ['comet_contract_version', 'id', 'conventions', 'series']); version(value);
-    requireValue(value.id === id && (targets ? Object.hasOwn(targets, id) : validId(id)), 'identity');
+    requireValue(value.id === id && validId(id), 'identity');
     fields(value.conventions, Object.keys(CONVENTIONS));
     requireValue(Object.entries(CONVENTIONS).every(([k, v]) => value.conventions[k] === v), 'conventions');
     fields(value.series, ['start', 'step', 'states']);
@@ -70,14 +70,12 @@ export function createCometSource({ version: contractVersion, targets = null }) 
       const index = decode(bytes);
       fields(index, ['comet_contract_version', 'objects']); version(index);
       requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
-      if (targets) requireValue(index.objects.length === Object.keys(targets).length
-        && index.objects.every((entry, i) => entry?.id === Object.keys(targets)[i]), 'catalogue');
       const seen = new Set();
       index.objects.forEach(entry => {
         fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
         requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
         seen.add(entry.id);
-        requireValue((targets ? entry.name === targets[entry.id] : validName(entry.name, entry.id)) && Array.isArray(entry.coverage)
+        requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
           && entry.coverage.length === 2 && entry.coverage[0] === START
           && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
         reference(entry.data, 'objects/', 2 * 1024 * 1024);

@@ -342,36 +342,17 @@ test('a rehashed object must still match its selected catalogue identity', async
   source.close();
 });
 
-test('v1 and v2 adapters keep separate contracts and lifetimes in one process', async t => {
-  const { default: LegacySource } = await import('../consumer/CometSource.js');
-  // Synthetic v2-only sample change exercises independent refreshes, not source accuracy.
-  await catalogueFixture(t, async (index, ref) => {
-    const entry = index.objects.find(entry => entry.id === '1P');
-    const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));
-    value.series.states[0][0] += 1e-8;
-    entry.data = ref(value, 'objects/');
-  });
-  const fetchCatalogue = globalThis.fetch;
-  t.mock.method(globalThis, 'fetch', async url => {
-    const pathname = new URL(url).pathname;
-    if (pathname.startsWith('/sub/comets-v2/')) return fetchCatalogue(url);
-    return new Response(await fs.readFile(path.join('data/comets', pathname.slice('/sub/comets/'.length))));
-  });
-  const legacyURL = 'https://example.test/sub/comets/latest.json';
-  const latestURL = 'https://example.test/sub/comets-v2/latest.json';
-  const [legacy, current] = await Promise.all([LegacySource.openLatest(legacyURL), CometSource.openLatest(latestURL)]);
-  assert.equal(legacy.info.objects.length, 3);
-  assert.equal(current.info.objects.length, 6);
-  await assert.rejects(LegacySource.openLatest(latestURL), /contract version/);
-  await assert.rejects(CometSource.openLatest(legacyURL), /contract version/);
-  await assert.rejects(legacy.load('67P'), /selection/);
-  const [oldHalley, newHalley] = await Promise.all([legacy.load('1P'), current.load('1P')]);
-  assert.equal(oldHalley.comet_contract_version, 1);
-  assert.equal(newHalley.comet_contract_version, 2);
-  assert.notStrictEqual(oldHalley.series, newHalley.series);
-  legacy.close();
-  assert.equal((await current.load('67P')).id, '67P');
-  current.close();
+test('catalogue rejects the retired wire version and keeps independent lifetimes', async t => {
+  await fixture(t);
+  const [first, second] = await Promise.all([
+    CometSource.openLatest(base + 'latest.json'), CometSource.openLatest(base + 'latest.json')]);
+  const a = await first.load('1P'), b = await second.load('1P');
+  assert.notStrictEqual(a, b);
+  first.close();
+  assert.equal((await second.load('67P')).id, '67P');
+  second.close();
+  await catalogueFixture(t, index => { index.comet_contract_version = 1; });
+  await assert.rejects(CometSource.openLatest(base + 'latest.json'), /contract version/);
 });
 
 test('shared identity fixtures agree with producer whitespace and ID rules', async t => {
