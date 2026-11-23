@@ -43,123 +43,119 @@ export function interpolateComet(series, jd) {
     + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3]);
 }
 
-// The catalogue adapter pins its wire contract for validation and loading.
-export function createCometSource({ version: contractVersion }) {
-  function version(value) { requireValue(value.comet_contract_version === contractVersion, 'contract version'); }
-  function validateComet(value, id) {
-    fields(value, ['comet_contract_version', 'id', 'conventions', 'series']); version(value);
-    requireValue(value.id === id && validId(id), 'identity');
-    fields(value.conventions, Object.keys(CONVENTIONS));
-    requireValue(Object.entries(CONVENTIONS).every(([k, v]) => value.conventions[k] === v), 'conventions');
-    fields(value.series, ['start', 'step', 'states']);
-    const { start, step, states } = value.series;
-    requireValue(start === START && step === STEP && Array.isArray(states) && states.length === COUNT
-      && states.every(row => Array.isArray(row) && row.length === 6 && row.every(Number.isFinite)), 'states');
-    return value;
-  }
-  // A source pins one index. A new visit/retry creates a new source; close aborts
-  // outstanding reads. Selection and renderer generation remain the app's concern.
-  class CometSource {
-    static async openLatest(url, { signal } = {}) {
-      const { location, latest } = await fetchLatest(url, signal, 'comet');
-      fields(latest, ['comet_contract_version', 'index']); version(latest);
-      reference(latest.index, 'index-', 256 * 1024);
-      const indexURL = new URL(latest.index.url, location).href;
-      const bytes = await fetchVerified(latest.index, indexURL, signal, 'comet');
-      check(signal);
-      const index = decode(bytes);
-      fields(index, ['comet_contract_version', 'objects']); version(index);
-      requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
-      const seen = new Set();
-      index.objects.forEach(entry => {
-        fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
-        requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
-        seen.add(entry.id);
-        requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
-          && entry.coverage.length === 2 && entry.coverage[0] === START
-          && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
-        reference(entry.data, 'objects/', 2 * 1024 * 1024);
-        fields(entry.provenance, ['vectors', 'midpoints']);
-        for (const [kind, source] of Object.entries(entry.provenance)) {
-          fields(source, ['url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version']);
-          requireValue(Object.values(source).every(v => typeof v === 'string' && v.length)
-            && ['1.2', '1.3'].includes(source.api_version) && utcTimestamp(source.retrieved_at)
-            && source.url === sourceQuery(entry.id, kind === 'midpoints')
-            && source.target === entry.name && /^JPL#[A-Za-z0-9\/._-]+$/.test(source.solution)
-            && /^[a-f0-9]{64}$/.test(source.sha256), 'provenance');
-        }
-        requireValue(entry.provenance.vectors.solution === entry.provenance.midpoints.solution, 'solution');
-        const v = entry.validation;
-        fields(v, ['method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references']);
-        requireValue(v.method === 'all-midpoints-final-serialized' && v.samples === COUNT - 1
-          && v.tolerance_au === 0.000052 && Number.isFinite(v.max_error_au)
-          && v.max_error_au >= 0 && v.max_error_au <= v.tolerance_au && Array.isArray(v.references)
-          && v.references.length > 0 && v.references.every(r => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
-          && v.references.some(r => r[0] === v.worst_jd), 'validation');
-      });
-      check(signal);
-      return new CometSource(indexURL, latest.index.sha256, index);
-    }
-    constructor(url, sourceId, info) {
-      Object.defineProperties(this, { url: { value: url }, sourceId: { value: sourceId, enumerable: true },
-        info: { value: freeze(info), enumerable: true } });
-      this.lifetime = new AbortController();
-      this.cache = new Map();
-      this.pending = new Map();
-    }
-    async load(id, { signal } = {}) {
-      check(signal); check(this.lifetime.signal);
-      const entry = this.info.objects.find(v => v.id === id);
-      requireValue(entry, 'selection');
-      if (this.cache.has(id)) return this.cache.get(id);
-      let pending = this.pending.get(id);
-      if (!pending) {
-        const controller = new AbortController();
-        pending = { controller, subscribers: new Set(), settled: false };
-        this.pending.set(id, pending);
-        pending.promise = (async () => {
-          try {
-            const bytes = await fetchVerified(entry.data,
-              new URL(entry.data.url, this.url).href, controller.signal, 'comet');
-            check(controller.signal);
-            const value = validateComet(decode(bytes), id);
-            for (const row of entry.validation.references) requireValue(
-              Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
-              'interpolation tolerance');
-            check(controller.signal);
-            this.cache.set(id, freeze(value));
-            return value;
-          } finally {
-            pending.settled = true;
-            if (this.pending.get(id) === pending) this.pending.delete(id);
-          }
-        })();
+function version(value) { requireValue(value.comet_contract_version === 2, 'contract version'); }
+export function validateComet(value, id) {
+  fields(value, ['comet_contract_version', 'id', 'conventions', 'series']); version(value);
+  requireValue(value.id === id && validId(id), 'identity');
+  fields(value.conventions, Object.keys(CONVENTIONS));
+  requireValue(Object.entries(CONVENTIONS).every(([k, v]) => value.conventions[k] === v), 'conventions');
+  fields(value.series, ['start', 'step', 'states']);
+  const { start, step, states } = value.series;
+  requireValue(start === START && step === STEP && Array.isArray(states) && states.length === COUNT
+    && states.every(row => Array.isArray(row) && row.length === 6 && row.every(Number.isFinite)), 'states');
+  return value;
+}
+// A source pins one index. A new visit/retry creates a new source; close aborts
+// outstanding reads. Selection and renderer generation remain the app's concern.
+export class CometSource {
+  static async openLatest(url, { signal } = {}) {
+    const { location, latest } = await fetchLatest(url, signal, 'comet');
+    fields(latest, ['comet_contract_version', 'index']); version(latest);
+    reference(latest.index, 'index-', 256 * 1024);
+    const indexURL = new URL(latest.index.url, location).href;
+    const bytes = await fetchVerified(latest.index, indexURL, signal, 'comet');
+    check(signal);
+    const index = decode(bytes);
+    fields(index, ['comet_contract_version', 'objects']); version(index);
+    requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
+    const seen = new Set();
+    index.objects.forEach(entry => {
+      fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
+      requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
+      seen.add(entry.id);
+      requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
+        && entry.coverage.length === 2 && entry.coverage[0] === START
+        && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
+      reference(entry.data, 'objects/', 2 * 1024 * 1024);
+      fields(entry.provenance, ['vectors', 'midpoints']);
+      for (const [kind, source] of Object.entries(entry.provenance)) {
+        fields(source, ['url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version']);
+        requireValue(Object.values(source).every(v => typeof v === 'string' && v.length)
+          && ['1.2', '1.3'].includes(source.api_version) && utcTimestamp(source.retrieved_at)
+          && source.url === sourceQuery(entry.id, kind === 'midpoints')
+          && source.target === entry.name && /^JPL#[A-Za-z0-9\/._-]+$/.test(source.solution)
+          && /^[a-f0-9]{64}$/.test(source.sha256), 'provenance');
       }
-      // Cancellation belongs to each subscriber. Only the last cancelled reader
-      // aborts shared work, and eviction permits an immediate independent retry.
-      return new Promise((resolve, reject) => {
-        const signals = [...new Set([this.lifetime.signal, ...(signal ? [signal] : [])])];
-        let finished = false;
-        const finish = (callback, value) => {
-          if (finished) return;
-          finished = true;
-          for (const signal of signals) signal.removeEventListener('abort', cancel);
-          pending.subscribers.delete(cancel);
-          if (!pending.settled && pending.subscribers.size === 0) {
-            pending.controller.abort();
-            if (this.pending.get(id) === pending) this.pending.delete(id);
-          }
-          callback(value);
-        };
-        const cancel = () => finish(reject, aborted());
-        pending.subscribers.add(cancel);
-        for (const signal of signals) signal.addEventListener('abort', cancel, { once: true });
-        pending.promise.then(value => finish(resolve, value), error => finish(reject, error));
-        // A synchronous fetch interceptor can abort before registration.
-        if (signals.some(signal => signal.aborted)) cancel();
-      });
-    }
-    close() { this.lifetime.abort(); this.cache.clear(); }
+      requireValue(entry.provenance.vectors.solution === entry.provenance.midpoints.solution, 'solution');
+      const v = entry.validation;
+      fields(v, ['method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references']);
+      requireValue(v.method === 'all-midpoints-final-serialized' && v.samples === COUNT - 1
+        && v.tolerance_au === 0.000052 && Number.isFinite(v.max_error_au)
+        && v.max_error_au >= 0 && v.max_error_au <= v.tolerance_au && Array.isArray(v.references)
+        && v.references.length > 0 && v.references.every(r => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
+        && v.references.some(r => r[0] === v.worst_jd), 'validation');
+    });
+    check(signal);
+    return new CometSource(indexURL, latest.index.sha256, index);
   }
-  return { CometSource, validateComet };
+  constructor(url, sourceId, info) {
+    Object.defineProperties(this, { url: { value: url }, sourceId: { value: sourceId, enumerable: true },
+      info: { value: freeze(info), enumerable: true } });
+    this.lifetime = new AbortController();
+    this.cache = new Map();
+    this.pending = new Map();
+  }
+  async load(id, { signal } = {}) {
+    check(signal); check(this.lifetime.signal);
+    const entry = this.info.objects.find(v => v.id === id);
+    requireValue(entry, 'selection');
+    if (this.cache.has(id)) return this.cache.get(id);
+    let pending = this.pending.get(id);
+    if (!pending) {
+      const controller = new AbortController();
+      pending = { controller, subscribers: new Set(), settled: false };
+      this.pending.set(id, pending);
+      pending.promise = (async () => {
+        try {
+          const bytes = await fetchVerified(entry.data,
+            new URL(entry.data.url, this.url).href, controller.signal, 'comet');
+          check(controller.signal);
+          const value = validateComet(decode(bytes), id);
+          for (const row of entry.validation.references) requireValue(
+            Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
+            'interpolation tolerance');
+          check(controller.signal);
+          this.cache.set(id, freeze(value));
+          return value;
+        } finally {
+          pending.settled = true;
+          if (this.pending.get(id) === pending) this.pending.delete(id);
+        }
+      })();
+    }
+    // Cancellation belongs to each subscriber. Only the last cancelled reader
+    // aborts shared work, and eviction permits an immediate independent retry.
+    return new Promise((resolve, reject) => {
+      const signals = [...new Set([this.lifetime.signal, ...(signal ? [signal] : [])])];
+      let finished = false;
+      const finish = (callback, value) => {
+        if (finished) return;
+        finished = true;
+        for (const signal of signals) signal.removeEventListener('abort', cancel);
+        pending.subscribers.delete(cancel);
+        if (!pending.settled && pending.subscribers.size === 0) {
+          pending.controller.abort();
+          if (this.pending.get(id) === pending) this.pending.delete(id);
+        }
+        callback(value);
+      };
+      const cancel = () => finish(reject, aborted());
+      pending.subscribers.add(cancel);
+      for (const signal of signals) signal.addEventListener('abort', cancel, { once: true });
+      pending.promise.then(value => finish(resolve, value), error => finish(reject, error));
+      // A synchronous fetch interceptor can abort before registration.
+      if (signals.some(signal => signal.aborted)) cancel();
+    });
+  }
+  close() { this.lifetime.abort(); this.cache.clear(); }
 }

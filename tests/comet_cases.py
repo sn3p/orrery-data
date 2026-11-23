@@ -86,7 +86,7 @@ class CometCases(CometFixture):
     def test_corruption_unknown_files_symlinks_and_versions(self):
         latest = self.output / 'latest.json'
         original = latest.read_bytes()
-        for value in [True, 3 - self.version, str(self.version)]:
+        for value in [True, 1, 3, "2"]:
             pointer = json.loads(original); pointer['comet_contract_version'] = value
             write_json(latest, pointer)
             with self.assertRaises(DataError): self.comets.verify_comets(self.output)

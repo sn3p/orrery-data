@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from orrery_data import comet_product, comets_v2, horizons
-from orrery_data.comet_product import CometContract, descriptor_bytes, valid_id, valid_name
+from orrery_data.comet_product import descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
 from orrery_data.storage import writer_lock, read_json, site_lock_path
 
@@ -124,18 +124,17 @@ class ReviewRegressions(unittest.TestCase):
     def test_outputs_exclude_other_acquisition_even_with_different_caches(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for first, second in [(comets_v2, comets_v2)]:
-                def acquiring(*args, **kwargs):
-                    # The publication lock remains free while acquiring.
-                    with writer_lock(root / '.data-browser-lock'): pass
-                    with patch.object(second.PRODUCT, 'acquire') as competing:
-                        with self.assertRaises(DataError):
-                            second.refresh_comets(root/'other-cache',root/'data/other-output')
-                        competing.assert_not_called()
-                    raise DataError('stop after exclusion check')
-                with patch.object(first.PRODUCT, 'acquire', side_effect=acquiring):
-                    with self.assertRaisesRegex(DataError, 'stop after exclusion'):
-                        first.refresh_comets(root/'cache',root/'data/comets-v2')
+            def acquiring(*args, **kwargs):
+                # The publication lock remains free while acquiring.
+                with writer_lock(root / '.data-browser-lock'): pass
+                with patch.object(comets_v2.PRODUCT, 'acquire') as competing:
+                    with self.assertRaises(DataError):
+                        comets_v2.refresh_comets(root/'other-cache',root/'data/other-output')
+                    competing.assert_not_called()
+                raise DataError('stop after exclusion check')
+            with patch.object(comets_v2.PRODUCT, 'acquire', side_effect=acquiring):
+                with self.assertRaisesRegex(DataError, 'stop after exclusion'):
+                    comets_v2.refresh_comets(root/'cache',root/'data/comets-v2')
 
     def test_candidate_releases_site_lock_and_rejects_changed_pointer(self):
         with tempfile.TemporaryDirectory() as temporary:

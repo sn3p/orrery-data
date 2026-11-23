@@ -342,17 +342,73 @@ test('a rehashed object must still match its selected catalogue identity', async
   source.close();
 });
 
-test('catalogue rejects the retired wire version and keeps independent lifetimes', async t => {
-  await fixture(t);
-  const [first, second] = await Promise.all([
-    CometSource.openLatest(base + 'latest.json'), CometSource.openLatest(base + 'latest.json')]);
-  const a = await first.load('1P'), b = await second.load('1P');
-  assert.notStrictEqual(a, b);
-  first.close();
-  assert.equal((await second.load('67P')).id, '67P');
-  second.close();
+test('retired descriptor is rejected before fetching its valid index', async t => {
+  const calls = await fixture(t, async name => {
+    if (name !== 'latest.json') return null;
+    const latest = JSON.parse(await fs.readFile(path.join(root, name)));
+    latest.comet_contract_version = 1;
+    return new Response(JSON.stringify(latest));
+  });
+  await assert.rejects(CometSource.openLatest(base + 'latest.json'), /contract version/);
+  assert.deepEqual(calls, ['latest.json']);
+});
+
+test('rehashed retired index is rejected', async t => {
   await catalogueFixture(t, index => { index.comet_contract_version = 1; });
   await assert.rejects(CometSource.openLatest(base + 'latest.json'), /contract version/);
+});
+
+test('rehashed retired object is rejected and never cached', async t => {
+  await catalogueFixture(t, async (index, ref) => {
+    const entry = index.objects[0];
+    const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));
+    value.comet_contract_version = 1;
+    entry.data = ref(value, 'objects/');
+  });
+  const fetchObject = globalThis.fetch;
+  let objectRequests = 0;
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    if (String(url).includes('/objects/')) objectRequests++;
+    return fetchObject(url, options);
+  });
+  const source = await CometSource.openLatest(base + 'latest.json');
+  t.after(() => source.close());
+  await assert.rejects(source.load('1P'), /contract version/);
+  await assert.rejects(source.load('1P'), /contract version/);
+  assert.equal(objectRequests, 2, 'invalid objects must be fetched again on retry');
+});
+
+test('closing one source aborts only its pending load and leaves the other cache usable', async t => {
+  const pending = [];
+  const calls = await fixture(t, (name, options) => {
+    if (!name.startsWith('objects/')) return null;
+    return new Promise((resolve, reject) => {
+      const cancel = () => reject(new DOMException('cancelled', 'AbortError'));
+      options.signal.addEventListener('abort', cancel, { once: true });
+      pending.push({ signal: options.signal, release: async () => {
+        options.signal.removeEventListener('abort', cancel);
+        resolve(new Response(await fs.readFile(path.join(root, name))));
+      }});
+    });
+  });
+  const first = await CometSource.openLatest(base + 'latest.json');
+  const second = await CometSource.openLatest(base + 'latest.json');
+  t.after(() => { first.close(); second.close(); });
+  const firstLoad = first.load('1P');
+  const rejected = assert.rejects(firstLoad, { name: 'AbortError' });
+  const secondLoad = second.load('1P');
+  assert.equal(pending.length, 2, 'sources must not share in-flight requests');
+  first.close();
+  await rejected;
+  assert.equal(pending[0].signal.aborted, true);
+  assert.equal(pending[1].signal.aborted, false);
+  await pending[1].release();
+  const value = await secondLoad;
+  assert.equal(value.id, '1P');
+  const count = calls.length;
+  assert.strictEqual(await second.load('1P'), value);
+  assert.equal(calls.length, count, 'the surviving source retains its verified cache');
+  await assert.rejects(first.load('1P'), { name: 'AbortError' });
 });
 
 test('shared identity fixtures agree with producer whitespace and ID rules', async t => {

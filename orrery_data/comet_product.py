@@ -55,11 +55,6 @@ class CometContract:
         if not entries:
             raise DataError('Comet catalogue must not be empty')
 
-    def valid_id(self, object_id):
-        return valid_id(object_id)
-
-    def valid_name(self, name, object_id):
-        return valid_name(name, object_id)
 
 
 def managed_files(directory):
@@ -104,7 +99,7 @@ def valid_name(name, object_id):
 
 def validate_object(value, object_id, *, contract):
     contract.object_schema(value, 'object')
-    if not contract.valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
+    if not valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
         raise DataError('Invalid comet identity or state count')
 
 
@@ -134,10 +129,10 @@ def inspect_comets(directory, *, contract, allow_orphans=False, descriptor=None)
     seen = set()
     expected = {'latest.json', latest['index']['url']}
     for entry in index['objects']:
-        if not contract.valid_id(entry['id']) or entry['id'] in seen:
+        if not valid_id(entry['id']) or entry['id'] in seen:
             raise DataError('Invalid or duplicate comet identity')
         seen.add(entry['id'])
-        if not contract.valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
+        if not valid_name(entry['name'], entry['id']) or entry['coverage'] != [START, START + STEP * (COUNT - 1)]:
             raise DataError('Invalid comet metadata/coverage')
         provenance = entry['provenance']
         for kind, source in provenance.items():
