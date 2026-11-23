@@ -34,10 +34,16 @@ Keep the existing v2 URL: retirement does not require another consumer migration
 Asteroid publication and Orrery's separate bundled rollback are unchanged.
 
 A complete Pages artifact contains only asteroid data and the optional v2 catalogue.
-Local verification rejects a leftover `comets/` directory. Publication reconciliation
-still probes `comets/latest.json`: only HTTP 404 establishes retirement; a stale
-response or unavailable host requires a new complete artifact even if active pins
-match. No remote deletion is claimed until a separately authorized publication
+Local verification rejects a leftover `comets/` directory. This retirement changes
+publication code, so the existing merge workflow's `--publication-base` comparison
+forces a complete-site replacement even when active data pins match. Routine
+reconciliation requests only active product descriptors; it does not probe retired
+URLs or infer deployment failure from cached legacy responses or redirects.
+
+If the retirement deployment fails, rerun all jobs of that push workflow (which retains
+its original publication base), or manually dispatch the publisher with `force=true`.
+A later scheduled MPC run does not repair a retirement-only failure when active
+pins already match. No remote deletion is claimed until an authorized publication
 replaces the deployed site. CDN/browser caches and old visits may retain old bytes
 until expiry; no purge or client audit is part of this change.
 
@@ -127,7 +133,7 @@ follow the [recovery contract](comet-contract.md). Rerun a failed refresh to pru
 operator investigation. A failed acquisition or numerical validation preserves
 the previous product. Complete-site verification rejects corrupt/incomplete
 products; asteroid-only refresh remains independent and preserves the v2 comet
-tree. Publication compares both active descriptors and retired-v1 absence, and stages the entire site on any difference. Nothing here deploys,
+tree. Publication compares both active descriptors, and stages the entire site on any difference. Nothing here deploys,
 schedules refresh, changes the asteroid contract or removes bundled fallbacks.
 
 ## Consumer handoff

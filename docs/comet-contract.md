@@ -60,13 +60,13 @@ scheduled MPC candidates; no stale generated output is rebased automatically.
 
 No additional service or hosting is needed. Existing Pages path filters already
 cover `data/**`, `orrery_data/**` and the staging script. Every deployment verifies
-and copies the complete site. Reconciliation checks both active descriptors and the retired-v1 endpoint, including
+and copies the complete site. Reconciliation checks both active descriptors, including
 missing/stale remote comets when asteroids are unchanged. A later MPC refresh
 can therefore retry a failed comet deployment without harvesting comets again.
 An asteroid refresh never changes comet files. A comet refresh never changes
-asteroid files. Removing the comet product is not a supported refresh operation. A deliberate
-whole-product removal in a reviewed site commit is detected by remote/local
-presence comparison and publishes the complete remaining site.
+asteroid files. Removing the comet product is not a supported refresh operation. An active optional-product removal is detected by remote/local presence comparison.
+Retiring its contract and publication code forces complete replacement through the
+merge workflow; see [retirement recovery](comets-v2.md#v1-retirement).
 Future comet scheduling must coordinate with the existing data-writer workflow
 and retain its data-only validation and non-force-push checks.
 
