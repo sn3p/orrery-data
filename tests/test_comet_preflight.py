@@ -1,4 +1,4 @@
-"""Comet v2 boundary coverage using the shared cases."""
+"""Comet boundary coverage using the shared cases."""
 import unittest
 from comet_cases import PreflightCases
 

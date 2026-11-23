@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orrery_data import comet_product, comets_v2, horizons
+from orrery_data import comet_product, comets, horizons
 from orrery_data.comet_product import descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
 from orrery_data.storage import writer_lock, read_json, site_lock_path
@@ -16,20 +16,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ReviewRegressions(unittest.TestCase):
     def test_object_validation_enforces_version_selection(self):
-        root = ROOT / 'data/comets-v2'
+        root = ROOT / 'data/comets'
         index = read_json(root / read_json(root / 'latest.json')['index']['url'])
         for entry in index['objects']:
             value = read_json(root / entry['data']['url'])
-            comets_v2.validate_object(value, entry['id'])
+            comets.validate_object(value, entry['id'])
             value['comet_contract_version'] = 1
             with self.assertRaises(DataError):
-                comets_v2.validate_object(value, entry['id'])
+                comets.validate_object(value, entry['id'])
 
     def test_refresh_ignores_builder_return_and_checks_installed_tree(self):
         for builder_result in (None, {'pin': 'wrong', 'bytes': -1}):
             with self.subTest(builder_result=builder_result), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary).resolve(); output = root / 'data/comets-v2'
-                shutil.copytree(ROOT / 'data/comets-v2', output)
+                root = Path(temporary).resolve(); output = root / 'data/comets'
+                shutil.copytree(ROOT / 'data/comets', output)
                 orphan = 'objects/' + '0' * 64 + '.json'
                 (output / orphan).write_text('{}')
                 def build(records, stage, previous):
@@ -37,35 +37,35 @@ class ReviewRegressions(unittest.TestCase):
                         shutil.copytree(output, stage, dirs_exist_ok=True)
                         (stage / orphan).unlink()
                     return builder_result
-                with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
-                     patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build):
-                    result = comets_v2.refresh_comets(root / 'cache', output, offline=True)
+                with patch.object(comets.PRODUCT, 'acquire', return_value={}), \
+                     patch.object(comets.PRODUCT, 'build_candidate', side_effect=build):
+                    result = comets.refresh_comets(root / 'cache', output, offline=True)
                 self.assertEqual(result['status'], 'updated')
                 self.assertEqual(result['changes']['deleted'], [orphan])
-                self.assertEqual({k: result[k] for k in ('path', 'pin', 'objects', 'files', 'bytes')}, comets_v2.verify_comets(output))
+                self.assertEqual({k: result[k] for k in ('path', 'pin', 'objects', 'files', 'bytes')}, comets.verify_comets(output))
 
     def test_installed_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve(); output = root / 'data/comets-v2'
-            shutil.copytree(ROOT / 'data/comets-v2', output)
+            root = Path(temporary).resolve(); output = root / 'data/comets'
+            shutil.copytree(ROOT / 'data/comets', output)
             def build(records, stage, previous):
                 shutil.copytree(output, stage, dirs_exist_ok=True)
-                return comets_v2.verify_comets(stage)
+                return comets.verify_comets(stage)
             sync = comet_product.sync_candidate
             def corrupt_after_install(*args, **kwargs):
                 changes = sync(*args, **kwargs)
                 next((output / 'objects').iterdir()).write_text('{}')
                 return changes
-            with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
-                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build), \
+            with patch.object(comets.PRODUCT, 'acquire', return_value={}), \
+                 patch.object(comets.PRODUCT, 'build_candidate', side_effect=build), \
                  patch.object(comet_product, 'sync_candidate', side_effect=corrupt_after_install):
                 with self.assertRaises(DataError):
-                    comets_v2.refresh_comets(root / 'cache', output, offline=True)
+                    comets.refresh_comets(root / 'cache', output, offline=True)
 
     def test_previous_index_uses_snapshot_once_without_site_lock(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve(); output = root / 'data/comets-v2'
-            shutil.copytree(ROOT / 'data/comets-v2', output)
+            root = Path(temporary).resolve(); output = root / 'data/comets'
+            shutil.copytree(ROOT / 'data/comets', output)
             descriptor = output / 'latest.json'
             original = descriptor.read_bytes()
             snapshot = comet_product.descriptor_bytes
@@ -87,19 +87,19 @@ class ReviewRegressions(unittest.TestCase):
             def build(records, stage, previous):
                 self.assertEqual(previous, read_json(output / json.loads(original)['index']['url']))
                 shutil.copytree(output, stage, dirs_exist_ok=True)
-            with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
-                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build), \
+            with patch.object(comets.PRODUCT, 'acquire', return_value={}), \
+                 patch.object(comets.PRODUCT, 'build_candidate', side_effect=build), \
                  patch.object(comet_product, 'descriptor_bytes', side_effect=snapshot_then_edit) as snapshot_mock, \
                  patch.object(comet_product, 'inspect_comets', side_effect=inspect_previous):
-                result = comets_v2.refresh_comets(root / 'cache', output, offline=True)
+                result = comets.refresh_comets(root / 'cache', output, offline=True)
             self.assertEqual(result['status'], 'unchanged')
 
     def test_previous_snapshot_rejects_duplicate_keys_and_nonfinite_json(self):
-        root = ROOT / 'data/comets-v2'
+        root = ROOT / 'data/comets'
         original = (root / 'latest.json').read_bytes()
         for prefix in (b'{"comet_contract_version":2,', b'{"unexpected":NaN,'):
             with self.subTest(prefix=prefix), self.assertRaises(DataError):
-                comet_product.inspect_comets(root, contract=comets_v2.CONTRACT,
+                comet_product.inspect_comets(root, contract=comets.CONTRACT,
                                              descriptor=prefix + original[1:])
 
     def test_descriptor_snapshot_is_bounded(self):
@@ -127,27 +127,27 @@ class ReviewRegressions(unittest.TestCase):
             def acquiring(*args, **kwargs):
                 # The publication lock remains free while acquiring.
                 with writer_lock(root / '.data-browser-lock'): pass
-                with patch.object(comets_v2.PRODUCT, 'acquire') as competing:
+                with patch.object(comets.PRODUCT, 'acquire') as competing:
                     with self.assertRaises(DataError):
-                        comets_v2.refresh_comets(root/'other-cache',root/'data/other-output')
+                        comets.refresh_comets(root/'other-cache',root/'data/other-output')
                     competing.assert_not_called()
                 raise DataError('stop after exclusion check')
-            with patch.object(comets_v2.PRODUCT, 'acquire', side_effect=acquiring):
+            with patch.object(comets.PRODUCT, 'acquire', side_effect=acquiring):
                 with self.assertRaisesRegex(DataError, 'stop after exclusion'):
-                    comets_v2.refresh_comets(root/'cache',root/'data/comets-v2')
+                    comets.refresh_comets(root/'cache',root/'data/comets')
 
     def test_candidate_releases_site_lock_and_rejects_changed_pointer(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); output = root/'data/comets-v2'
-            shutil.copytree(ROOT/'data/comets-v2',output)
+            root = Path(temporary); output = root/'data/comets'
+            shutil.copytree(ROOT/'data/comets',output)
             original = (output/'latest.json').read_bytes()
             def build(records, stage, previous):
                 with writer_lock(root/'.data-browser-lock'):
                     shutil.copytree(output, stage, dirs_exist_ok=True)
                     (output/'latest.json').write_bytes(b'changed by another writer')
-            with patch.object(comets_v2.PRODUCT,'acquire',return_value={}), patch.object(comets_v2.PRODUCT,'build_candidate',side_effect=build):
+            with patch.object(comets.PRODUCT,'acquire',return_value={}), patch.object(comets.PRODUCT,'build_candidate',side_effect=build):
                 with self.assertRaisesRegex(DataError,'descriptor changed'):
-                    comets_v2.refresh_comets(root/'cache',output,offline=True)
+                    comets.refresh_comets(root/'cache',output,offline=True)
             self.assertEqual((output/'latest.json').read_bytes(),b'changed by another writer')
             (output/'latest.json').write_bytes(original)
-            comets_v2.verify_comets(output)
+            comets.verify_comets(output)

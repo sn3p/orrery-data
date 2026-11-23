@@ -1,4 +1,4 @@
-"""Independent numerical evidence can follow refreshed v2 data without changing v1."""
+"""Independent numerical evidence follows refreshed catalogue data."""
 import copy
 import gzip
 import hashlib
@@ -10,13 +10,13 @@ import sys
 import tempfile
 import unittest
 
-from orrery_data import comet_product, comets_v2 as comets
+from orrery_data import comet_product, comets
 from orrery_data.browser import reference
 from orrery_data.horizons import parse_response
 from orrery_data.storage import read_json, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / 'tests/fixtures/comet-v2-midpoints.json.gz'
+FIXTURE = ROOT / 'tests/fixtures/comet-midpoints.json.gz'
 SCRIPT = ROOT / 'scripts/rebuild_comet_evidence.py'
 
 
@@ -26,7 +26,7 @@ def product_index(root):
 
 class NumericalEvidence(unittest.TestCase):
     def test_every_midpoint_matches_current_published_product(self):
-        root = ROOT / 'data/comets-v2'
+        root = ROOT / 'data/comets'
         index = product_index(root)
         samples = json.loads(gzip.decompress(FIXTURE.read_bytes()))
         self.assertEqual(set(samples), {entry['id'] + '-midpoints' for entry in index['objects']})
@@ -46,7 +46,7 @@ class NumericalEvidence(unittest.TestCase):
 
     def test_seed_projection_preserves_supplied_series_and_provenance(self):
         # Projection must preserve supplied source series and provenance.
-        root = ROOT / 'data/comets-v2'
+        root = ROOT / 'data/comets'
         index = product_index(root)
         records, originals = {}, {}
         for entry in index['objects']:
@@ -71,15 +71,15 @@ class NumericalEvidence(unittest.TestCase):
     def test_rebuild_cli_follows_refreshed_series_and_provenance_and_preserves_failed_output(self):
         # Full-sized synthetic raw tables exercise the real offline parser/CLI.
         # They are never committed as scientific data or substituted for real evidence.
-        original = product_index(ROOT / 'data/comets-v2')['objects'][0]
+        original = product_index(ROOT / 'data/comets')['objects'][0]
         object_id = original['id']
-        series = copy.deepcopy(read_json(ROOT / 'data/comets-v2' / original['data']['url'])['series'])
+        series = copy.deepcopy(read_json(ROOT / 'data/comets' / original['data']['url'])['series'])
         series['states'][0][0] += 1e-8
         middle = json.loads(gzip.decompress(FIXTURE.read_bytes()))[object_id + '-midpoints']['rows']
         targets = {object_id: original['name']}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); cache = root / 'cache'; cache.mkdir()
-            output = root / 'data/comets-v2'; output.mkdir(parents=True)
+            output = root / 'data/comets'; output.mkdir(parents=True)
             records = {}
             raw_paths = []
             for kind, rows in [

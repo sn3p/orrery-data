@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orrery_data import comets_v2 as comets
+from orrery_data import comets
 from orrery_data.browser import reference
 from orrery_data.cli import main
 from orrery_data.formats import DataError
@@ -22,8 +22,8 @@ class Catalogue(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.output = self.root / 'data/comets-v2'
-        shutil.copytree(ROOT / 'data/comets-v2', self.output)
+        self.output = self.root / 'data/comets'
+        shutil.copytree(ROOT / 'data/comets', self.output)
         self.index = read_json(self.output / read_json(self.output / 'latest.json')['index']['url'])
 
     def install_index(self, index):
@@ -64,7 +64,7 @@ class Catalogue(unittest.TestCase):
                 self.install_index(dict(self.index, objects=entries))
 
     def test_refresh_cli_grows_shrinks_and_reorders_existing_product(self):
-        checks = json.loads(gzip.decompress((ROOT / 'tests/fixtures/comet-v2-midpoints.json.gz').read_bytes()))
+        checks = json.loads(gzip.decompress((ROOT / 'tests/fixtures/comet-midpoints.json.gz').read_bytes()))
         records = {}
         for entry in self.index['objects']:
             series = read_json(self.output / entry['data']['url'])['series']
@@ -73,7 +73,7 @@ class Catalogue(unittest.TestCase):
         targets = comets.TARGETS.copy()
         for selection in [dict(list(targets.items())[:3]), targets, dict(reversed(list(targets.items())))]:
             with patch.object(comets.PRODUCT, 'targets', selection), patch.object(comets.PRODUCT, 'acquire', return_value=records), patch('sys.stdout', new_callable=io.StringIO):
-                self.assertEqual(main(['refresh-comets-v2','--offline','--cache',str(self.root/'cache'),'--output',str(self.output)]), 0)
+                self.assertEqual(main(['refresh-comets','--offline','--cache',str(self.root/'cache'),'--output',str(self.output)]), 0)
             result = comets.verify_comets(self.output)
             index = read_json(self.output / result['pin']['url'])
             self.assertEqual([e['id'] for e in index['objects']], list(selection))

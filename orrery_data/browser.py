@@ -29,7 +29,7 @@ def check_reference(ref, prefix, suffix):
 
 def managed_files(directory):
     """Own asteroid files; comets have an independent verifier and inventory."""
-    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets-v2',), label='Browser output')
+    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets',), label='Browser output')
 
 
 def verify_browser(directory, index_sha256=None):

@@ -1,7 +1,7 @@
 """Boundary cases for the supported comet catalogue.
 
 These mixins deliberately do not inherit TestCase: discovery runs each boundary
-only through the explicit classes in test_comet_v2*.py.
+only through the explicit classes in test_comet*.py.
 """
 
 from contextlib import chdir
@@ -20,7 +20,7 @@ import tempfile
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from orrery_data import comets_v2, horizons
+from orrery_data import comets, horizons
 from orrery_data.browser import sync_candidate, verify_browser
 from orrery_data.cli import main
 from orrery_data.formats import DataError
@@ -35,7 +35,7 @@ ONE_TARGET = {'1P': '1P/Halley'}
 class CometFixture:
     @property
     def comets(self):
-        return comets_v2
+        return comets
 
     @property
     def product(self):
@@ -43,7 +43,7 @@ class CometFixture:
 
     @property
     def product_name(self):
-        return 'comets-v2'
+        return 'comets'
 
     @property
     def refresh_command(self):
@@ -55,7 +55,7 @@ class CometFixture:
 
     @property
     def verifier_name(self):
-        return 'verify_comets_v2'
+        return 'verify_comets'
 
 
 class CometCases(CometFixture):
@@ -413,7 +413,7 @@ class PublicationCases(CometFixture):
         (data / 'latest.json').write_text('{}')
         discovery = 'https://example.test/sub/custom-descriptor.json?pin=test'
         remote = {discovery: b'{}'}
-        for name in ('comets-v2',):
+        for name in ('comets',):
             descriptor = data / name / 'latest.json'
             if descriptor.exists():
                 remote['https://example.test/sub/' + name + '/latest.json'] = descriptor.read_bytes()

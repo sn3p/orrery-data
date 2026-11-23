@@ -1,12 +1,12 @@
-# Curated comet catalogue v2
+# Comet catalogue
 
-The supported comet product is `comets-v2/latest.json`, using
+The supported comet product is `comets/latest.json`, using
 `comet_contract_version: 2` in descriptor, index and objects. See the
 [wire format, scientific provenance and recovery contract](comet-contract.md).
 
 ## Catalogue contract
 
-V2 accepts a nonempty catalogue with
+The reader accepts a nonempty catalogue with
 unique numbered periodic-comet IDs (`[1-9][0-9]*P`) in producer-defined order.
 Names must start with that ID plus `/`, have a nonempty suffix, no ASCII
 control characters and no edge whitespace from the explicitly shared set in
@@ -24,33 +24,20 @@ validation. Different grids/conventions or structural changes require a reviewed
 contract change. Consumers discover entries from `source.info.objects` rather
 than assuming six objects or a fixed order; app colours/defaults remain app-owned.
 
-## V1 retirement
+## Publication
 
-Orrery's catalogue adoption and startup-switch fix shipped in PR111/PR112;
-deployed Pixi and Three acceptance passed on 2026-11-23. The old `comets/`
-product, v1 reader and `refresh-comets`/`verify-comets` commands are removed.
-Breaking old clients is explicitly accepted; no compatibility redirect is provided.
-Keep the existing v2 URL: retirement does not require another consumer migration.
-Asteroid publication and Orrery's separate bundled rollback are unchanged.
+A complete Pages artifact contains asteroid data and the optional `comets/`
+catalogue. Unknown product directories fail verification. Publication compares
+active descriptors and stages the complete site on any difference. Publication
+code changes force replacement through the merge workflow's `--publication-base`
+comparison, even when the data pins are unchanged.
 
-A complete Pages artifact contains only asteroid data and the optional v2 catalogue.
-Local verification rejects a leftover `comets/` directory. This retirement changes
-publication code, so the existing merge workflow's `--publication-base` comparison
-forces a complete-site replacement even when active data pins match. Routine
-reconciliation requests only active product descriptors; it does not probe retired
-URLs or infer deployment failure from cached legacy responses or redirects.
+If publication fails, rerun all jobs of that push workflow, or manually dispatch
+with `force=true`. Scheduled reconciliation cannot repair a publication-only
+change when active pins already match. Browser/CDN caches can retain old data
+until expiry; consumers reject unsupported schemas and must offer retry/reload.
 
-If the retirement deployment fails, rerun all jobs of that push workflow (which retains
-its original publication base), or manually dispatch the publisher with `force=true`.
-A later scheduled MPC run does not repair a retirement-only failure when active
-pins already match. No remote deletion is claimed until an authorized publication
-replaces the deployed site. CDN/browser caches and old visits may retain old bytes
-until expiry; no purge or client audit is part of this change.
-
-Historical v1 source/data remain in Git at `5d55c602e53cdb8edf9d75e19bdfa682d1f6a452`.
-Original source headers and acquisition provenance remain in the current v2 index;
-all-six independent midpoint evidence remains committed. Raw responses and prior
-hosted acceptance evidence remain retained outside worktrees in local feature memory.
+## Scientific coverage
 
 All six cover UT JD `[2444239.5, 2488067.5]`, 1980-01-01 through 2099-12-30,
 with 10,958 states spaced four days apart. Horizons requests stop at 2100-01-01;
@@ -58,10 +45,8 @@ the actual last state defines coverage. Positions/velocities are Sun-centred,
 Ecliptic J2000, AU and AU/day, UT, geometric (`NONE`). Cubic Hermite interpolation
 rejects extrapolation. No closed-orbit, physical-survival, tail or continuous
 error-bound claim is made. Interpolation differences are not physical uncertainty.
-The initial v2 release preserved the original three series, provenance and
-validation exactly; only their v2 object envelope/version (and therefore content
-hash) changed. Subsequent explicit v2 refreshes may advance their scientific
-solutions without a cross-version equality requirement.
+Explicit refreshes may advance scientific solutions while preserving the
+coverage and validation requirements.
 
 ## Selection and measured evidence
 
@@ -89,8 +74,8 @@ Total: 6,627,126 decoded bytes; 2,770,744 independently gzip-compressed bytes. L
 Each maximum is measured from final serialized 12-significant-digit values.
 Acceptance remains `0.000052 AU`. The committed gzip fixture contains every
 independent midpoint position for all six objects, with original source metadata;
-`test_comet_v2_evidence.py` checks grid coverage and exact reported maxima
-against the current v2 product offline. A separate producer regression checks
+`test_comet_evidence.py` checks grid coverage and exact reported maxima
+against the current product offline. A separate producer regression checks
 that projection preserves supplied seed series/provenance; it does not require
 future solutions to stay equal to a historical seed product.
 Representative references remain in the public index for reference-reader checks. Full raw HTTP responses are retained
@@ -100,17 +85,17 @@ responses for regeneration.
 ## Operation, failure and recovery
 
 ```sh
-python3 -m orrery_data refresh-comets-v2 --offline
-python3 -m orrery_data refresh-comets-v2       # acquire only missing cached inputs
-python3 -m orrery_data refresh-comets-v2 --refresh  # explicitly reacquire twelve queries
-# After any v2 refresh, regenerate the matching committed evidence offline.
+python3 -m orrery_data refresh-comets --offline
+python3 -m orrery_data refresh-comets       # acquire only missing cached inputs
+python3 -m orrery_data refresh-comets --refresh  # explicitly reacquire twelve queries
+# After any refresh, regenerate the matching committed evidence offline.
 python3 scripts/rebuild_comet_evidence.py
-python3 -m orrery_data verify-comets-v2 --directory data/comets-v2
+python3 -m orrery_data verify-comets --directory data/comets
 python3 -m orrery_data verify-site --directory data
 python3 scripts/prepare_browser_site.py --output .context/pages-site-new
 ```
 
-Commit refreshed `data/comets-v2` and `tests/fixtures/comet-v2-midpoints.json.gz`
+Commit refreshed `data/comets` and `tests/fixtures/comet-midpoints.json.gz`
 together. The evidence command reads the exact raw SHA-256 files pinned by the
 published index, so newer cache query records cannot silently substitute another
 acquisition. It reparses both vector and independent midpoint responses, checks
@@ -121,8 +106,8 @@ valid explicit refresh before retrying. It never queries Horizons. Its optional
 `--directory`, `--cache` and `--output` paths support retained offline inputs.
 
 The default cache remains `.data/horizons`, and must be disjoint from the whole
-site. The default output is `data/comets-v2`. Avoid custom nested product layouts:
-the complete site recognizes only the v2 sibling product root. Ordinary builds,
+site. The default output is `data/comets`. Avoid custom nested product layouts:
+the complete site recognizes only the comet sibling product root. Ordinary builds,
 tests and verification are offline. Missing/corrupt cache fails offline replay;
 reacquire explicitly only when source refresh is intended.
 
@@ -132,7 +117,7 @@ before pointer, unknown-file/symlink rejection and interrupted-orphan recovery
 follow the [recovery contract](comet-contract.md). Rerun a failed refresh to prune managed orphans; unknown files require
 operator investigation. A failed acquisition or numerical validation preserves
 the previous product. Complete-site verification rejects corrupt/incomplete
-products; asteroid-only refresh remains independent and preserves the v2 comet
+products; asteroid-only refresh remains independent and preserves the comet
 tree. Publication compares both active descriptors, and stages the entire site on any difference. Nothing here deploys,
 schedules refresh, changes the asteroid contract or removes bundled fallbacks.
 
@@ -143,14 +128,14 @@ and the MIT license from the same revision.
 
 ```js
 import CometCatalogSource, { interpolateComet } from './CometCatalogSource.js';
-const source = await CometCatalogSource.openLatest(`${baseURL}/comets-v2/latest.json`, { signal });
+const source = await CometCatalogSource.openLatest(`${baseURL}/comets/latest.json`, { signal });
 const catalogue = source.info.objects; // identity, name, actual coverage, provenance
 const comet = await source.load('67P', { signal });
 const position = interpolateComet(comet.series, 2461362.5);
 source.close();
 ```
 
-V2 retains pinning, verified lazy loading, shared-request cancellation, cache
+The reader retains pinning, verified lazy loading, shared-request cancellation, cache
 retry, close/disposal and no extrapolation. Consumers own selection and generation
 guards; failures must expose retry/reload without mixing pins. Application acceptance covers selection, focus, window shifts, loading/error/retry,
 cancellation and renderer switches. Bundled rollback remains an application decision.
