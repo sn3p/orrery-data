@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import CometSource, { interpolateComet } from '../consumer/CometSource.js';
+import CometSource, { interpolateComet, validateComet } from '../consumer/CometSource.js';
 
 const root = path.resolve('data/comets');
 const base = 'https://example.test/sub/comets/';
@@ -270,4 +270,17 @@ test('comet adapter errors keep comet context at discovery, selection and load b
   await assert.rejects(source.load('1P'), /^Error: Comet request failed \(404\): objects\//);
   source.close();
   await assert.rejects(source.load('1P'), { name: 'AbortError', message: 'Comet read cancelled.' });
+});
+
+
+test('v1 object validation rejects catalogue-only identities', async () => {
+  const directory = path.resolve('data/comets-v2');
+  const latest = JSON.parse(await fs.readFile(path.join(directory, 'latest.json')));
+  const index = JSON.parse(await fs.readFile(path.join(directory, latest.index.url)));
+  for (const entry of index.objects) {
+    const value = JSON.parse(await fs.readFile(path.join(directory, entry.data.url)));
+    value.comet_contract_version = 1;
+    if (['1P', '2P', '55P'].includes(entry.id)) validateComet(value, entry.id);
+    else assert.throws(() => validateComet(value, entry.id), /identity/);
+  }
 });

@@ -7,14 +7,49 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from orrery_data import comets, comets_v2, horizons
+from orrery_data import comet_product, comets, comets_v2, horizons
 from orrery_data.comet_product import CometContract, descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
-from orrery_data.storage import writer_lock
+from orrery_data.storage import writer_lock, read_json, site_lock_path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 class ReviewRegressions(unittest.TestCase):
+    def test_object_validation_enforces_version_selection(self):
+        root = ROOT / 'data/comets-v2'
+        index = read_json(root / read_json(root / 'latest.json')['index']['url'])
+        for entry in index['objects']:
+            value = read_json(root / entry['data']['url'])
+            comets_v2.validate_object(value, entry['id'])
+            value['comet_contract_version'] = 1
+            if entry['id'] in comets.TARGETS:
+                comets.validate_object(value, entry['id'])
+            else:
+                with self.assertRaisesRegex(DataError, 'identity'):
+                    comets.validate_object(value, entry['id'])
+
+    def test_refresh_verifies_old_and_candidate_outside_site_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); output = root / 'data/comets-v2'
+            shutil.copytree(ROOT / 'data/comets-v2', output)
+            original_verify = comet_product.verify_comets
+            checked = []
+            def verify(directory, **kwargs):
+                with writer_lock(site_lock_path(output.parent)):
+                    checked.append(Path(directory))
+                    return original_verify(directory, **kwargs)
+            def build(records, stage, previous):
+                shutil.copytree(output, stage, dirs_exist_ok=True)
+                return verify(stage, contract=comets_v2.CONTRACT)
+            with patch.object(comets_v2.PRODUCT, 'acquire', return_value={}), \
+                 patch.object(comets_v2.PRODUCT, 'verify_comets', side_effect=lambda p, **kw: verify(p, contract=comets_v2.CONTRACT, **kw)), \
+                 patch.object(comets_v2.PRODUCT, 'build_candidate', side_effect=build):
+                result = comets_v2.refresh_comets(root / 'cache', output, offline=True)
+            self.assertEqual(len(checked), 2)
+            self.assertEqual(checked[0], output)
+            self.assertEqual(result['status'], 'unchanged')
+            self.assertEqual({k: result[k] for k in ('path', 'pin', 'objects', 'files', 'bytes')}, original_verify(output, contract=comets_v2.CONTRACT))
+
     def test_descriptor_snapshot_is_bounded(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)/'latest.json'

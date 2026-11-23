@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.storage import writer_lock
+from orrery_data.storage import writer_lock, site_lock_path
 # Keep in sync with the workflow's non-data push paths. The CLI imports the
 # producer package transitively; no installation or external config is needed.
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
@@ -62,7 +62,7 @@ def main():
     source = (ROOT / 'data').resolve()
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
-    with writer_lock(ROOT / '.data-browser-lock'):
+    with writer_lock(site_lock_path(ROOT / 'data')):
         result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', ROOT / 'data'],
                                 cwd=ROOT, capture_output=True, text=True)
         if result.returncode:

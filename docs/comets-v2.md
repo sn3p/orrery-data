@@ -162,8 +162,10 @@ entry modules and data, while retaining the shared implementation.
 Refresh coordination: both versions share a per-site Horizons acquisition lock,
 including when different caches are used. The existing nonblocking writer-lock
 policy rejects a competing acquisition before it can request data; retry after
-the current refresh finishes. Product refresh locks prevent overtaking. Candidate
-construction and full numerical verification run outside the site publication
-lock; previous-product checks and installation verification retain that lock.
+the current refresh finishes. Product refresh locks prevent overtaking. Previous-product
+verification, candidate construction and full candidate verification run outside
+the site publication lock. Installation compares hashes and moves verified candidate
+bytes, so it does not repeat full product validation.
 The descriptor is checked again before installation to reject stale preparation.
-These checks protect different states and are intentionally retained.
+Inventory and filesystem preflight use one shared helper, called before acquisition,
+after acquisition, and before installation to catch destination changes.

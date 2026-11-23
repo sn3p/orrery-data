@@ -45,7 +45,8 @@ place the site inside a directory on the destination volume so its parent can
 hold staging files on that same volume. This preserves pointer-last atomic
 renames without placing temporary candidates in the public tree. When using
 `data/comets`, both producers and the Pages stager share `.data-browser-lock`
-only during local verification/installation; upstream acquisition leaves it free.
+during short snapshot and installation phases. Acquisition and full comet
+verification leave it free; the product refresh lock prevents competing comet writers.
 Build/validate the whole comet
 candidate before installation; install immutable assets, then atomically replace
 `latest.json`, then prune obsolete managed files. Failure before installation

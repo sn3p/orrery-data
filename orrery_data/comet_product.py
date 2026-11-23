@@ -1,6 +1,7 @@
 """Shared comet verification, numerical projection and atomic publication."""
 
 import math
+from functools import partial
 from pathlib import Path
 import re
 import tempfile
@@ -11,7 +12,7 @@ from .contracts import obj, array, rule, literal, TEXT, NONEMPTY, FILE_FIELDS, U
 from . import horizons
 from .horizons import START, STEP, COUNT, query
 from .paths import validate_disjoint_paths, validate_writable_path, managed_tree, validate_same_filesystem
-from .storage import read_json, write_json, verify_file, writer_lock
+from .storage import read_json, write_json, verify_file, writer_lock, site_lock_path
 
 CONVENTIONS = {'center': 'Sun', 'frame': 'Ecliptic J2000', 'time': 'UT',
                'position_units': 'AU', 'velocity_units': 'AU/day',
@@ -57,6 +58,9 @@ class CometContract:
                 raise DataError(f'Comet v{self.version} requires fixed selection: ' + ', '.join(self.fixed_targets))
         elif not entries:
             raise DataError('Comet catalogue must not be empty')
+
+    def valid_id(self, object_id):
+        return valid_id(object_id) and (self.fixed_targets is None or object_id in self.fixed_targets)
 
     def valid_name(self, name, object_id):
         if self.fixed_targets is not None:
@@ -106,7 +110,7 @@ def valid_name(name, object_id):
 
 def validate_object(value, object_id, *, contract):
     contract.object_schema(value, 'object')
-    if not valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
+    if not contract.valid_id(object_id) or value['id'] != object_id or len(value['series']['states']) != COUNT:
         raise DataError('Invalid comet identity or state count')
 
 
@@ -227,7 +231,7 @@ def build_candidate(records, stage, previous=None, *, contract, targets):
     pin = reference(temporary, 'index-', '.json')
     temporary.rename(stage / pin['url'])
     write_json(stage / 'latest.json', {'comet_contract_version': contract.version, 'index': pin})
-    verify_comets(stage, contract=contract)
+    return verify_comets(stage, contract=contract)
 
 
 def descriptor_bytes(path):
@@ -240,18 +244,25 @@ def descriptor_bytes(path):
     return content
 
 
+def preflight_output(output):
+    """Recheck inventory and atomic-rename devices at each mutation boundary."""
+    names = managed_files(output)
+    site = output.parent
+    validate_same_filesystem(site.parent, (site, output, output / "objects",
+                                         *(output / name for name in names)), label="Comet output")
+
+
 def refresh_comets(cache, output, *, acquire_records, build, verify):
     cache, output = Path(cache), Path(output)
     # Check the lexical target before resolving aliases for all locks/staging.
-    names = managed_files(output)
+    managed_files(output)
     output = validate_writable_path(output, label='Comet output')
     site = output.parent
     # A failed acquisition must not leave locks/raw inputs in either product.
     validate_disjoint_paths(cache, (site,), label='Horizons cache')
-    destinations = (site, output, output / 'objects', *(output / name for name in names))
-    validate_same_filesystem(site.parent, destinations, label='Comet output')
+    preflight_output(output)
     site.mkdir(parents=True, exist_ok=True)
-    lock = site.parent / ('.' + site.name + '-browser-lock')
+    lock = site_lock_path(site)
     refresh_lock = site.parent / ('.' + site.name + '-' + output.name + '-refresh-lock')
     acquisition_lock = site.parent / ('.' + site.name + '-horizons-lock')
     # Competing writers fail fast. The product lock prevents refresh overtaking;
@@ -260,30 +271,31 @@ def refresh_comets(cache, output, *, acquire_records, build, verify):
         with writer_lock(acquisition_lock):
             records = acquire_records()
         with writer_lock(lock):
-            names = managed_files(output)
-            validate_same_filesystem(site.parent, (site, output, output / 'objects',
-                                                   *(output / name for name in names)), label='Comet output')
-            previous = None
+            preflight_output(output)
             descriptor = output / 'latest.json'
             prior_descriptor = descriptor_bytes(descriptor)
-            if prior_descriptor is not None:
-                verify(output, allow_orphans=True)
-                pin = read_json(descriptor)['index']
-                previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
+        # The product refresh lock excludes other writers of this product.
+        # Read/validate the old product without blocking unrelated site writers.
+        previous = None
+        if prior_descriptor is not None:
+            verify(output, allow_orphans=True)
+            pin = read_json(descriptor)['index']
+            previous = read_reference(output, pin, 'index-', MAX_INDEX_BYTES)
         # The output refresh lock stays held; asteroid writers and publication
         # can proceed while the new candidate is built and numerically verified.
         with tempfile.TemporaryDirectory(prefix='.comets-', dir=site.parent) as temp:
             stage = Path(temp)
-            build(records, stage, previous)
+            result = build(records, stage, previous)
             with writer_lock(lock):
-                names = managed_files(output)
-                validate_same_filesystem(site.parent, (site, output, output / 'objects',
-                                                       *(output / name for name in names)), label='Comet output')
+                preflight_output(output)
                 current_descriptor = descriptor_bytes(descriptor)
                 if current_descriptor != prior_descriptor:
                     raise DataError('Comet descriptor changed during candidate preparation; retry')
                 changes = sync_candidate(stage, output, inventory=managed_files)
-                result = verify(output)
+                # sync_candidate compares file hashes, installs verified stage
+                # bytes, removes orphans and writes the pointer last. Re-parsing
+                # that identical product would repeat candidate validation.
+                result = {**result, 'path': str(output)}
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',
             'changes': changes}
 
@@ -294,18 +306,16 @@ class CometProduct:
     def __init__(self, contract, targets):
         self.contract = contract
         self.targets = targets
+        # Bind policy directly; adding an operation needs no forwarding method.
+        self.validate_object = partial(validate_object, contract=contract)
+        self.verify_comets = partial(verify_comets, contract=contract)
+
+    def build_candidate(self, records, stage, previous=None):
+        # Selection can change between refreshes without changing the contract.
+        return build_candidate(records, stage, previous, contract=self.contract, targets=self.targets)
 
     def acquire(self, cache, *, refresh=False, offline=False):
         return horizons.acquire(cache, refresh=refresh, offline=offline, targets=self.targets)
-
-    def validate_object(self, value, object_id):
-        return validate_object(value, object_id, contract=self.contract)
-
-    def verify_comets(self, directory, *, allow_orphans=False):
-        return verify_comets(directory, contract=self.contract, allow_orphans=allow_orphans)
-
-    def build_candidate(self, records, stage, previous=None):
-        return build_candidate(records, stage, previous, contract=self.contract, targets=self.targets)
 
     def refresh_comets(self, cache, output, *, refresh=False, offline=False):
         return refresh_comets(cache, output,

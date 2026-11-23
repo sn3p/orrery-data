@@ -214,6 +214,7 @@ class CometCases(CometFixture):
             with writer_lock(expected_site_lock):
                 pass
             shutil.copytree(self.output, stage, dirs_exist_ok=True)
+            return self.comets.verify_comets(stage)
         for spelling in (self.product_name, './' + self.product_name, str(self.output)):
             with self.subTest(spelling=spelling), chdir(self.output.parent), \
                  patch.object(self.product, 'acquire', side_effect=acquiring), \
