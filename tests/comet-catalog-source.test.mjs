@@ -344,11 +344,18 @@ test('a rehashed object must still match its selected catalogue identity', async
 
 test('v1 and v2 adapters keep separate contracts and lifetimes in one process', async t => {
   const { default: LegacySource } = await import('../consumer/CometSource.js');
+  // Synthetic v2-only sample change exercises independent refreshes, not source accuracy.
+  await catalogueFixture(t, async (index, ref) => {
+    const entry = index.objects.find(entry => entry.id === '1P');
+    const value = JSON.parse(await fs.readFile(path.join(root, entry.data.url)));
+    value.series.states[0][0] += 1e-8;
+    entry.data = ref(value, 'objects/');
+  });
+  const fetchCatalogue = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async url => {
     const pathname = new URL(url).pathname;
-    const version2 = pathname.startsWith('/sub/comets-v2/');
-    const prefix = version2 ? '/sub/comets-v2/' : '/sub/comets/';
-    return new Response(await fs.readFile(path.join(version2 ? 'data/comets-v2' : 'data/comets', pathname.slice(prefix.length))));
+    if (pathname.startsWith('/sub/comets-v2/')) return fetchCatalogue(url);
+    return new Response(await fs.readFile(path.join('data/comets', pathname.slice('/sub/comets/'.length))));
   });
   const legacyURL = 'https://example.test/sub/comets/latest.json';
   const latestURL = 'https://example.test/sub/comets-v2/latest.json';
@@ -361,7 +368,7 @@ test('v1 and v2 adapters keep separate contracts and lifetimes in one process', 
   const [oldHalley, newHalley] = await Promise.all([legacy.load('1P'), current.load('1P')]);
   assert.equal(oldHalley.comet_contract_version, 1);
   assert.equal(newHalley.comet_contract_version, 2);
-  assert.deepEqual(oldHalley.series, newHalley.series);
+  assert.notStrictEqual(oldHalley.series, newHalley.series);
   legacy.close();
   assert.equal((await current.load('67P')).id, '67P');
   current.close();
