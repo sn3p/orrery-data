@@ -122,18 +122,35 @@ class HistoryPilotTests(unittest.TestCase):
                 work.assert_not_called()
 
     def test_baseline_is_pinned_verified_and_retained_for_replay(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(pilot, 'OUTPUT', Path(tmp)):
-            pin, first = pilot.load_baseline()
-            with patch.object(pilot.subprocess, 'run', side_effect=AssertionError('retained replay must not read Git or latest')):
-                other = Path(tmp) / 'other-checkout'
-                (other / 'research/comet-history').mkdir(parents=True)
-                shutil.copy2(pilot.ROOT / 'research/comet-history/baseline.json', other / 'research/comet-history/baseline.json')
-                with patch.object(pilot, 'ROOT', other):
+        # A self-contained immutable source works in shallow CI checkouts too.
+        from types import SimpleNamespace
+        import hashlib
+        blobs = {}
+        def reference(value, prefix):
+            raw = (json.dumps(value) + '\n').encode()
+            digest = hashlib.sha256(raw).hexdigest()
+            ref = {'url': prefix + digest + '.json', 'sha256': digest, 'bytes': len(raw)}
+            blobs['a' * 40 + ':data/comets/' + ref['url']] = raw
+            return ref
+        states = {'start': 2444239.5, 'step': 4, 'states': [[0]*6, [1]*6]}
+        entries = [{'id': ident, 'data': reference({'id': ident, 'series': states}, 'objects/')}
+                   for ident in ('1P', '55P')]
+        expected_pin = {'commit': 'a'*40, 'index': reference({'objects': entries}, 'index-')}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pilot, 'OUTPUT', Path(tmp)/'output'):
+            source = Path(tmp) / 'source'
+            (source / 'research/comet-history').mkdir(parents=True)
+            (source / 'research/comet-history/baseline.json').write_text(json.dumps(expected_pin))
+            with patch.object(pilot, 'ROOT', source):
+                with patch.object(pilot.subprocess, 'run', side_effect=lambda args, **kw: SimpleNamespace(stdout=blobs[args[2]])):
+                    pin, first = pilot.load_baseline()
+                self.assertEqual(pin, expected_pin)
+                self.assertEqual(first['1P'][0], states)
+                with patch.object(pilot.subprocess, 'run', side_effect=AssertionError('retained replay must not read Git or latest')):
                     self.assertEqual(pilot.load_baseline(), (pin, first))
-            path = Path(tmp) / 'baseline' / (pin['index']['sha256'] + '.json')
-            path.write_bytes(path.read_bytes() + b' ')
-            with self.assertRaisesRegex(DataError, 'Corrupt baseline'):
-                pilot.load_baseline()
+                path = pilot.OUTPUT / 'baseline' / (pin['index']['sha256'] + '.json')
+                path.write_bytes(path.read_bytes() + b' ')
+                with self.assertRaisesRegex(DataError, 'Corrupt baseline'):
+                    pilot.load_baseline()
 
     def test_pass_requires_baseline_position_and_velocity(self):
         checks = [{'max_error_au': 0}]
