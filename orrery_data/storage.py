@@ -45,6 +45,11 @@ def encode(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
 
 
+def json_bytes(value):
+    """Canonical UTF-8 JSON file bytes, including the trailing newline."""
+    return (encode(value) + "\n").encode('utf-8')
+
+
 def digest(value):
     return hashlib.sha256(encode(value).encode()).hexdigest()
 
@@ -137,7 +142,7 @@ def loads_json(text):
 
 
 def write_json(path, value):
-    path.write_text(encode(value) + "\n", encoding="utf-8")
+    path.write_bytes(json_bytes(value))
 
 
 def atomic_bytes(path, value):

@@ -41,7 +41,7 @@ def query(record, start, count, offset=0):
     return ENDPOINT + '?' + urlencode(params)
 
 
-def parse(raw, name, solution, start, count):
+def parse_with_provenance(raw, name, solution, start, count):
     def calendar(julian):
         day = date.fromordinal(int(julian - 1721424.5))
         months = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
@@ -49,6 +49,11 @@ def parse(raw, name, solution, start, count):
     rows, provenance = parse_vector_response(raw, name=name, solution=solution,
         start=start, step=4, count=count, start_date=calendar(start),
         stop_date=calendar(start + 4 * (count - 1)))
+    return rows, provenance
+
+
+def parse(raw, name, solution, start, count):
+    rows, provenance = parse_with_provenance(raw, name, solution, start, count)
     return rows, provenance['header']
 
 

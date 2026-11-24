@@ -1,6 +1,7 @@
 """One complete current browser distribution, separate from indexed bundle v1."""
 
 from pathlib import Path
+import hashlib
 import re
 import shutil
 import tempfile
@@ -18,7 +19,14 @@ MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|(?:header|notice
 
 
 def reference(path, prefix, suffix):
-    info = file_info(path)
+    return named_reference(file_info(path), prefix, suffix)
+
+
+def bytes_reference(raw, prefix, suffix='.json'):
+    return named_reference({'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}, prefix, suffix)
+
+
+def named_reference(info, prefix, suffix):
     return {'url': f'{prefix}{info["sha256"]}{suffix}', **info}
 
 
