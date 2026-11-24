@@ -224,7 +224,9 @@ class HistoryCandidateTests(unittest.TestCase):
         # Production inspect/references run over a synthetic zero trajectory.
         # Acquisition is the only mocked boundary; real parsing lives in pilot tests.
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);(root/'objects').mkdir()
+            # Mirror the site/product hierarchy so its sibling publication lock
+            # stays in this fixture on Linux as well as macOS.
+            root=Path(temp)/'data/comets';(root/'objects').mkdir(parents=True)
             latest=json.loads((candidate.ROOT/'data/comets/latest.json').read_text())
             index=json.loads((candidate.ROOT/'data/comets'/latest['index']['url']).read_text())
             originals={}
@@ -253,9 +255,15 @@ class HistoryCandidateTests(unittest.TestCase):
                 with writer_lock(site_lock_path(root.parent)):
                     (root/'objects').rename(retired)
                 return validate_metadata(*args)
+            writer_lock=candidate.writer_lock
+            def confined_lock(path):
+                self.assertTrue(path.resolve().is_relative_to(Path(temp).resolve()),
+                                f'Test lock escaped temporary directory: {path}')
+                return writer_lock(path)
             try:
                 with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
-                        candidate.pilot,'validate_metadata',side_effect=prune_after_snapshot):
+                        candidate.pilot,'validate_metadata',side_effect=prune_after_snapshot), patch.object(
+                        candidate,'writer_lock',side_effect=confined_lock):
                     files=candidate.construct(root)
             finally:
                 if retired.exists():retired.rename(root/'objects')
