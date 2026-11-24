@@ -51,7 +51,7 @@ test('metadata is eager, files lazy, modern owns exact transition and final date
     assert.equal(await s.positionAt(id,start-1e-6),null);
     const strips=await s.pathSegments(id,T-2,T+2);
     assert.deepEqual(strips.map(p=>p.key),['historical','modern']);
-    assert.equal(strips[0].points.at(-1)[0],T);assert.equal(strips[1].points[0][0],T);
+    assert.ok(strips[0].points.at(-1)[0]<T);assert.equal(strips[1].points[0][0],T);
     assert.deepEqual((await s.pathSegments(id,T,T+1)).map(p=>p.key),['modern']);
   }
   assert.equal(await s.positionAt('2P',T-1),null);
@@ -79,7 +79,7 @@ test('malformed rehashed metadata, coverage and provenance fail before object re
 test('actual seam velocity fails even if position checks and declared limits pass, in either load order',async t=>{
   for(const first of ['historical','modern']) {
     const f=fixture((kind,v,o,s)=>{if(kind==='payload'&&o.id==='1P'&&s.key==='historical')v.series.states.at(-1)[3]=.00005;});
-    const calls=transport(t,f);const source=await open();await source.loadSegment('1P',first);
+    const calls=transport(t,f);const source=await open();await assert.rejects(source.loadSegment('1P',first),/transition evidence/);
     const second=first==='historical'?'modern':'historical';
     await assert.rejects(source.loadSegment('1P',second),/transition evidence/);
     const before=calls.length;
@@ -92,8 +92,8 @@ test('two transfers maximum, subscriber cancellation, queued abort and retry',as
   const f=fixture(),gates=[];
   transport(t,f,async(name,options)=>{if(name.startsWith('objects/'))await new Promise(resolve=>gates.push({resolve,signal:options.signal}));});
   const s=await open(),abort=new AbortController();
-  const a=s.loadSegment('1P','modern',{signal:abort.signal});const rejected=assert.rejects(a,{name:'AbortError'});
-  const b=s.loadSegment('1P','modern'),c=s.loadSegment('2P','modern');
+  const a=s.loadSegment('10P','modern',{signal:abort.signal});const rejected=assert.rejects(a,{name:'AbortError'});
+  const b=s.loadSegment('10P','modern'),c=s.loadSegment('2P','modern');
   const queued=new AbortController();const q=s.loadSegment('9P','modern',{signal:queued.signal});const qRejected=assert.rejects(q,{name:'AbortError'});
   await new Promise(resolve=>setImmediate(resolve));assert.equal(gates.length,2);
   abort.abort();queued.abort();await Promise.all([rejected,qRejected]);assert.equal(gates[0].signal.aborted,false);
@@ -124,4 +124,53 @@ test('real serialized candidate: all segment references, seams, support-only bou
     if(o.transition){assert.equal((await s.load(o.id,{jd:T-1e-6})).segment,'historical');assert.equal((await s.load(o.id,{jd:T})).comet_contract_version,2);await s.pathSegments(o.id,T-2,T+2);}
   }
   s.close();
+});
+
+test('review: historical-only and retry reads cannot bypass transition validation',async t=>{
+  const f=fixture((kind,v,o,s)=>{if(kind==='payload'&&o.id==='1P'&&s.key==='historical')v.series.states.at(-1)[3]=.00005;});
+  transport(t,f);const s=await open();
+  await assert.rejects(s.positionAt('1P',T-2),/transition evidence/);
+  await assert.rejects(s.loadSegment('1P','historical'),/transition evidence/);
+  await assert.rejects(s.positionAt('1P',T-2),/transition evidence/);
+  s.close();
+});
+test('review: path boundary emits T only from modern data',async t=>{
+  const f=fixture();transport(t,f);const s=await open();
+  const strips=await s.pathSegments('55P',T-2,T+2);
+  assert.ok(strips[0].points.every(p=>p[0]<T));
+  assert.equal(strips[0].points.length,2);
+  assert.ok(T-strips[0].points.at(-1)[0]<1e-9);
+  assert.ok(strips[0].points.at(-1)[0]>strips[0].points[0][0]);
+  assert.deepEqual(strips.flatMap(strip=>strip.points.filter(p=>p[0]===T).map(()=>strip.key)),['modern']);
+  s.close();
+});
+test('review: failed path cancels its sibling subscriber',async t=>{
+  const f=fixture(), historical=f.index.objects[0].segments[0].data.url;
+  f.files.set(historical,'{}');let signal,release;
+  transport(t,f,async(name,options)=>{
+    if(name.startsWith('objects/')&&name!==historical) {
+      signal=options.signal;await new Promise(r=>{release=r;});
+    }
+  });const s=await open();
+  try { await assert.rejects(s.pathSegments('1P',T-2,T+2));assert.equal(signal.aborted,true); }
+  finally {release?.();s.close();}
+});
+
+test('complete fixed inventory stays cached without eviction or extra downloads',async t=>{
+  const f=fixture(),calls=transport(t,f),s=await open();
+  for(const o of f.index.objects)for(const seg of o.segments)await s.loadSegment(o.id,seg.key);
+  assert.equal(calls.length,10);
+  for(const o of f.index.objects)for(const seg of o.segments)await s.loadSegment(o.id,seg.key);
+  assert.equal(calls.length,10);s.close();
+});
+test('concurrent pair callers both reject corruption and release their subscribers',async t=>{
+  const f=fixture(), old=f.index.objects[0].segments[0].data.url;
+  f.files.set(old,'{}');let release, signal;
+  transport(t,f,async(n,options)=>{if(n.startsWith('objects/')&&n!==old){signal=options.signal;await new Promise(r=>{release=r;});}});
+  const s=await open();
+  // Both are public pair subscribers. Failure cancels path-owned subscribers,
+  // and the other read independently rejects its own invalid pair.
+  const path=assert.rejects(s.pathSegments('1P',T-2,T+2));
+  const other=assert.rejects(s.loadSegment('1P','modern'));
+  await Promise.all([path,other]);assert.equal(signal.aborted,true);release();s.close();
 });

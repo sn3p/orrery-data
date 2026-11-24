@@ -4,6 +4,15 @@ import { fetchLatest, fetchVerified, decodeJSON, check, aborted } from './transp
 import { keys } from './contract.js';
 import { T, END, reference, requireHistory, validateHistoryIndex, validateSegment } from './cometHistoryContract.js';
 
+// Historical owned intervals are half-open. Finish a visible strip at the
+// immediately preceding representable Julian day, reserving exact T for modern.
+function previousDay(value) {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0,value);
+  view.setBigUint64(0,view.getBigUint64(0)-1n); // coverage endpoints are positive JDs
+  return view.getFloat64(0);
+}
+
 export default class CometHistorySource extends CometSource {
   static async openLatest(url, { signal } = {}) {
     const {location,latest} = await fetchLatest(url,signal,'comet');
@@ -40,9 +49,32 @@ export default class CometHistorySource extends CometSource {
     const segment = this.segmentAt(id,jd);
     return segment ? this.loadSegment(id,segment.key,{signal}) : null;
   }
-  loadSegment(id,key,{signal}={}) {
-    this.object(id);
-    return super.load(`${id}:${key}`,{signal});
+  async group(signal, work) {
+    check(signal,'comet'); check(this.lifetime.signal,'comet');
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort',cancel,{once:true});
+    try { return await work(controller.signal); }
+    finally { controller.abort(); signal?.removeEventListener('abort',cancel); }
+  }
+  async loadSegment(id,key,{signal}={}) {
+    check(signal,'comet');
+    const object = this.object(id);
+    requireHistory(object.segments.some(s=>s.key===key),'selection');
+    // Every caller owns subscribers to both files. Cached payloads are only
+    // returned after this pair check, including retry and pre-1980-only visits.
+    if (!object.transition) return super.load(`${id}:${key}`,{signal});
+    return this.group(signal,async sharedSignal=>{
+      const [historical,modern] = await Promise.all(['historical','modern'].map(part=>
+        super.load(`${id}:${part}`,{signal:sharedSignal})));
+      check(sharedSignal,'comet'); check(this.lifetime.signal,'comet');
+      try { this.validateTransition(object,historical,modern); }
+      catch(error) {
+        this.cache.delete(`${id}:historical`); this.cache.delete(`${id}:modern`);
+        throw error;
+      }
+      return key==='historical'?historical:modern;
+    });
   }
   async positionAt(id,jd,{signal}={}) {
     const value = await this.load(id,{jd,signal});
@@ -56,9 +88,11 @@ export default class CometHistorySource extends CometSource {
     check(signal,'comet');
     const wanted = this.object(id).segments.filter(s=>start<=s.coverage.end && end>=s.coverage.start
       && !(start===s.coverage.end && !s.coverage.end_inclusive));
+    return this.group(signal,async pathSignal=>{
     const strips = await Promise.all(wanted.map(async s=>{
-      const value = await this.loadSegment(id,s.key,{signal}), series = value.series;
-      const first = Math.max(start,s.coverage.start), last = Math.min(end,s.coverage.end);
+      const value = await this.loadSegment(id,s.key,{signal:pathSignal}), series = value.series;
+      const first = Math.max(start,s.coverage.start);
+      const last = Math.min(end,s.coverage.end_inclusive?s.coverage.end:previousDay(s.coverage.end));
       const times = [first];
       for (let i=Math.floor((first-series.start)/series.step)+1; series.start+i*series.step<last; i++) times.push(series.start+i*series.step);
       if(last>first) times.push(last);
@@ -66,34 +100,20 @@ export default class CometHistorySource extends CometSource {
     }));
     check(signal,'comet'); check(this.lifetime.signal,'comet');
     return strips;
+    });
   }
-  validatePayload(value,entry) {
-    validateSegment(value,entry);
-    const object = this.object(entry.objectId);
-    if (object.transition) {
-      const otherKey = entry.segment.key === 'modern' ? 'historical' : 'modern';
-      const other = this.cache.get(`${entry.objectId}:${otherKey}`);
-      if(other) {
-        const historical = entry.segment.key === 'historical' ? value : other;
-        const modern = entry.segment.key === 'modern' ? value : other;
-        for(const c of object.transition.comparisons) {
-          const h = interpolateCometState(historical.series,c.jd), m = interpolateCometState(modern.series,c.jd);
-          const dp = Math.hypot(...h.position.map((v,i)=>v-m.position[i]));
-          const dv = Math.hypot(...h.velocity.map((v,i)=>v-m.velocity[i]));
-          const valid = dp <= object.transition.position_limit_au && dv <= object.transition.velocity_limit_au_per_day
-            && Math.abs(dp-c.position_difference_au)<=1e-14 && Math.abs(dv-c.velocity_difference_au_per_day)<=1e-14;
-          if (!valid) this.cache.delete(`${entry.objectId}:${otherKey}`);
-          requireHistory(valid,'transition evidence');
-        }
-      }
+  validatePayload(value,entry) { return validateSegment(value,entry); }
+  validateTransition(object,historical,modern) {
+    for(const c of object.transition.comparisons) {
+      const h = interpolateCometState(historical.series,c.jd), m = interpolateCometState(modern.series,c.jd);
+      const dp = Math.hypot(...h.position.map((v,i)=>v-m.position[i]));
+      const dv = Math.hypot(...h.velocity.map((v,i)=>v-m.velocity[i]));
+      requireHistory(dp <= object.transition.position_limit_au && dv <= object.transition.velocity_limit_au_per_day
+        && Math.abs(dp-c.position_difference_au)<=1e-14 && Math.abs(dv-c.velocity_difference_au_per_day)<=1e-14,'transition evidence');
     }
-    return value;
   }
-  cacheValue(id,value) {
-    this.cache.set(id,value);
-    const bytes = () => [...this.cache.keys()].reduce((sum,key)=>sum+this.entries.find(e=>e.id===key).data.bytes,0);
-    while(this.cache.size>8 || bytes()>16*1024*1024) this.cache.delete(this.cache.keys().next().value);
-  }
+  // The strict index admits exactly eight files, each <=2MiB. Retaining all
+  // verified files is bounded by construction; there is no unreachable LRU policy.
   async fetchEntry(entry,signal) {
     await new Promise((resolve,reject)=>{
       const item = {start:()=>{signal.removeEventListener('abort',cancel);this.active++;resolve();}};

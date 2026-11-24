@@ -77,8 +77,9 @@ representative first/worst/last references for each grid. Transition records
 contain `jd`, `owner: "modern"`, position/velocity limits and measured
 `comparisons` at T and, for 55P, January 2. Limits are 0.000052 AU and
 0.000013 AU/day. These are numerical compatibility guards, not physical uncertainty
-or a continuous interpolation bound. Reader checks actual position/velocity
-comparisons when the second member of a pair loads, before caching that member.
+or a continuous interpolation bound. Reader loads both members of a transition pair and checks actual position/velocity
+comparisons before returning either member, including historical-only sessions and
+retries. A failing pair evicts both cached payloads.
 
 ## Reference reader API
 
@@ -100,17 +101,20 @@ source.close();
 payload or null. `loadSegment(id, key, {signal})` is a low-level explicit read;
 its sample support is not public coverage. Use `positionAt` for markers.
 `pathSegments` returns separate `{key, points: [[JD,x,y,z], ...]}` strips, clipped
-to requested and owned intervals. A historical strip may end at its own evaluated
-T to finish the path; modern supplies the marker. Do not connect unequal seam
+to requested and owned intervals. A historical strip ends at the immediately preceding representable Julian day
+below T; exact T belongs exclusively to the modern strip and marker. Do not connect unequal seam
 positions. Empty/outside ranges yield no fabricated points. A failed required
-file rejects the whole path result; applications must not present partial Fit.
+file rejects the whole path result and cancels its sibling subscribers; unrelated
+subscribers retain their own cancellation lifetime. Applications must not present
+partial Fit.
 
 Metadata loads first, trajectories lazily. One pin owns all cache and pending
 loads. Concurrent subscribers share work; one cancellation preserves other
 subscribers, the last cancellation aborts shared work, and retry never changes
 pin. Failed reads are not cached. Close aborts pending/queued reads. The adapter
-allows two simultaneous downloads and bounds resident cache to eight payloads /
-16 MiB decoded bytes with LRU eviction. JSON/array heap overhead and app-retained
+allows two simultaneous downloads. The strict fixed catalogue permits only eight
+payloads of at most 2 MiB each, so retaining the entire verified inventory is bounded
+by 16 MiB decoded bytes; there is no unused eviction policy. JSON/array heap overhead and app-retained
 references are additional; this is not a heap budget or measured UI performance.
 
 ## Concrete Orrery integration work

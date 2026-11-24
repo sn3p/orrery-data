@@ -17,21 +17,23 @@ const validName = (name, id) => typeof name === 'string' && name.startsWith(id +
   && name.length > id.length + 1 && !EDGE_WHITESPACE.includes(name[0]) && !EDGE_WHITESPACE.includes(name.at(-1)) && !/[\x00-\x1f\x7f]/.test(name);
 export const CONVENTIONS = Object.freeze({ center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
   velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' });
-function reference(ref, prefix, max) {
+export function reference(ref, prefix, max) {
   fields(ref, ['url', 'sha256', 'bytes']);
   requireValue(/^[a-f0-9]{64}$/.test(ref.sha256) && ref.url === `${prefix}${ref.sha256}.json`
     && Number.isSafeInteger(ref.bytes) && ref.bytes > 0 && ref.bytes <= max, 'reference');
 }
-function sourceQuery(id, midpoint) {
-  const params = { format: 'json', COMMAND: `'DES=${id}; CAP;'`, EPHEM_TYPE: "'VECTORS'",
-    CENTER: "'500@10'", START_TIME: midpoint ? "'1980-01-03'" : "'1980-01-01'",
-    STOP_TIME: midpoint ? "'2099-12-30'" : "'2100-01-01'", STEP_SIZE: "'4 d'",
+export function vectorQuery(command,start,stop) {
+  const params = { format: 'json', COMMAND: `'${command}'`, EPHEM_TYPE: "'VECTORS'",
+    CENTER: "'500@10'", START_TIME: `'${start}'`, STOP_TIME: `'${stop}'`, STEP_SIZE: "'4 d'",
     TIME_TYPE: "'UT'", OUT_UNITS: "'AU-D'", REF_PLANE: "'ECLIPTIC'", REF_SYSTEM: "'ICRF'",
     VEC_TABLE: "'2'", CSV_FORMAT: "'YES'", VEC_CORR: "'NONE'", OBJ_DATA: "'YES'" };
   return 'https://ssd.jpl.nasa.gov/api/horizons.api?' + new URLSearchParams(params);
 }
-function utcTimestamp(value) {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
+function sourceQuery(id, midpoint) {
+  return vectorQuery(`DES=${id}; CAP;`, midpoint?'1980-01-03':'1980-01-01',midpoint?'2099-12-30':'2100-01-01');
+}
+export function utcTimestamp(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().replace('.000Z', 'Z') === value;
 }
 export function interpolateCometState(series, jd) {
@@ -119,11 +121,7 @@ export class CometSource {
     check(signal); check(this.lifetime.signal);
     const entry = this.entries.find(v => v.id === id);
     requireValue(entry, 'selection');
-    if (this.cache.has(id)) {
-      const value = this.cache.get(id);
-      this.cache.delete(id); this.cache.set(id, value);
-      return value;
-    }
+    if (this.cache.has(id)) return this.cache.get(id);
     let pending = this.pending.get(id);
     if (!pending) {
       const controller = new AbortController();

@@ -1,5 +1,5 @@
 import { keys, requireValue, freeze } from './contract.js';
-import { CONVENTIONS, validateCometIndex, validateComet, interpolateComet } from './cometSourceCore.js';
+import { CONVENTIONS, reference, utcTimestamp, vectorQuery, validateCometIndex, validateComet, interpolateComet } from './cometSourceCore.js';
 export const T = 2444239.5, END = 2488067.5;
 const IDS = ['1P', '2P', '55P', '9P', '10P', '67P'];
 export const HISTORY = { '1P': [2391511.5, 13183, '90000030', 'JPL#75'], '55P': [2402592.5, 10413, '90000626', 'JPL#J985/69'] };
@@ -13,14 +13,8 @@ function day(v) {
   return typeof v === 'string' && /^\d{4}-\d\d-\d\d$/.test(v)
     && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0,10) === v;
 }
-function clock(v) { return typeof v === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(v)
-  && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().replace('.000Z','Z') === v; }
 function https(v) { try { const u = new URL(v); return u.protocol === 'https:' && !u.username && !u.password; } catch { return false; } }
-export function reference(ref, prefix, max) {
-  fields(ref, ['url','sha256','bytes']);
-  requireHistory(hash(ref.sha256) && ref.url === `${prefix}${ref.sha256}.json`
-    && Number.isSafeInteger(ref.bytes) && ref.bytes > 0 && ref.bytes <= max, 'reference');
-}
+export { reference };
 function metadata(value, id, sources) {
   fields(value, ['id','catalogue_discovery','catalogue_provenance','events','event_inventory_complete']);
   requireHistory(value.id === id && value.event_inventory_complete === false, 'discovery identity');
@@ -30,7 +24,7 @@ function metadata(value, id, sources) {
   fields(p, ['url','raw_file','sha256','retrieved_on','retrieved_at','note']);
   requireHistory(p.url === `https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=${id}&discovery=true&full-prec=true`
     && p.raw_file === `sources/${id}-sbdb.json` && hash(p.sha256) && day(p.retrieved_on)
-    && (p.retrieved_at === null || (clock(p.retrieved_at) && p.retrieved_at.startsWith(p.retrieved_on))) && nullable(p.note), 'discovery provenance');
+    && (p.retrieved_at === null || (utcTimestamp(p.retrieved_at) && p.retrieved_at.startsWith(p.retrieved_on))) && nullable(p.note), 'discovery provenance');
   requireHistory(Array.isArray(value.events) && value.events.length > 0, 'events');
   for (const e of value.events) {
     fields(e, ['kind','date','people','sources','certainty','note']);
@@ -52,8 +46,7 @@ function metadata(value, id, sources) {
 function historicalQuery(id, offset) {
   const [start,,record] = HISTORY[id], count = Math.floor((END-start)/4)+1;
   const first = start+offset, last = start+4*(count-1)-(offset ? 4-offset : 0);
-  return 'https://ssd.jpl.nasa.gov/api/horizons.api?' + new URLSearchParams({format:'json',COMMAND:`'${record};'`,EPHEM_TYPE:"'VECTORS'",CENTER:"'500@10'",
-    START_TIME:`'JD${first}'`,STOP_TIME:`'JD${last}'`,STEP_SIZE:"'4 d'",TIME_TYPE:"'UT'",OUT_UNITS:"'AU-D'",REF_PLANE:"'ECLIPTIC'",REF_SYSTEM:"'ICRF'",VEC_TABLE:"'2'",CSV_FORMAT:"'YES'",VEC_CORR:"'NONE'",OBJ_DATA:"'YES'"});
+  return vectorQuery(`${record};`, `JD${first}`, `JD${last}`);
 }
 export function validateHistoryIndex(index) {
   fields(index,['comet_contract_version','sources','objects']);
@@ -87,7 +80,7 @@ export function validateHistoryIndex(index) {
       for (const [kind,p] of Object.entries(s.provenance)) {
         fields(p,['url','sha256','retrieved_at','header','target','solution','api_version']);
         requireHistory(p.url === historicalQuery(e.id,kind === 'vectors' ? 0 : Number(kind))
-          && ['1.2','1.3'].includes(p.api_version) && hash(p.sha256) && clock(p.retrieved_at) && p.target === e.name
+          && ['1.2','1.3'].includes(p.api_version) && hash(p.sha256) && utcTimestamp(p.retrieved_at) && p.target === e.name
           && p.solution === HISTORY[e.id][3] && text(p.header), 'historical provenance');
         normalized.push(p.header.split('\n').filter(l=>!l.startsWith('Start time')&&!l.startsWith('Stop  time')).join('\n'));
       }
