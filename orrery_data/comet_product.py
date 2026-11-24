@@ -69,16 +69,32 @@ def validate_series(series):
 
 
 def interpolate(series, jd):
+    return _interpolate(series, jd, include_velocity=False)
+
+
+def interpolate_state(series, jd):
+    """Position and analytic Hermite derivative (AU, AU/day)."""
+    return _interpolate(series, jd, include_velocity=True)
+
+
+def _interpolate(series, jd, *, include_velocity):
+    if not number(jd):
+        raise DataError('Date outside comet coverage')
     offset = (jd - series['start']) / series['step']
     states = series['states']
-    if not number(jd) or offset < 0 or offset > len(states) - 1:
+    if offset < 0 or offset > len(states) - 1:
         raise DataError('Date outside comet coverage')
     index = min(int(offset), len(states) - 2)
     t = offset - index
     a, b = states[index:index + 2]
     h = series['step']
-    return [(2*t**3-3*t*t+1)*a[k] + (t**3-2*t*t+t)*h*a[k+3]
-            + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3] for k in range(3)]
+    position = [(2*t**3-3*t*t+1)*a[k] + (t**3-2*t*t+t)*h*a[k+3]
+                + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3] for k in range(3)]
+    if not include_velocity:
+        return position
+    velocity = [((6*t*t-6*t)*a[k] + (3*t*t-4*t+1)*h*a[k+3]
+                 + (-6*t*t+6*t)*b[k] + (3*t*t-2*t)*h*b[k+3]) / h for k in range(3)]
+    return position, velocity
 
 
 def valid_id(value):
