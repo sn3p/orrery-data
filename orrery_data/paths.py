@@ -1,6 +1,7 @@
 """Preflight writable destinations without changing files or acquiring locks."""
 
 from pathlib import Path
+import json
 import re
 import stat
 import unicodedata
@@ -10,6 +11,25 @@ from .formats import DataError
 
 CANDIDATE_NAME = re.compile(r"(?:snapshot|export|release|delivery)-v1-[a-f0-9]{64}")
 CANDIDATE_MARKERS = ("snapshot.json", "manifest.json", "release.json", "index.json")
+
+
+def historical_candidate(directory):
+    marker = directory / 'latest.json'
+    if not (marker.exists() or marker.is_symlink()):
+        return False
+    if any(parent.name.casefold() == 'comet-candidates' and parent.parent.name.casefold() == '.context'
+           for parent in directory.parents):
+        return True
+    # Retained copies and redirected namespaces lose the lexical namespace.
+    # Schema 3 is immutable; schema-2 and asteroid site pointers stay mutable.
+    try:
+        info = marker.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+            return False
+        value = json.loads(marker.read_bytes())
+        return isinstance(value, dict) and value.get('comet_contract_version') == 3
+    except (OSError, ValueError):
+        return False
 
 
 def validate_flat_inventory(directory, names, *, label):
@@ -61,6 +81,11 @@ def validate_writable_path(path, *, label="Output", protected_roots=()):
         if path_within(resolved, root):
             raise DataError(f"{label} must be outside immutable inputs: {root}")
     for ancestor in (resolved, *resolved.parents):
+        # Unlike mutable site products, historical candidates live in this
+        # reserved local namespace. Protect their entire installed tree, even
+        # through aliases, without blocking the external lock/staging area.
+        if historical_candidate(ancestor):
+            raise DataError(f'{label} must be outside immutable historical candidates: {ancestor}')
         if CANDIDATE_NAME.fullmatch(ancestor.name.casefold()) or (ancestor == resolved and ancestor.is_dir() and any(
                 (ancestor / marker).exists() or (ancestor / marker).is_symlink()
                 for marker in CANDIDATE_MARKERS)):

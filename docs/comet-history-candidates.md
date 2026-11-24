@@ -22,18 +22,23 @@ public data and descendants of existing candidates are rejected before replay.
 Candidate installation rechecks this under a namespace-wide lock, with locks and staging
 outside candidate inventories. Candidates are immutable: an existing
 path is verified, never overwritten. A new path is staged and renamed only after
-validation. There is no install, refresh-online or publish option. Raw cache and
+validation. Shared writer preflight also protects installed schema-3 candidates
+and their descendants, including aliases and retained copies. There is no install, refresh-online or publish option. Raw cache and
 research sources remain outside the candidate. The script is a checkout tool,
 not part of the installed `orrery-data` CLI.
 
 Verification replays the retained source evidence and compares the complete file
 inventory and exact bytes. It therefore requires raw inputs, not just the candidate.
+Each build captures the validated modern index and payload bytes under the shared
+site publication lock, then releases it before historical replay. A concurrent
+refresh can therefore prune old modern files without invalidating this snapshot.
 Each build reuses parsed API provenance and shared file encoding/hash-reference
 helpers. It validates modern schema 2, exact six-object membership, raw discovery
 assertions, strict metadata, historical target/solution/model identity, all final
 serialized historical interval quarter points, and position plus analytic velocity
 at the seam and support-overlap endpoint. Changed historical target or modern
-solution requires reassessment. Retained provenance includes URLs, raw hashes,
+solution requires reassessment; the reader enforces the same modern solution pins
+for the two historical objects. Retained provenance includes URLs, raw hashes,
 retrieval clocks, API version and scientific headers.
 
 ## Wire contract

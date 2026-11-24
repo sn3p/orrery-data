@@ -12,6 +12,68 @@ from orrery_data.formats import DataError
 
 
 class HistoryCandidateTests(unittest.TestCase):
+    def test_modern_snapshot_excludes_refresh_and_releases_lock(self):
+        from orrery_data.storage import site_lock_path, writer_lock
+        import shutil
+        with tempfile.TemporaryDirectory() as temp:
+            modern=Path(temp)/'site/comets'
+            shutil.copytree(candidate.ROOT/'data/comets',modern)
+            inspect=candidate.inspect_comets
+            lock=site_lock_path(modern.parent)
+            def inspect_during_refresh(*args, **kwargs):
+                result=inspect(*args, **kwargs)
+                with self.assertRaisesRegex(DataError,'Another writer'):
+                    with writer_lock(lock): pass
+                return result
+            with patch.object(candidate,'inspect_comets',side_effect=inspect_during_refresh):
+                index,files=candidate.snapshot_modern(modern)
+            with writer_lock(lock):
+                shutil.rmtree(modern)
+            self.assertEqual(set(files),{e['data']['url'] for e in index['objects']})
+            self.assertTrue(all(files.values()))
+
+    def test_other_writers_cannot_change_installed_candidate(self):
+        from orrery_data.horizons import acquire
+        from orrery_data.paths import validate_writable_path
+        from orrery_data.storage import writer_lock
+        files={'latest.json':candidate.json_bytes({'index':{'sha256':'test'}})}
+        with tempfile.TemporaryDirectory(dir=candidate.ROOT/'.context/comet-candidates') as temp:
+            root=Path(temp);installed=root/'installed'
+            with patch.object(candidate,'construct',return_value=files):candidate.build(installed)
+            alias=root/'alias';alias.symlink_to(installed,target_is_directory=True)
+            for base in (installed,alias):
+                for path in (base,base/'objects',base/'new/deep'):
+                    with self.subTest(path=path):
+                        with self.assertRaisesRegex(DataError,'immutable'):
+                            validate_writable_path(path)
+                        with self.assertRaisesRegex(DataError,'immutable'):
+                            acquire(path,offline=True,targets=['1P'])
+                        with self.assertRaisesRegex(DataError,'immutable'):
+                            with writer_lock(path): pass
+                        candidate.verify(installed,files)
+            # Site products remain refreshable; namespace staging stays writable.
+            validate_writable_path(candidate.ROOT/'data/comets')
+            validate_writable_path(root/'sibling')
+
+    def test_redirected_namespace_and_retained_copies_are_immutable(self):
+        import shutil
+        from orrery_data.paths import validate_writable_path
+        from orrery_data.horizons import acquire
+        files={'latest.json':candidate.json_bytes({'comet_contract_version':3,'index':{'sha256':'test'}})}
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);project=root/'project';external=root/'external'
+            (project/'.context').mkdir(parents=True);external.mkdir()
+            namespace=project/'.context/comet-candidates';namespace.symlink_to(external,target_is_directory=True)
+            with patch.object(candidate,'ROOT',project),patch.object(candidate,'construct',return_value=files):
+                candidate.build(namespace/'installed')
+            retained=root/'retained';shutil.copytree(external/'installed',retained)
+            for base in (namespace/'installed',external/'installed',retained):
+                for path in (base,base/'new/deep'):
+                    with self.subTest(path=path):
+                        with self.assertRaisesRegex(DataError,'immutable'):validate_writable_path(path)
+                        with self.assertRaisesRegex(DataError,'immutable'):acquire(path,offline=True,targets=['1P'])
+                        candidate.verify(base,files)
+
     def test_public_metadata_rejects_reader_incompatible_fields(self):
         original = candidate.pilot.validate_metadata(candidate.ROOT / 'research/comet-history')
         candidate.validate_metadata(original)
@@ -182,8 +244,21 @@ class HistoryCandidateTests(unittest.TestCase):
                 first=float(params['START_TIME'][0].strip("'")[2:]);last=float(params['STOP_TIME'][0].strip("'")[2:])
                 rows=[[first+4*i,0,0,0,0,0,0] for i in range(round((last-first)/4)+1)]
                 return b'{"signature":{"version":"1.2"}}',dict(url=url,sha256='a'*64,retrieved_at='2026-11-24T12:00:00Z'),(rows,{'header':'model','api_version':'1.2'})
-            with patch.object(candidate.pilot,'acquire',side_effect=acquire):
-                files=candidate.construct(root)
+            # Refresh may prune every old payload once the snapshot lock is
+            # released, including while historical replay is still running.
+            validate_metadata=candidate.pilot.validate_metadata
+            retired=root/'retired-objects'
+            def prune_after_snapshot(*args):
+                from orrery_data.storage import site_lock_path, writer_lock
+                with writer_lock(site_lock_path(root.parent)):
+                    (root/'objects').rename(retired)
+                return validate_metadata(*args)
+            try:
+                with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
+                        candidate.pilot,'validate_metadata',side_effect=prune_after_snapshot):
+                    files=candidate.construct(root)
+            finally:
+                if retired.exists():retired.rename(root/'objects')
             for name,raw in originals.items(): self.assertEqual(files[name],raw)
             latest=json.loads(files['latest.json']);built=json.loads(files[latest['index']['url']])
             self.assertEqual(len(built['objects']),6)

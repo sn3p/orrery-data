@@ -20,7 +20,7 @@ from scripts import comet_history_pilot as pilot
 from orrery_data.comet_product import CometContract, inspect_comets, interpolate_state
 from orrery_data.formats import DataError
 from orrery_data.paths import validate_disjoint_paths, path_within
-from orrery_data.storage import encode, json_bytes, loads_json, writer_lock, utc_timestamp
+from orrery_data.storage import encode, json_bytes, loads_json, writer_lock, utc_timestamp, site_lock_path
 from orrery_data.browser import bytes_reference as reference
 
 T = 2444239.5
@@ -103,9 +103,19 @@ def validate_metadata(value):
                     day(f"{d['year']:04d}-{d['month']:02d}-{d['day']:02d}")
 
 
+def snapshot_modern(modern):
+    """Capture validated bytes while excluding refresh publication/pruning."""
+    modern = Path(modern).resolve()
+    with writer_lock(site_lock_path(modern.parent)):
+        _, baseline = inspect_comets(modern, contract=CometContract(2))
+        files = {e['data']['url']: (modern / e['data']['url']).read_bytes()
+                 for e in baseline['objects']}
+    return baseline, files
+
+
 def construct(modern=ROOT / 'data/comets'):
     """Revalidate raw model identity and all serialized historical intervals."""
-    _, baseline = inspect_comets(modern, contract=CometContract(2))
+    baseline, modern_files = snapshot_modern(modern)
     if [e['id'] for e in baseline['objects']] != IDS:
         raise DataError('Historical candidate requires the six-object modern catalogue')
     metadata = pilot.validate_metadata(ROOT / 'research/comet-history')
@@ -113,7 +123,7 @@ def construct(modern=ROOT / 'data/comets'):
     files, entries = {}, []
     for entry, discovery in zip(baseline['objects'], metadata['objects']):
         ident = entry['id']
-        raw = (modern / entry['data']['url']).read_bytes()
+        raw = modern_files[entry['data']['url']]
         files[entry['data']['url']] = raw
         modern_series = loads_json(raw)['series']
         segments = [dict(key='modern', payload_contract_version=2,
