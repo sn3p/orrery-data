@@ -1,6 +1,6 @@
 # Unpublished comet history research
 
-This draft PR is a research step. Hosted data, schema 2 and `data/` remain
+The merged research PR was a research step. Hosted data, schema 2 and `data/` remain
 unchanged. The public-format change and Orrery integration are still pending.
 These files are not a public schema or a Pages product; no consumer or publication
 path reads this directory.
@@ -171,3 +171,7 @@ Python 3.13 also verifies the complete data site. The separate browser job runs
 Node consumer tests and the full browser workflow. Coverage is configured for the
 production-helper changes; a passing result must be confirmed separately for the
 final PR head. No workflow expansion is necessary for these files.
+
+The candidate implementation and concrete Orrery integration handoff are in
+[comet-history-candidates.md](../../docs/comet-history-candidates.md). Hosted data
+remains schema 2; candidate construction never installs public files.
