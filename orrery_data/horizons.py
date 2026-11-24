@@ -34,44 +34,65 @@ def query(object_id, midpoint=False):
 
 
 def parse_response(raw, object_id, midpoint=False, *, targets):
-    if len(raw) > MAX_RESPONSE:
-        raise DataError('Horizons response exceeds size limit')
-    envelope = loads_json(raw)
+    return parse_vector_response(
+        raw, name=targets[object_id], start=START + (2 if midpoint else 0),
+        step=STEP, count=COUNT - int(midpoint),
+        start_date='1980-Jan-03' if midpoint else '1980-Jan-01',
+        stop_date='2099-Dec-30' if midpoint else '2100-Jan-01')
+
+
+def parse_vector_response(raw, *, name, solution=None, start, step, count,
+                          start_date, stop_date):
+    """Validate vectors against explicit scientific identity and requested grid.
+
+    Dates are Horizons AD calendar labels (YYYY-Mmm-DD), independently checked
+    against the request; count may end before stop_date on a fixed-step grid.
+    """
+    if not isinstance(raw, (bytes, str)) or len(raw) > MAX_RESPONSE:
+        raise DataError('Invalid or oversized Horizons response')
+    try:
+        envelope = loads_json(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise DataError('Malformed Horizons JSON response') from exc
     if (not isinstance(envelope, dict) or envelope.get('error') or
             envelope.get('signature') not in ({'source': 'NASA/JPL Horizons API', 'version': v} for v in ('1.2', '1.3'))):
         raise DataError('Horizons error or unsupported API signature/version')
     result = envelope.get('result', '')
     if not isinstance(result, str) or result.count('$$SOE') != 1 or result.count('$$EOE') != 1:
         raise DataError('Missing complete Horizons vector table')
+    if result.index('$$EOE') < result.index('$$SOE'):
+        raise DataError('Invalid Horizons table marker order')
     header, body = result.split('$$SOE')
     body, _ = body.split('$$EOE')
     target = re.search(r'^Target body name:\s*(.*?)\s+\{source: (.*?)\}', header, re.M)
-    if not target or target[1] != targets[object_id] or not re.fullmatch(r'JPL#[A-Za-z0-9/._-]+', target[2]):
+    if (not target or target[1] != name or not re.fullmatch(r'JPL#[A-Za-z0-9/._-]+', target[2])
+            or (solution is not None and target[2] != solution)):
         raise DataError('Horizons returned the wrong target or missing solution')
     required = (r'Center body name:\s*Sun \(10\)', r'Center-site name:\s*BODY CENTER',
                 r'Output units\s*:\s*AU-D\s*$', r'Output type\s*:\s*GEOMETRIC cartesian states\s*$',
                 r'Output format\s*:\s*2 \(position and velocity\)\s*$',
                 r'Reference frame\s*:\s*Ecliptic of J2000.0\s*$', r'JDUT\s*,',
-                r'Step-size\s*:\s*5760 minutes\s*$')
+                r'Step-size\s*:\s*' + re.escape(f'{step * 1440:g}') + r' minutes\s*$')
     if not all(re.search(pattern, header, re.M) for pattern in required):
         raise DataError('Unexpected Horizons origin/frame/time/units/encoding/grid')
-    start = '1980-Jan-03' if midpoint else '1980-Jan-01'
-    stop = '2099-Dec-30' if midpoint else '2100-Jan-01'
-    for label, date in [('Start time', start), ('Stop  time', stop)]:
-        if not re.search(re.escape(label) + r'\s*:\s*A\.D\. ' + date + r' 00:00:00\.0000 UT\s*$', header, re.M):
+    for label, date in [('Start time', start_date), ('Stop  time', stop_date)]:
+        if not re.search(re.escape(label) + r'\s*:\s*A\.D\. ' + re.escape(date) + r' 00:00:00\.0000 UT\s*$', header, re.M):
             raise DataError('Unexpected Horizons requested dates/time scale')
     rows = []
     for line in body.strip().splitlines():
         columns = [v.strip() for v in line.split(',')]
         if len(columns) != 9 or columns[-1] != '':
             raise DataError('Malformed Horizons row')
-        row = [float(columns[0]), *map(float, columns[2:8])]
+        try:
+            row = [float(columns[0]), *map(float, columns[2:8])]
+        except ValueError as exc:
+            raise DataError('Malformed Horizons numeric state') from exc
         if not all(math.isfinite(v) for v in row):
             raise DataError('Nonfinite Horizons state')
-        if row[0] != START + (2 if midpoint else 0) + len(rows) * STEP:
+        if row[0] != start + len(rows) * step:
             raise DataError('Horizons dates are missing, duplicated or out of order')
         rows.append(row)
-    if len(rows) != COUNT - int(midpoint):
+    if len(rows) != count:
         raise DataError('Incomplete Horizons coverage')
     # Only operational banners are excluded from scientific identity. Preserve all
     # model, solution, EOP, perturber and query headers, including solution dates.
