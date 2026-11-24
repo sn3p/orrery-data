@@ -18,7 +18,9 @@ COMET_HISTORY_CANDIDATE=.context/comet-candidates/history-v3 npm run test:comets
 ```
 
 Output must be a named directory under `.context/comet-candidates/`; aliases into
-public data are rejected before replay. Candidates are immutable: an existing
+public data and descendants of existing candidates are rejected before replay.
+Candidate installation rechecks this under a namespace-wide lock, with locks and staging
+outside candidate inventories. Candidates are immutable: an existing
 path is verified, never overwritten. A new path is staged and renamed only after
 validation. There is no install, refresh-online or publish option. Raw cache and
 research sources remain outside the candidate. The script is a checkout tool,

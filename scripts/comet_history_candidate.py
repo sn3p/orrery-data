@@ -209,23 +209,35 @@ def verify(directory, expected):
                 pin=loads_json(expected['latest.json'])['index'])
 
 
-def build(output, *, verify_only=False):
+def candidate_destination(output):
+    """Resolve aliases and reserve every existing candidate's entire subtree."""
     output = Path(output)
-    # Explicitly restrict this research command to ignored workspace candidates.
-    # Resolve aliases before any cache lock, replay, directory creation or write.
     if not path_within(output, ROOT / '.context/comet-candidates'):
         raise DataError('Output must be under .context/comet-candidates')
     output = validate_disjoint_paths(output, [ROOT / 'data', pilot.OUTPUT, ROOT / 'research'], label='Candidate')
     if output == (ROOT / '.context/comet-candidates').resolve():
         raise DataError('Choose a named candidate directory')
+    for ancestor in output.parents:
+        marker = ancestor / 'latest.json'
+        if marker.exists() or marker.is_symlink():
+            raise DataError('Output must not be nested inside an existing candidate')
+    return output
+
+
+def build(output, *, verify_only=False):
+    # Preflight before replay/cache locks, then repeat under a namespace-wide
+    # installation lock: another builder may have installed an ancestor meantime.
+    output = candidate_destination(output)
     expected = construct()
     if verify_only or output.exists():
         return verify(output, expected)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with writer_lock(output.parent):
+    namespace = (ROOT / '.context/comet-candidates').resolve()
+    with writer_lock(namespace):
+        output = candidate_destination(output)
         if output.exists():
             return verify(output, expected)
-        with tempfile.TemporaryDirectory(prefix='.history-', dir=output.parent) as temporary:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='.history-', dir=namespace) as temporary:
             staged = Path(temporary) / 'candidate'
             for name, raw in expected.items():
                 path = staged / name

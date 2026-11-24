@@ -96,6 +96,41 @@ class HistoryCandidateTests(unittest.TestCase):
             with self.assertRaises(DataError):
                 candidate.build(alias/'comets')
 
+    def test_nested_outputs_reject_before_replay_and_preserve_original(self):
+        files={'latest.json':candidate.json_bytes({'index':{'sha256':'test'}})}
+        with tempfile.TemporaryDirectory(dir=candidate.ROOT/'.context/comet-candidates') as temp:
+            root=Path(temp);first=root/'first'
+            with patch.object(candidate,'construct',return_value=files):candidate.build(first)
+            alias=root/'alias';alias.symlink_to(first,target_is_directory=True)
+            def inventory():
+                return {p.relative_to(first).as_posix():p.read_bytes() if p.is_file() else None
+                        for p in first.rglob('*')}
+            before=inventory()
+            for output in [first/'nested',first/'deeper/nested',alias/'nested',alias/'deeper/nested']:
+                with self.subTest(output=output),patch.object(candidate,'construct') as replay,patch.object(candidate,'writer_lock') as lock:
+                    with self.assertRaisesRegex(DataError,'nested inside'):
+                        candidate.build(output)
+                    replay.assert_not_called();lock.assert_not_called()
+                self.assertEqual(inventory(),before)
+                candidate.verify(first,files)
+            # Existing candidate verification remains supported; sibling builders
+            # place neither locks nor staging files inside the first candidate.
+            with patch.object(candidate,'construct',return_value=files):
+                candidate.build(first);candidate.build(root/'sibling')
+            self.assertEqual(inventory(),before)
+
+    def test_ancestor_installed_during_replay_is_rechecked_under_namespace_lock(self):
+        files={'latest.json':candidate.json_bytes({'index':{'sha256':'test'}})}
+        with tempfile.TemporaryDirectory(dir=candidate.ROOT/'.context/comet-candidates') as temp:
+            first=Path(temp)/'first';output=first/'deeper/nested'
+            def replay():
+                first.mkdir();(first/'latest.json').write_bytes(files['latest.json'])
+                return files
+            with patch.object(candidate,'construct',side_effect=replay):
+                with self.assertRaisesRegex(DataError,'nested inside'):candidate.build(output)
+            self.assertEqual(list(first.iterdir()),[first/'latest.json'])
+            candidate.verify(first,files)
+
     def test_exact_verifier_rejects_corruption_missing_unknown_and_special_files(self):
         expected = {'latest.json': b'{}\n', 'objects/abc.json': b'[]\n'}
         with tempfile.TemporaryDirectory() as temp:
