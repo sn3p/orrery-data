@@ -26,8 +26,13 @@ class HistoryCandidateTests(unittest.TestCase):
         for mutate in mutations:
             value = copy.deepcopy(original)
             mutate(value['objects'][0])
-            with self.subTest(mutate=mutate), patch.object(candidate.pilot, 'validate_metadata', return_value=value), self.assertRaises(DataError):
-                candidate.construct()
+            with self.subTest(mutate=mutate), self.assertRaises(DataError):
+                candidate.validate_metadata(value)
+            with patch.object(candidate.pilot, 'validate_metadata', return_value=value), patch.object(
+                    candidate.pilot, 'acquire', side_effect=AssertionError('metadata reached acquisition')) as acquire:
+                with self.assertRaisesRegex(DataError, 'metadata|Discovery'):
+                    candidate.construct()
+                acquire.assert_not_called()
 
     def test_public_metadata_semantics_do_not_depend_on_pilot_validation(self):
         original = candidate.pilot.validate_metadata(candidate.ROOT/'research/comet-history')
@@ -44,6 +49,29 @@ class HistoryCandidateTests(unittest.TestCase):
             value=copy.deepcopy(original);mutation(value['objects'][0])
             with self.subTest(mutation=mutation),self.assertRaises(DataError):candidate.validate_metadata(value)
             with patch.object(candidate.pilot,'validate_metadata',return_value=value),self.assertRaises(DataError):candidate.construct()
+
+    def test_shared_serialization_and_names_match_file_helpers(self):
+        from orrery_data.storage import write_json
+        from orrery_data.browser import reference
+        value={'unicode':'é','nested':[1,None,True]}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'value.json';write_json(path,value)
+            self.assertEqual(candidate.json_bytes(value),path.read_bytes())
+            for prefix in ['index-','objects/']:
+                self.assertEqual(candidate.reference(path.read_bytes(),prefix),reference(path,prefix,'.json'))
+
+    def test_empty_source_keys_rejected_even_when_unused(self):
+        value=candidate.pilot.validate_metadata(candidate.ROOT/'research/comet-history')
+        value['sources']['']=value['sources']['sbdb']
+        with self.assertRaisesRegex(DataError,'metadata'):candidate.validate_metadata(value)
+
+    def test_parser_retains_api_version_without_second_json_decode(self):
+        from orrery_data import horizons
+        raw=(candidate.ROOT/'tests/fixtures/horizons-1p.json').read_bytes().replace(b'2100-Jan-01',b'1980-Jan-09')
+        with patch.object(horizons,'loads_json',wraps=horizons.loads_json) as decode:
+            rows,source=candidate.pilot.parse_with_provenance(raw,'1P/Halley','JPL#75',2444239.5,3)
+            self.assertEqual(len(rows),3);self.assertEqual(source['api_version'],'1.2')
+            self.assertEqual(decode.call_count,1)
 
     def test_changed_historical_target_or_solution_rejected_before_acquisition(self):
         _, original = candidate.inspect_comets(candidate.ROOT/'data/comets', contract=candidate.CometContract(2))
@@ -118,7 +146,7 @@ class HistoryCandidateTests(unittest.TestCase):
                 params=parse_qs(urlparse(url).query)
                 first=float(params['START_TIME'][0].strip("'")[2:]);last=float(params['STOP_TIME'][0].strip("'")[2:])
                 rows=[[first+4*i,0,0,0,0,0,0] for i in range(round((last-first)/4)+1)]
-                return b'{"signature":{"version":"1.2"}}',dict(url=url,sha256='a'*64,retrieved_at='2026-11-24T12:00:00Z'),(rows,'model')
+                return b'{"signature":{"version":"1.2"}}',dict(url=url,sha256='a'*64,retrieved_at='2026-11-24T12:00:00Z'),(rows,{'header':'model','api_version':'1.2'})
             with patch.object(candidate.pilot,'acquire',side_effect=acquire):
                 files=candidate.construct(root)
             for name,raw in originals.items(): self.assertEqual(files[name],raw)

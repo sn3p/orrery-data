@@ -5,7 +5,6 @@ No acquisition or installation mode. Verification replays scientific checks from
 raw responses, rather than trusting a candidate's self-reported evidence.
 """
 import argparse
-import hashlib
 import math
 import re
 from datetime import date
@@ -21,21 +20,13 @@ from scripts import comet_history_pilot as pilot
 from orrery_data.comet_product import CometContract, inspect_comets, interpolate_state
 from orrery_data.formats import DataError
 from orrery_data.paths import validate_disjoint_paths, path_within
-from orrery_data.storage import encode, loads_json, writer_lock, utc_timestamp
+from orrery_data.storage import encode, json_bytes, loads_json, writer_lock, utc_timestamp
+from orrery_data.browser import bytes_reference as reference
 
 T = 2444239.5
 END = 2488067.5
 LIMIT = 2 * 1024 * 1024
 IDS = ['1P', '2P', '55P', '9P', '10P', '67P']
-
-
-def json_bytes(value):
-    return (encode(value) + '\n').encode()
-
-
-def reference(raw, prefix):
-    digest = hashlib.sha256(raw).hexdigest()
-    return dict(url=f'{prefix}{digest}.json', sha256=digest, bytes=len(raw))
 
 
 def interval(start, end, inclusive=True):
@@ -63,7 +54,8 @@ def validate_metadata(value):
     fields(value, ['experimental', 'status', 'sources', 'objects'])
     require(value['experimental'] is True and text(value['status']))
     require(isinstance(value['sources'], dict))
-    for source in value['sources'].values():
+    for key, source in value['sources'].items():
+        require(text(key))
         fields(source, ['url', 'checked_on'], ['note', 'description'])
         require(text(source['url']))
         url = urlparse(source['url'])
@@ -136,8 +128,9 @@ def construct(modern=ROOT / 'data/comets'):
             full_count = int((END - start) // 4) + 1
             count = math.ceil((T - start) / 4) + 1
             url = pilot.query(record, start, full_count)
-            source_raw, info, (rows, header) = pilot.acquire(url, False,
-                lambda body: pilot.parse(body, name, solution, start, full_count))
+            _, info, (rows, source) = pilot.acquire(url, False,
+                lambda body: pilot.parse_with_provenance(body, name, solution, start, full_count))
+            header = source['header']
             series = dict(start=start, step=4, states=pilot.serialize_states(rows[:count]))
             value = dict(comet_contract_version=3, id=ident, segment='historical',
                          conventions=pilot.CONVENTIONS, series=series)
@@ -145,15 +138,17 @@ def construct(modern=ROOT / 'data/comets'):
             if len(raw) > LIMIT:
                 raise DataError('Historical object exceeds byte budget')
             series = loads_json(raw)['series']
-            provenance = {'vectors': dict(info, header=header, target=name, solution=solution, api_version=loads_json(source_raw)['signature']['version'])}
+            provenance = {'vectors': dict(info, header=header, target=name, solution=solution, api_version=source['api_version'])}
             checks = []
             for offset in (1, 2, 3):
                 def validate(body):
-                    refs, ref_header = pilot.parse(body, name, solution, start + offset, full_count - 1)
+                    refs, provenance = pilot.parse_with_provenance(body, name, solution, start + offset, full_count - 1)
+                    ref_header = provenance['header']
                     if pilot.model_identity(header) != pilot.model_identity(ref_header):
                         raise DataError('Scientific model changed between requests')
-                    return refs, ref_header
-                source_raw, info, (refs, ref_header) = pilot.acquire(pilot.query(record, start, full_count, offset), False, validate)
+                    return refs, provenance
+                _, info, (refs, ref_source) = pilot.acquire(pilot.query(record, start, full_count, offset), False, validate)
+                ref_header = ref_source['header']
                 refs = refs[:count - 1]
                 errors = [math.dist(pilot.interpolate(series, r[0]), r[1:4]) for r in refs]
                 worst = max(range(len(errors)), key=errors.__getitem__)
@@ -161,7 +156,7 @@ def construct(modern=ROOT / 'data/comets'):
                     raise DataError('Historical serialized interpolation exceeds tolerance')
                 checks.append(dict(offset_days=offset, samples=len(refs), max_error_au=errors[worst],
                     worst_jd=refs[worst][0], references=[refs[i][:4] for i in sorted({0, worst, len(refs)-1})]))
-                provenance[str(offset)] = dict(info, header=ref_header, target=name, solution=solution, api_version=loads_json(source_raw)['signature']['version'])
+                provenance[str(offset)] = dict(info, header=ref_header, target=name, solution=solution, api_version=ref_source['api_version'])
             # Check both components at the ownership boundary and at the support
             # overlap endpoint (55P January 2). Never rewrite either state series.
             overlap_end = start + (count - 1) * 4
