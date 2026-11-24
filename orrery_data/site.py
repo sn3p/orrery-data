@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from .browser import verify_browser
-from .comets import verify_comets
+from .comet_rollout import verify_current_comets
 
 
 def verify_optional_product(directory, verifier):
@@ -17,5 +17,5 @@ def verify_site(directory):
     asteroids = verify_browser(directory)
     return {
         **asteroids,
-        'comets': verify_optional_product(directory / 'comets', verify_comets),
+        'comets': verify_optional_product(directory / 'comets', verify_current_comets),
     }

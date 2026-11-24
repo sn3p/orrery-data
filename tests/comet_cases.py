@@ -350,7 +350,8 @@ class PublicationCases(CometFixture):
         self.assertFalse(staged.exists())
         # Site verification visits the comet product once, independently of asteroid files.
         orphan.unlink()
-        with patch('orrery_data.site.' + self.verifier_name, wraps=self.comets.verify_comets) as verify:
+        from orrery_data.comet_rollout import verify_current_comets
+        with patch('orrery_data.site.verify_current_comets', wraps=verify_current_comets) as verify:
             verify_site(self.output.parent)
             verify.assert_called_once_with(self.output)
         shutil.rmtree(self.output)

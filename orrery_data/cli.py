@@ -128,18 +128,26 @@ def parser():
     comet.add_argument("--refresh", action="store_true", help="explicitly reacquire all twelve Horizons queries")
     comet_verify = commands.add_parser("verify-comets")
     comet_verify.add_argument("--directory", type=Path, default=Path("data/comets"))
+    rollout = commands.add_parser("prepare-comet-rollout", help="stage schema-3 site and offline rollback; never publish")
+    rollout.add_argument("--site", type=Path, default=Path("data"))
+    rollout.add_argument("--candidate", type=Path, required=True)
+    rollout.add_argument("--output", type=Path, required=True, help="new directory containing site/ and rollback/")
+    rollout.add_argument("--expected-current-pin", required=True)
     return root
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        if args.command == "refresh-comets":
+        if args.command == "prepare-comet-rollout":
+            from .comet_rollout import prepare_rollout
+            result = prepare_rollout(args.site, args.candidate, args.output, args.expected_current_pin)
+        elif args.command == "refresh-comets":
             from .comets import refresh_comets
             result = refresh_comets(args.cache, args.output, refresh=args.refresh, offline=args.offline)
         elif args.command == "verify-comets":
-            from .comets import verify_comets
-            result = verify_comets(args.directory)
+            from .comet_rollout import verify_current_comets
+            result = verify_current_comets(args.directory)
         elif args.command == "check":
             result = check(args.store, {name: getattr(args, name + "_url") for name in URLS}, args.timeout)
         elif args.command == "refresh":

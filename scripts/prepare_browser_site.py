@@ -51,6 +51,7 @@ def published_site_matches(source, latest_url):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--source', type=Path, help='verified complete site to stage (default: repository data)')
     parser.add_argument('--output', type=Path, required=True, help='new, empty staging directory')
     parser.add_argument('--latest-url', help='optional trusted published descriptor to detect an unchanged deployment')
     parser.add_argument('--force', action='store_true')
@@ -59,11 +60,11 @@ def main():
     output = args.output.resolve()
     if output.exists() or output.is_symlink():
         parser.error('staging output must not exist')
-    source = (ROOT / 'data').resolve()
+    source = (args.source if args.source is not None else ROOT / 'data').resolve()
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
-    with writer_lock(site_lock_path(ROOT / 'data')):
-        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', ROOT / 'data'],
+    with writer_lock(site_lock_path(source)):
+        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', source],
                                 cwd=ROOT, capture_output=True, text=True)
         if result.returncode:
             print(result.stderr, file=sys.stderr)
@@ -80,7 +81,7 @@ def main():
         unchanged = bool(args.latest_url and not force
                          and published_site_matches(source, args.latest_url))
         if not unchanged:
-            shutil.copytree(ROOT / 'data', output)
+            shutil.copytree(source, output)
             (output / '.nojekyll').write_text('')
         print(json.dumps({**verified, 'status': 'unchanged' if unchanged else 'prepared', 'output': str(output)}))
         return 0

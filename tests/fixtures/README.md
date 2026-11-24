@@ -27,3 +27,10 @@ against final published values before atomic replacement. Gzip uses mtime=0,
 no filename, and a portable header. Numerical tests compare final committed
 object bytes against every row offline. Raw responses
 remain acquisition inputs, separately retained outside the public product.
+
+`comet-history-payloads/*.json.gz` contains the exact two historical payloads from
+PR16's scientifically verified candidate, deterministically gzip-compressed. The
+existing `comet-history-index.json` is the approved index (a9de1f2f…c2e2); six modern
+payloads are reused from committed data. These fixtures let CI exercise the real
+production rollout CLI and publication boundary without network acquisition or
+private raw research caches. Provenance and JPL source URLs remain in the index.
