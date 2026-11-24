@@ -1,0 +1,161 @@
+{
+  "status": "unpublished pilot; not a finalized contract",
+  "measured_on": "2026-11-24",
+  "metadata_size": {
+    "json_bytes": 9937,
+    "gzip_bytes": 2464,
+    "sha256": "dfb88b9d5d41c71fbed7efb1bbe09c992663e4dadb891b1fb13bf484de136737"
+  },
+  "pilots": {
+    "1P": {
+      "solution": "JPL#75",
+      "start": "1835-08-21",
+      "start_jd": 2391511.5,
+      "end_jd": 2488067.5,
+      "states": 24140,
+      "history_states": 13183,
+      "history_end_jd": 2444239.5,
+      "checks": [
+        {
+          "offset_days": 1,
+          "samples": 24139,
+          "max_error_au": 1.8215386838022822e-06,
+          "worst_jd": 2418780.5
+        },
+        {
+          "offset_days": 2,
+          "samples": 24139,
+          "max_error_au": 3.24064493429014e-06,
+          "worst_jd": 2418781.5
+        },
+        {
+          "offset_days": 3,
+          "samples": 24139,
+          "max_error_au": 1.822765343904793e-06,
+          "worst_jd": 2391598.5
+        }
+      ],
+      "tolerance_au": 5.2e-05,
+      "passed": true,
+      "full_size": {
+        "json_bytes": 2397702,
+        "gzip_bytes": 961555,
+        "sha256": "af8b85c5035a38a500b70afeee80c0a3c02a54288c2c8c9b16ee99848ec7416e"
+      },
+      "history_size": {
+        "json_bytes": 1309617,
+        "gzip_bytes": 524507,
+        "sha256": "3a33158f751aa1b78a41b028303a9fb679c640aac169b447c4dc68fca0ac22d0"
+      },
+      "baseline_size": {
+        "json_bytes": 1088469,
+        "gzip_bytes": 438092,
+        "sha256": "dd33c20783eaa0c2ceb54a0a30b8510883219d77f5ff8dc5f099bd88f3e768ed"
+      },
+      "overlap_samples": 10958,
+      "overlap_max_difference_au": 0.0,
+      "seam_position_difference_au": 0.0,
+      "seam_velocity_difference_au_per_day": 0.0,
+      "provenance": {
+        "vectors": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000030%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2391511.5%27&STOP_TIME=%27JD2488067.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "a59703cc2ffa9dc99038cc7c25d284fb196694b42d2a13ae3f303e57de502070",
+          "retrieved_at": "2026-11-24T13:41:35Z"
+        },
+        "1": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000030%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2391512.5%27&STOP_TIME=%27JD2488064.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "3435198e76c983ed3e3171ad24369e69422951c359844e1dfacfd96f8bbbbb46",
+          "retrieved_at": "2026-11-24T13:41:38Z"
+        },
+        "2": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000030%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2391513.5%27&STOP_TIME=%27JD2488065.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "0d2dfb06ef67997488d40eb494d2ae4f478395f16a770749e6ea72b8b7ff420e",
+          "retrieved_at": "2026-11-24T13:41:41Z"
+        },
+        "3": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000030%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2391514.5%27&STOP_TIME=%27JD2488066.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "6b9daae4c79a727ae7b3e372ab5dcf4eb99c1f6d5ae84e1e8ae40caaa07f903f",
+          "retrieved_at": "2026-11-24T13:41:44Z"
+        }
+      }
+    },
+    "55P": {
+      "solution": "JPL#J985/69",
+      "start": "1865-12-22",
+      "start_jd": 2402592.5,
+      "end_jd": 2488064.5,
+      "states": 21369,
+      "history_states": 10413,
+      "history_end_jd": 2444240.5,
+      "checks": [
+        {
+          "offset_days": 1,
+          "samples": 21368,
+          "max_error_au": 1.4620820172610356e-07,
+          "worst_jd": 2463005.5
+        },
+        {
+          "offset_days": 2,
+          "samples": 21368,
+          "max_error_au": 2.6002666986968967e-07,
+          "worst_jd": 2463006.5
+        },
+        {
+          "offset_days": 3,
+          "samples": 21368,
+          "max_error_au": 1.4629244400915033e-07,
+          "worst_jd": 2463007.5
+        }
+      ],
+      "tolerance_au": 5.2e-05,
+      "passed": true,
+      "full_size": {
+        "json_bytes": 2145361,
+        "gzip_bytes": 875940,
+        "sha256": "9d8c85bf5f008a70260e9a2fe5d6e9793927eb33e476163ee62911559cb60359"
+      },
+      "history_size": {
+        "json_bytes": 1046327,
+        "gzip_bytes": 427295,
+        "sha256": "41d0045b68429a5aade91c53ab2d086b1e10bdffcded0f377a5dac6aa9b054e1"
+      },
+      "baseline_size": {
+        "json_bytes": 1099322,
+        "gzip_bytes": 449199,
+        "sha256": "858b0443750100bdee887bd90d7be606fefc574e030dee4ccd9b87b244a418d0"
+      },
+      "overlap_samples": 10957,
+      "overlap_max_difference_au": 1.462922456990739e-07,
+      "seam_position_difference_au": 2.3477184823016194e-09,
+      "seam_velocity_difference_au_per_day": 4.220216934334159e-09,
+      "provenance": {
+        "vectors": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000626%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2402592.5%27&STOP_TIME=%27JD2488064.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "439d2d1c0f366508262a56bc7833db8d23873d5e974a19e6f6e657f0d0ba7207",
+          "retrieved_at": "2026-11-24T13:41:48Z"
+        },
+        "1": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000626%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2402593.5%27&STOP_TIME=%27JD2488061.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "08f1470bccd5da6fd8eeed8bb09757f553f422d42c07e83b5a3fc9680fad5568",
+          "retrieved_at": "2026-11-24T13:41:51Z"
+        },
+        "2": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000626%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2402594.5%27&STOP_TIME=%27JD2488062.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "0eb248015990cc84c70af1e327ee283ccc500818430bdf4878b276212876af66",
+          "retrieved_at": "2026-11-24T13:41:53Z"
+        },
+        "3": {
+          "url": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2790000626%3B%27&EPHEM_TYPE=%27VECTORS%27&CENTER=%27500%4010%27&START_TIME=%27JD2402595.5%27&STOP_TIME=%27JD2488063.5%27&STEP_SIZE=%274+d%27&TIME_TYPE=%27UT%27&OUT_UNITS=%27AU-D%27&REF_PLANE=%27ECLIPTIC%27&REF_SYSTEM=%27ICRF%27&VEC_TABLE=%272%27&CSV_FORMAT=%27YES%27&VEC_CORR=%27NONE%27&OBJ_DATA=%27YES%27",
+          "sha256": "677ea0a4bbf2057eeb2c92d5620d10f28258ae37b3a275fce7b2db3bb9f922e9",
+          "retrieved_at": "2026-11-24T13:41:56Z"
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Interpolation agreement is not physical historical accuracy.",
+    "55P full grid ends 2099-12-27; historical subset ends 1980-01-02.",
+    "No continuous error bound or public chunking decision.",
+    "Metadata event lists are not exhaustive; Tempel 2 exact discovery day unresolved."
+  ]
+}
