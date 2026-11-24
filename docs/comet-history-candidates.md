@@ -12,20 +12,28 @@ as described in the [research README](../research/comet-history/README.md).
 No network acquisition occurs in this command. Run from the repository checkout:
 
 ```sh
-python3 - <<'PYTHON'
-from pathlib import Path
-from scripts.comet_history_candidate import construct, verify
-# Frozen pre-activation schema-2 inputs; never reconstruct from refreshed data.
-expected = construct(Path('tests/fixtures/comets-schema2'))
-print(verify(Path('data/comets'), expected))
-PYTHON
-COMET_HISTORY_CANDIDATE=data/comets npm run test:comets
+python3 scripts/comet_history_candidate.py
+python3 scripts/comet_history_candidate.py --verify
+COMET_HISTORY_CANDIDATE=.context/comet-candidates/history-v3 npm run test:comets
 ```
 
-The original candidate-builder CLI requires a schema-2 `data/comets` baseline;
-after activation use the explicit-baseline replay above. The test fixture is
-never staged or published and does not replace the retained complete rollback.
-For new candidates in a schema-2 research checkout, output must be a named directory under `.context/comet-candidates/`; aliases into
+The builder defaults to the frozen schema-2 baseline, authenticating its index
+against approved pin `b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567`
+and verifying every referenced payload before scientific replay. Shared writers
+reject this fixture and aliases into it. The fixture is never staged or published;
+[portable Git recovery](comet-activation.md#portable-rollback-preparation) preserves
+rollback availability without depending on a local Mac.
+
+To compare the committed production release directly with a fresh raw replay:
+
+```sh
+python3 - <<'PYTHON'
+from scripts.comet_history_candidate import ROOT, construct, verify
+print(verify(ROOT / 'data/comets', construct()))
+PYTHON
+```
+
+Output must be a named directory under `.context/comet-candidates/`; aliases into
 public data and descendants of existing candidates are rejected before replay.
 Candidate installation rechecks this under a namespace-wide lock, with locks and staging
 outside candidate inventories. Candidates are immutable: an existing

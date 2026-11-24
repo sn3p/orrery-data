@@ -18,8 +18,8 @@ release-pinned publication policy, not a general schema-3 science validator.
 A different index, metadata change or orbital solution needs scientific replay,
 reader compatibility checks and a reviewed update to the approved pin.
 
-The candidate builder and its raw-evidence replay remain unchanged. Restore the
-retained candidate or build/verify it as described in
+The candidate builder now uses the authenticated frozen schema-2 baseline; its
+scientific replay is unchanged. Restore the retained candidate or build/verify it as described in
 [the candidate contract](comet-history-candidates.md). Then:
 
 ```sh
@@ -83,6 +83,8 @@ No schema-2-only index or historical staging endpoint is added to production.
 
 ## Rollback and subsequent refresh
 
+The [portable Git recovery procedure](comet-activation.md#portable-rollback-preparation)
+restores the exact baseline on any checkout without requiring local retained files.
 During rollout, restore `rollback/comets` to the committed comet product, verify
 and redeploy the complete current site; preserve newer unrelated asteroid data.
 The transitional Orrery loader must still accept schema 2. For an app regression,

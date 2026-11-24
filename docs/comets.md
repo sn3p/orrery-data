@@ -97,6 +97,7 @@ python3 -m orrery_data refresh-comets --offline
 python3 -m orrery_data refresh-comets       # acquire only missing cached inputs
 python3 -m orrery_data refresh-comets --refresh  # explicitly reacquire twelve queries
 # After any refresh, regenerate the matching committed evidence offline.
+# Supports verified schema 2 or the approved schema-3 modern segments.
 python3 scripts/rebuild_comet_evidence.py
 python3 -m orrery_data verify-comets --directory data/comets
 python3 -m orrery_data verify-site --directory data
