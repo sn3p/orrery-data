@@ -38,6 +38,16 @@ function transport(t,f,gate) {
   });return calls;
 }
 const open=()=>Source.openLatest(base+'latest.json');
+test('historical objects reject a changed modern solution before loading payloads',async t=>{
+  for(const id of ['1P','55P']) {
+    const f=fixture((kind,index)=>{
+      if(kind==='index')for(const p of Object.values(index.objects.find(o=>o.id===id).segments[1].provenance))p.solution='JPL#76';
+    });
+    const calls=transport(t,f);
+    await assert.rejects(open(),/modern historical solution/);
+    assert.equal(calls.length,2);
+  }
+});
 test('metadata is eager, files lazy, modern owns exact transition and final date',async t=>{
   const f=fixture(),calls=transport(t,f),s=await open();assert.equal(calls.length,2);
   assert.equal(s.info.objects.length,6);assert.equal(s.info.objects[4].discovery.events[0].date.day,null);
