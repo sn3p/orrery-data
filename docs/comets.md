@@ -1,8 +1,14 @@
 # Comet catalogue
 
-The supported comet product is `comets/latest.json`, using
+The currently committed comet product is `comets/latest.json`, using
 `comet_contract_version: 2` in descriptor, index and objects. See the
 [wire format, scientific provenance and recovery contract](comet-contract.md).
+
+Production verification also accepts the exact approved historical schema-3
+release. See [production rollout and rollback](comet-production-rollout.md) for
+the coordinated replacement at this same URL. The schema-2 acquisition and
+reader contract below remains the pre-activation baseline; ordinary refresh
+cannot overwrite an installed schema-3 product.
 
 ## Catalogue contract
 
