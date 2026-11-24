@@ -150,7 +150,9 @@ redistributed artifacts; the code license does not relicense upstream data.
 ## Comet trajectories
 
 The separate [comet catalogue](docs/comets.md) provides validated Horizons
-trajectories for six curated comets, one file per selected object.
-Use `python3 -m orrery_data refresh-comets` for manual acquisition/export and
-`python3 -m orrery_data verify-comets` for offline verification. The existing
-asteroid contract and weekly refresh schedule remain unchanged.
+trajectories for six curated comets: six modern files plus historical segments
+for Halley and Tempel–Tuttle. The committed schema-3 replacement is subject to
+the [activation gates](docs/comet-activation.md). Use
+`python3 -m orrery_data verify-comets` for offline verification; ordinary
+`refresh-comets` rejects this pinned historical product. Future releases require
+scientific revalidation. The asteroid contract and weekly refresh remain unchanged.

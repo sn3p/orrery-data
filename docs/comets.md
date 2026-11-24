@@ -1,14 +1,16 @@
 # Comet catalogue
 
-The currently committed comet product is `comets/latest.json`, using
-`comet_contract_version: 2` in descriptor, index and objects. See the
-[wire format, scientific provenance and recovery contract](comet-contract.md).
+The committed product at `comets/latest.json` uses schema 3, with six unchanged
+schema-2 modern payloads and two schema-3 historical payloads. Halley starts
+1835-08-21 and Tempel–Tuttle starts 1865-12-22; the other four remain modern-only.
+Modern owns 1980-01-01 onward and all coverage ends 2099-12-30. See the
+[historical wire contract](comet-history-candidates.md) and
+[activation gates](comet-activation.md); committed does not mean deployed.
 
-Production verification also accepts the exact approved historical schema-3
-release. See [production rollout and rollback](comet-production-rollout.md) for
-the coordinated replacement at this same URL. The schema-2 acquisition and
-reader contract below remains the pre-activation baseline; ordinary refresh
-cannot overwrite an installed schema-3 product.
+The sections below document the preserved **schema-2 baseline**, its acquisition,
+science and transition reader. Ordinary refresh cannot overwrite schema 3.
+Production verification accepts only the exact approved historical pin;
+[rollout and rollback](comet-production-rollout.md) govern replacement.
 
 ## Catalogue contract
 

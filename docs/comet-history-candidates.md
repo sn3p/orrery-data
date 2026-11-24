@@ -1,8 +1,8 @@
 # Unpublished historical comet candidates and Orrery handoff
 
-This is a candidate contract, not the hosted product. `data/`, its schema-2
-producer, site staging and hosted latest remain unchanged. No deployment or
-Orrery application changes are part of this work. Discovery-based visibility is
+This describes the historical candidate contract and scientific replay. The
+activation change installs the approved candidate in `data/comets`; publication
+requires the separately gated rollout below. Discovery-based visibility is
 **app-owned**; event metadata does not hide objects or authorize extrapolation.
 
 ## Build and verify
@@ -12,12 +12,20 @@ as described in the [research README](../research/comet-history/README.md).
 No network acquisition occurs in this command. Run from the repository checkout:
 
 ```sh
-python3 scripts/comet_history_candidate.py --output .context/comet-candidates/history-v3
-python3 scripts/comet_history_candidate.py --output .context/comet-candidates/history-v3 --verify
-COMET_HISTORY_CANDIDATE=.context/comet-candidates/history-v3 npm run test:comets
+python3 - <<'PYTHON'
+from pathlib import Path
+from scripts.comet_history_candidate import construct, verify
+# Frozen pre-activation schema-2 inputs; never reconstruct from refreshed data.
+expected = construct(Path('tests/fixtures/comets-schema2'))
+print(verify(Path('data/comets'), expected))
+PYTHON
+COMET_HISTORY_CANDIDATE=data/comets npm run test:comets
 ```
 
-Output must be a named directory under `.context/comet-candidates/`; aliases into
+The original candidate-builder CLI requires a schema-2 `data/comets` baseline;
+after activation use the explicit-baseline replay above. The test fixture is
+never staged or published and does not replace the retained complete rollback.
+For new candidates in a schema-2 research checkout, output must be a named directory under `.context/comet-candidates/`; aliases into
 public data and descendants of existing candidates are rejected before replay.
 Candidate installation rechecks this under a namespace-wide lock, with locks and staging
 outside candidate inventories. Candidates are immutable: an existing

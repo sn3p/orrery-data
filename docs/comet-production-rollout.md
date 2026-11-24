@@ -1,7 +1,9 @@
 # Historical comet production rollout
 
-This support change does **not** activate schema 3. Committed `data/comets` and
-`comets/latest.json` remain unchanged until coordinated with Orrery's loader.
+The activation change replaces committed `data/comets` with the approved schema-3
+release. It remains a draft pending the deployment and acceptance gates recorded
+in [the activation record](comet-activation.md). Preparing or merging support
+code alone does not establish production readiness.
 The approved migration replaces that URL with schema 3. Older clients may break;
 there will be no permanent schema-2 API or versioned public catalogue.
 
