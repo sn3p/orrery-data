@@ -8,6 +8,14 @@
   },
   "pilots": {
     "1P": {
+      "baseline": {
+        "commit": "f126e471938ebe590ea6dceec379ae21e030c8b9",
+        "index": {
+          "url": "index-b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567.json",
+          "sha256": "b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567",
+          "bytes": 72528
+        }
+      },
       "solution": "JPL#75",
       "start": "1835-08-21",
       "start_jd": 2391511.5,
@@ -37,6 +45,9 @@
       ],
       "tolerance_au": 5.2e-05,
       "passed": true,
+      "baseline_position_limit_au": 5.2e-05,
+      "baseline_velocity_limit_au_per_day": 1.3e-05,
+      "overlap_max_velocity_difference_au_per_day": 0.0,
       "full_size": {
         "json_bytes": 2397702,
         "gzip_bytes": 961555,
@@ -80,6 +91,14 @@
       }
     },
     "55P": {
+      "baseline": {
+        "commit": "f126e471938ebe590ea6dceec379ae21e030c8b9",
+        "index": {
+          "url": "index-b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567.json",
+          "sha256": "b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567",
+          "bytes": 72528
+        }
+      },
       "solution": "JPL#J985/69",
       "start": "1865-12-22",
       "start_jd": 2402592.5,
@@ -109,6 +128,9 @@
       ],
       "tolerance_au": 5.2e-05,
       "passed": true,
+      "baseline_position_limit_au": 5.2e-05,
+      "baseline_velocity_limit_au_per_day": 1.3e-05,
+      "overlap_max_velocity_difference_au_per_day": 1.9505296923301248e-07,
       "full_size": {
         "json_bytes": 2145361,
         "gzip_bytes": 875940,

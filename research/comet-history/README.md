@@ -33,7 +33,8 @@ does not establish trajectory availability or a visibility policy.
 ## Pilot reproduction
 
 From the repository root, `python3 scripts/comet_history_pilot.py --acquire`
-explicitly permits serial downloads of eight missing JPL queries. Subsequent
+explicitly permits serial downloads of missing or corrupt JPL queries. Replies
+are fully validated before entering the cache. Subsequent
 `python3 scripts/comet_history_pilot.py` runs are offline and fail on absent or
 corrupt retained responses. Outputs are fixed under `.context/comet-history-pilot/`,
 never `data/`. Preserve that directory for replay; the raw files are intentionally
@@ -97,3 +98,41 @@ HTTP servers or depend on those fixtures; the exact selection is retained in the
 workspace evidence. Python 3.11/3.13 and the browser workflow were not run (server
 and image restrictions apply). No push/CI/publication was requested or performed.
 A final hosted-descriptor fetch matched the assessment's unchanged catalogue pin.
+
+
+## Review hardening
+
+All eight chat findings were confirmed before fixes. An absent query record was
+already a useful missing-input error; malformed records or missing referenced raw
+files now consistently report `Corrupt cache`. Explicit `--acquire` can repair
+corrupt entries; failed downloads leave no newly accepted record. Nonblocking
+writer locks serialize acquisition and protect the entire output run.
+
+`baseline.json` pins the original commit and index reference. First use reads
+immutable Git blobs and verifies the index and object SHA-256/length; retained
+baseline bytes support later offline runs without consulting `latest.json` or Git.
+A missing Git object on first use fails explicitly. Corrupt retained baselines fail
+rather than silently selecting another baseline. Baseline sizes use the original
+bytes directly, with one JSON decode per object.
+
+`passed` now requires every interpolation check AND every overlapping baseline
+position/velocity comparison to pass. Position tolerance remains 0.000052 AU;
+velocity compatibility tolerance is 0.000013 AU/day (one position budget per
+four-day interval). These are explicit numerical compatibility guards, not
+physical uncertainty estimates or a finalized public seam contract. Max velocity
+drift is zero for Halley and 1.95053e-7 AU/day for Tempel–Tuttle; both pass.
+
+The production and pilot paths now share header/endpoint/grid validation and
+Hermite evaluation; pilot velocity is the analytic derivative of that same
+interpolant. Invalid metadata dates, structures and source-file references produce
+DataError. Regression coverage includes rejected downloads/recovery, cache
+corruption/concurrency, pinned-baseline corruption/replay, invalid metadata,
+incorrect header dates, polynomial derivatives and a complete run whose
+interpolation passes but baseline drift must fail.
+
+Review verification: 42 distinct focused Python tests passed (the 41-test affected
+suite followed by the final 13-test pilot suite containing one additional test).
+Offline replay preserves every previously reported measurement and artifact hash;
+the result record adds the pin, explicit limits and maximum velocity difference.
+No public data bytes changed. No push, PR, CI run or publication occurred. The full
+CI suites were not run; earlier server/browser restrictions still apply.
