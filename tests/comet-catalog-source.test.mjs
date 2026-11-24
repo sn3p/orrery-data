@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import CometSource, { interpolateComet } from '../consumer/CometCatalogSource.js';
 
-const root = path.resolve('tests/fixtures/comets-schema2');
+import {ROOT, SCHEMA2_BASELINE as root} from './comet-fixtures.mjs';
 const base = 'https://example.test/sub/comets/';
 async function fixture(t, fault) {
   const calls = [];
@@ -170,7 +170,7 @@ test('a pre-aborted reader never starts or joins object work', async t => {
 
 test('shared discovery transport preserves asteroid fixtures and rejects bounded descriptor errors', async t => {
   const { default: CatalogSource } = await import('../consumer/CatalogSource.js');
-  const directory = path.resolve('tests/fixtures/browser-v1/ties');
+  const directory = path.join(ROOT, 'tests/fixtures/browser-v1/ties');
   const requests = [];
   let fault;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -184,7 +184,7 @@ test('shared discovery transport preserves asteroid fixtures and rejects bounded
   for await (const event of source.read({ start: 0, end: source.info.counts.discovery_export })) {
     if (event.type === 'batch') rows.push(...event.records);
   }
-  const expected = JSON.parse(await fs.readFile('tests/fixtures/consumer-v1/ties/full/catalog.json'));
+  const expected = JSON.parse(await fs.readFile(path.join(ROOT,'tests/fixtures/consumer-v1/ties/full/catalog.json')));
   assert.deepEqual(rows, expected);
   assert.equal(requests[0].options.cache, 'no-cache');
   assert.equal(requests[0].options.redirect, 'error');
@@ -421,7 +421,7 @@ test('closing one source aborts only its pending load and leaves the other cache
 });
 
 test('shared identity fixtures agree with producer whitespace and ID rules', async t => {
-  const cases = JSON.parse(await fs.readFile('tests/fixtures/comet-identities.json'));
+  const cases = JSON.parse(await fs.readFile(path.join(ROOT,'tests/fixtures/comet-identities.json')));
   for (const item of cases) {
     await catalogueFixture(t, index => {
       const entry = index.objects[0]; entry.id = item.id; entry.name = item.name;

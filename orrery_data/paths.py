@@ -7,6 +7,7 @@ import stat
 import unicodedata
 
 from .formats import DataError
+from .comet_baseline import SCHEMA2_BASELINE
 
 
 CANDIDATE_NAME = re.compile(r"(?:snapshot|export|release|delivery)-v1-[a-f0-9]{64}")
@@ -85,6 +86,8 @@ def paths_overlap(first, second):
 def validate_writable_path(path, *, label="Output", protected_roots=()):
     """Reject named candidate ancestors and marker-bearing target directories."""
     resolved = resolved_path(path)
+    if path_within(resolved, SCHEMA2_BASELINE):
+        raise DataError(f'{label} must be outside immutable frozen schema-2 baseline: {SCHEMA2_BASELINE}')
     for root in protected_roots:
         if path_within(resolved, root):
             raise DataError(f"{label} must be outside immutable inputs: {root}")

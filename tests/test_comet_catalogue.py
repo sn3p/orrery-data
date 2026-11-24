@@ -4,6 +4,7 @@ import gzip
 import io
 import json
 from pathlib import Path
+from scripts.comet_baseline import SCHEMA2_BASELINE
 import shutil
 import tempfile
 import unittest
@@ -23,7 +24,7 @@ class Catalogue(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.output = self.root / 'data/comets'
-        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.output)
+        shutil.copytree(SCHEMA2_BASELINE, self.output)
         self.index = read_json(self.output / read_json(self.output / 'latest.json')['index']['url'])
 
     def install_index(self, index):

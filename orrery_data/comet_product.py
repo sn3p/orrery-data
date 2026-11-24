@@ -268,6 +268,13 @@ def refresh_comets(cache, output, *, acquire_records, build, verify, inspect):
     cache, output = Path(cache), Path(output)
     # Check the lexical target before resolving aliases for all locks/staging.
     managed_files(output)
+    marker = output / 'latest.json'
+    if marker.is_file() and marker.stat().st_size <= 4096:
+        descriptor = read_json(marker)
+        if isinstance(descriptor, dict) and descriptor.get('comet_contract_version') == 3:
+            raise DataError('refresh-comets cannot refresh an immutable schema-3 historical release; '
+                            'prepare a scientifically verified replacement as described in '
+                            'docs/comet-production-rollout.md')
     output = validate_writable_path(output, label='Comet output')
     site = output.parent
     # A failed acquisition must not leave locks/raw inputs in either product.

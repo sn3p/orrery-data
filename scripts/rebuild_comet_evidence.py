@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from orrery_data import comets
+from orrery_data.comet_rollout import verify_current_comets
 from orrery_data.comet_product import serialize_states, measure_interpolation
 from orrery_data.formats import DataError
 from orrery_data.horizons import parse_response, read_raw
@@ -35,8 +35,14 @@ def rebuild(directory, cache, output):
     directory, cache, output = directory.resolve(), cache.resolve(), output.resolve()
     lock = site_lock_path(directory.parent)
     with writer_lock(lock):
-        verified = comets.verify_comets(directory)
+        verified = verify_current_comets(directory)
         index = read_json(directory / verified['pin']['url'])
+        if index['comet_contract_version'] == 3:
+            # Replay the retained modern provenance; historical quarter-point
+            # evidence is independently replayed by comet_history_candidate.py.
+            index = dict(index, objects=[dict(
+                next(segment for segment in entry['segments'] if segment['key'] == 'modern'),
+                id=entry['id'], name=entry['name']) for entry in index['objects']])
         targets = {entry['id']: entry['name'] for entry in index['objects']}
         evidence = {}
         for entry in index['objects']:

@@ -17,6 +17,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import comet_history_pilot as pilot
+from scripts.comet_baseline import SCHEMA2_BASELINE, authenticate_baseline
 from orrery_data.comet_product import CometContract, inspect_comets, interpolate_state
 from orrery_data.formats import DataError
 from orrery_data.paths import validate_disjoint_paths, path_within
@@ -107,13 +108,15 @@ def snapshot_modern(modern):
     """Capture validated bytes while excluding refresh publication/pruning."""
     modern = Path(modern).resolve()
     with writer_lock(site_lock_path(modern.parent)):
-        _, baseline = inspect_comets(modern, contract=CometContract(2))
+        report, baseline = inspect_comets(modern, contract=CometContract(2))
+        if modern == SCHEMA2_BASELINE.resolve():
+            authenticate_baseline(report)
         files = {e['data']['url']: (modern / e['data']['url']).read_bytes()
                  for e in baseline['objects']}
     return baseline, files
 
 
-def construct(modern=ROOT / 'data/comets'):
+def construct(modern=SCHEMA2_BASELINE):
     """Revalidate raw model identity and all serialized historical intervals."""
     baseline, modern_files = snapshot_modern(modern)
     if [e['id'] for e in baseline['objects']] != IDS:
