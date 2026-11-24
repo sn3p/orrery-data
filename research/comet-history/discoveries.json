@@ -1,0 +1,488 @@
+{
+  "experimental": true,
+  "status": "unpublished research metadata; not a public wire contract",
+  "sources": {
+    "sbdb": {
+      "url": "https://ssd-api.jpl.nasa.gov/doc/sbdb.html",
+      "description": "Raw per-object discovery records retained under sources/; catalogue facts are not silently relabelled.",
+      "checked_on": "2026-11-24"
+    },
+    "halley": {
+      "url": "https://science.nasa.gov/solar-system/comets/1p-halley/",
+      "checked_on": "2026-11-24"
+    },
+    "halley-history": {
+      "url": "https://aas.org/posts/news/2020/06/month-astronomical-history-may-2020",
+      "checked_on": "2026-11-24"
+    },
+    "encke": {
+      "url": "https://science.nasa.gov/solar-system/comets/2p-encke/",
+      "checked_on": "2026-11-24"
+    },
+    "tempel-tuttle": {
+      "url": "https://science.nasa.gov/solar-system/comets/55p-tempel-tuttle/",
+      "checked_on": "2026-11-24"
+    },
+    "tempel-tuttle-history": {
+      "url": "https://pages.astro.umd.edu/~farnham/tt/tthist.html",
+      "checked_on": "2026-11-24"
+    },
+    "tempel1": {
+      "url": "https://science.nasa.gov/solar-system/comets/9p-tempel-1/",
+      "checked_on": "2026-11-24"
+    },
+    "67p": {
+      "url": "https://arcnav.psi.edu/urn:nasa:pds:context:target:comet.67p_churyumov-gerasimenko",
+      "checked_on": "2026-11-24"
+    },
+    "tempel1-history": {
+      "url": "https://deepimpact.astro.umd.edu/science/tempel1.html",
+      "checked_on": "2026-11-24"
+    },
+    "tempel2-paper": {
+      "url": "https://www.sciencedirect.com/science/article/abs/pii/S0019103516307722",
+      "checked_on": "2026-11-24",
+      "note": "Indexed abstract reports July 4; full publisher page inaccessible (403). Exact-day conflict unresolved."
+    }
+  },
+  "objects": [
+    {
+      "id": "1P",
+      "catalogue_discovery": {
+        "citation": null,
+        "name": null,
+        "who": "Palitzsch, Johann Georg",
+        "location": "",
+        "site": null,
+        "discovery": "Discovered 1758-12-25 by Palitzsch, Johann Georg at ",
+        "cref": null,
+        "date": "1758-Dec-25",
+        "ref": "comet.dis"
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=1P&discovery=true&full-prec=true",
+        "raw_file": "sources/1P-sbdb.json",
+        "sha256": "51be713b1d74961afbe52ab6426a7f35b6762be2b42d87db973fa476f74c0ce8",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "earlier_sighting",
+          "date": {
+            "year": -239,
+            "month": null,
+            "day": null,
+            "precision": "year",
+            "calendar": "historical-unspecified",
+            "year_numbering": "astronomical"
+          },
+          "people": [],
+          "sources": [
+            "halley-history"
+          ],
+          "certainty": "documented",
+          "note": "240 BCE; earliest securely identified recorded apparition, not a known original discovery."
+        },
+        {
+          "kind": "recovery",
+          "date": {
+            "year": 1758,
+            "month": 12,
+            "day": 25,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Johann Georg Palitzsch"
+          ],
+          "sources": [
+            "sbdb",
+            "halley"
+          ],
+          "certainty": "documented",
+          "note": "SBDB calls this discovery; historical interpretation is the predicted return/recovery."
+        }
+      ],
+      "event_inventory_complete": false
+    },
+    {
+      "id": "2P",
+      "catalogue_discovery": {
+        "discovery": "Discovered 1786-01-17 by Mechain, Pierre F. A. at ",
+        "location": "",
+        "site": null,
+        "cref": null,
+        "ref": "comet.dis",
+        "date": "1786-Jan-17",
+        "name": null,
+        "who": "Mechain, Pierre F. A.",
+        "citation": null
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=2P&discovery=true&full-prec=true",
+        "raw_file": "sources/2P-sbdb.json",
+        "sha256": "f28bb462edd28950edb2462c59e1367edb3cba12fcda01934e8d7f25208fed34",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "discovery",
+          "date": {
+            "year": 1786,
+            "month": 1,
+            "day": 17,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Pierre Méchain"
+          ],
+          "sources": [
+            "sbdb",
+            "encke"
+          ],
+          "certainty": "documented",
+          "note": null
+        }
+      ],
+      "event_inventory_complete": false
+    },
+    {
+      "id": "55P",
+      "catalogue_discovery": {
+        "site": null,
+        "location": "Harvard College Observatory, Massachusetts",
+        "discovery": "Discovered 1866-01-06 by Tuttle, Horace at Harvard College Observatory, Massachusetts",
+        "who": "Tuttle, Horace",
+        "citation": null,
+        "name": null,
+        "ref": "comet.dis",
+        "date": "1866-Jan-06",
+        "cref": null
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=55P&discovery=true&full-prec=true",
+        "raw_file": "sources/55P-sbdb.json",
+        "sha256": "d840e8cee786b8092b8472c2bfeaf6ff18757af073759f86abcc4bac307db037",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "earlier_sighting",
+          "date": {
+            "year": 1366,
+            "month": null,
+            "day": null,
+            "precision": "year",
+            "calendar": "historical-unspecified",
+            "year_numbering": "astronomical"
+          },
+          "people": [],
+          "sources": [
+            "tempel-tuttle-history"
+          ],
+          "certainty": "documented",
+          "note": null
+        },
+        {
+          "kind": "earlier_sighting",
+          "date": {
+            "year": 1699,
+            "month": null,
+            "day": null,
+            "precision": "year",
+            "calendar": "historical-unspecified",
+            "year_numbering": "astronomical"
+          },
+          "people": [],
+          "sources": [
+            "tempel-tuttle-history"
+          ],
+          "certainty": "documented",
+          "note": null
+        },
+        {
+          "kind": "independent_discovery",
+          "date": {
+            "year": 1865,
+            "month": 12,
+            "day": null,
+            "precision": "month",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Ernst Wilhelm Tempel"
+          ],
+          "sources": [
+            "tempel-tuttle",
+            "tempel-tuttle-history"
+          ],
+          "certainty": "documented",
+          "note": "Day unspecified by retained historical sources."
+        },
+        {
+          "kind": "independent_discovery",
+          "date": {
+            "year": 1866,
+            "month": 1,
+            "day": 6,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Horace Tuttle"
+          ],
+          "sources": [
+            "sbdb",
+            "tempel-tuttle"
+          ],
+          "certainty": "documented",
+          "note": "Exact day is the SBDB catalogue assertion; independent historical source establishes year only."
+        },
+        {
+          "kind": "recovery",
+          "date": {
+            "year": 1965,
+            "month": null,
+            "day": null,
+            "precision": "year",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [],
+          "sources": [
+            "tempel-tuttle-history"
+          ],
+          "certainty": "documented",
+          "note": null
+        },
+        {
+          "kind": "recovery",
+          "date": {
+            "year": 1997,
+            "month": 3,
+            "day": 4,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Karen Meech",
+            "Olivier Hainaut",
+            "James Bauer"
+          ],
+          "sources": [
+            "tempel-tuttle-history"
+          ],
+          "certainty": "documented",
+          "note": null
+        }
+      ],
+      "event_inventory_complete": false
+    },
+    {
+      "id": "9P",
+      "catalogue_discovery": {
+        "location": "Marseilles, France",
+        "site": null,
+        "ref": "comet.dis",
+        "date": "1867-Apr-03",
+        "cref": null,
+        "discovery": "Discovered 1867-04-03 by Tempel, William at Marseilles, France",
+        "name": null,
+        "citation": null,
+        "who": "Tempel, William"
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=9P&discovery=true&full-prec=true",
+        "raw_file": "sources/9P-sbdb.json",
+        "sha256": "947f97d1daaf6e35e9a7228f6d49d07aad58ecb7dcf3ac166f4408a749637dfe",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "discovery",
+          "date": {
+            "year": 1867,
+            "month": 4,
+            "day": 3,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Ernst Wilhelm Tempel"
+          ],
+          "sources": [
+            "sbdb",
+            "tempel1"
+          ],
+          "certainty": "documented",
+          "note": null
+        },
+        {
+          "kind": "photographic_observation",
+          "date": {
+            "year": 1967,
+            "month": 6,
+            "day": 8,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Elizabeth Roemer"
+          ],
+          "sources": [
+            "tempel1-history"
+          ],
+          "certainty": "documented",
+          "note": "Exposure later identified in 1968 and confirmed by 1972 recovery."
+        },
+        {
+          "kind": "recovery",
+          "date": {
+            "year": 1972,
+            "month": 1,
+            "day": 11,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Elizabeth Roemer",
+            "L. M. Vaughn"
+          ],
+          "sources": [
+            "tempel1-history"
+          ],
+          "certainty": "documented",
+          "note": "Confirmed recovery; establishes the earlier photographic identification."
+        }
+      ],
+      "event_inventory_complete": false
+    },
+    {
+      "id": "10P",
+      "catalogue_discovery": {
+        "site": null,
+        "discovery": "Discovered 1873-07-03 by Tempel, William at Milan, Italy",
+        "location": "Milan, Italy",
+        "name": null,
+        "citation": null,
+        "who": "Tempel, William",
+        "cref": null,
+        "ref": "comet.dis",
+        "date": "1873-Jul-03"
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=10P&discovery=true&full-prec=true",
+        "raw_file": "sources/10P-sbdb.json",
+        "sha256": "307ba607c75a774881bfe59050cb98106e617eae2c6eb9f533cdfd212547a4ea",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "discovery",
+          "date": {
+            "year": 1873,
+            "month": 7,
+            "day": null,
+            "precision": "month",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Ernst Wilhelm Tempel"
+          ],
+          "sources": [
+            "sbdb",
+            "tempel2-paper"
+          ],
+          "certainty": "day-disputed",
+          "note": "July 3 in SBDB versus July 4 in an indexed research abstract. Retain the raw catalogue day; curated event deliberately uses month precision pending resolution."
+        }
+      ],
+      "event_inventory_complete": false
+    },
+    {
+      "id": "67P",
+      "catalogue_discovery": {
+        "name": null,
+        "site": null,
+        "date": "1969-Oct-22",
+        "location": "Alma-Ata Observatory, Russia",
+        "ref": "comet.dis",
+        "discovery": "Discovered 1969-10-22 by Churyumov, Klim Ivanovic at Alma-Ata Observatory, Russia",
+        "cref": null,
+        "who": "Churyumov, Klim Ivanovic",
+        "citation": null
+      },
+      "catalogue_provenance": {
+        "url": "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=67P&discovery=true&full-prec=true",
+        "raw_file": "sources/67P-sbdb.json",
+        "sha256": "1201fd0980d33a5d51fefb46b5daeb20518d246b173ccf3981b1a57b2c39ed81",
+        "retrieved_on": "2026-11-24",
+        "retrieved_at": null,
+        "note": "Original assessment recorded acquisition date, not precise clock time; do not invent a timestamp."
+      },
+      "events": [
+        {
+          "kind": "photographic_observation",
+          "date": {
+            "year": 1969,
+            "month": 9,
+            "day": 11,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Svetlana Gerasimenko"
+          ],
+          "sources": [
+            "67p"
+          ],
+          "certainty": "documented",
+          "note": null
+        },
+        {
+          "kind": "discovery_recognition",
+          "date": {
+            "year": 1969,
+            "month": 10,
+            "day": 22,
+            "precision": "day",
+            "calendar": "gregorian",
+            "year_numbering": "astronomical"
+          },
+          "people": [
+            "Klim Churyumov",
+            "Svetlana Gerasimenko"
+          ],
+          "sources": [
+            "sbdb",
+            "67p"
+          ],
+          "certainty": "documented",
+          "note": "Catalogue credits Churyumov; PDS distinguishes Gerasimenko’s exposure from identification. Preserve both contributors."
+        }
+      ],
+      "event_inventory_complete": false
+    }
+  ]
+}
