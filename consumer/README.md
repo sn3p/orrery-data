@@ -11,6 +11,8 @@ relative paths):
 ```text
 CatalogSource.js
 CometCatalogSource.js
+CometHistorySource.js
+cometHistoryContract.js
 cometSourceCore.js
 contract.js
 transport.js
@@ -47,3 +49,8 @@ For the comet catalogue use `CometCatalogSource.js` and the separate
 The comet reader requires `cometSourceCore.js`, `contract.js` and `transport.js`.
 The core retains interpolation,
 validation, verified loading and cancellation for the supported catalogue.
+
+The unpublished schema-3 candidate adapter is `CometHistorySource.js`, with
+`cometHistoryContract.js`, `cometSourceCore.js`, `contract.js`, and `transport.js`.
+It does not replace the hosted schema-2 adapter. See the
+[candidate contract and Orrery handoff](../docs/comet-history-candidates.md).

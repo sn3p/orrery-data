@@ -15,8 +15,8 @@ const EDGE_WHITESPACE = '\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f 
   + '\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
 const validName = (name, id) => typeof name === 'string' && name.startsWith(id + '/')
   && name.length > id.length + 1 && !EDGE_WHITESPACE.includes(name[0]) && !EDGE_WHITESPACE.includes(name.at(-1)) && !/[\x00-\x1f\x7f]/.test(name);
-const CONVENTIONS = { center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
-  velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' };
+export const CONVENTIONS = Object.freeze({ center: 'Sun', frame: 'Ecliptic J2000', time: 'UT', position_units: 'AU',
+  velocity_units: 'AU/day', correction: 'NONE', interpolation: 'cubic-hermite', encoding: 'uniform-state-v1' });
 function reference(ref, prefix, max) {
   fields(ref, ['url', 'sha256', 'bytes']);
   requireValue(/^[a-f0-9]{64}$/.test(ref.sha256) && ref.url === `${prefix}${ref.sha256}.json`
@@ -34,14 +34,19 @@ function utcTimestamp(value) {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().replace('.000Z', 'Z') === value;
 }
-export function interpolateComet(series, jd) {
+export function interpolateCometState(series, jd) {
   const offset = (jd - series.start) / series.step;
   requireValue(Number.isFinite(jd) && offset >= 0 && offset <= series.states.length - 1, 'date coverage');
   const index = Math.min(Math.floor(offset), series.states.length - 2), t = offset - index;
   const a = series.states[index], b = series.states[index + 1], h = series.step;
-  return [0, 1, 2].map(k => (2*t**3-3*t*t+1)*a[k] + (t**3-2*t*t+t)*h*a[k+3]
+  const position = [0, 1, 2].map(k => (2*t**3-3*t*t+1)*a[k] + (t**3-2*t*t+t)*h*a[k+3]
     + (-2*t**3+3*t*t)*b[k] + (t**3-t*t)*h*b[k+3]);
+  const velocity = [0,1,2].map(k=>((6*t*t-6*t)*a[k]+(3*t*t-4*t+1)*h*a[k+3]
+    +(-6*t*t+6*t)*b[k]+(3*t*t-2*t)*h*b[k+3])/h);
+  return {position,velocity};
 }
+
+export function interpolateComet(series,jd) { return interpolateCometState(series,jd).position; }
 
 function version(value) { requireValue(value.comet_contract_version === 2, 'contract version'); }
 export function validateComet(value, id) {
@@ -55,6 +60,38 @@ export function validateComet(value, id) {
     && states.every(row => Array.isArray(row) && row.length === 6 && row.every(Number.isFinite)), 'states');
   return value;
 }
+export function validateCometIndex(index) {
+  fields(index, ['comet_contract_version', 'objects']); version(index);
+  requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
+  const seen = new Set();
+  index.objects.forEach(entry => {
+    fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
+    requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
+    seen.add(entry.id);
+    requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
+      && entry.coverage.length === 2 && entry.coverage[0] === START
+      && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
+    reference(entry.data, 'objects/', 2 * 1024 * 1024);
+    fields(entry.provenance, ['vectors', 'midpoints']);
+    for (const [kind, source] of Object.entries(entry.provenance)) {
+      fields(source, ['url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version']);
+      requireValue(Object.values(source).every(v => typeof v === 'string' && v.length)
+        && ['1.2', '1.3'].includes(source.api_version) && utcTimestamp(source.retrieved_at)
+        && source.url === sourceQuery(entry.id, kind === 'midpoints')
+        && source.target === entry.name && /^JPL#[A-Za-z0-9\/._-]+$/.test(source.solution)
+        && /^[a-f0-9]{64}$/.test(source.sha256), 'provenance');
+    }
+    requireValue(entry.provenance.vectors.solution === entry.provenance.midpoints.solution, 'solution');
+    const v = entry.validation;
+    fields(v, ['method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references']);
+    requireValue(v.method === 'all-midpoints-final-serialized' && v.samples === COUNT - 1
+      && v.tolerance_au === 0.000052 && Number.isFinite(v.max_error_au)
+      && v.max_error_au >= 0 && v.max_error_au <= v.tolerance_au && Array.isArray(v.references)
+      && v.references.length > 0 && v.references.every(r => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
+      && v.references.some(r => r[0] === v.worst_jd), 'validation');
+  });
+  return index;
+}
 // A source pins one index. A new visit/retry creates a new source; close aborts
 // outstanding reads. Selection and renderer generation remain the app's concern.
 export class CometSource {
@@ -66,35 +103,7 @@ export class CometSource {
     const bytes = await fetchVerified(latest.index, indexURL, signal, 'comet');
     check(signal);
     const index = decode(bytes);
-    fields(index, ['comet_contract_version', 'objects']); version(index);
-    requireValue(Array.isArray(index.objects) && index.objects.length > 0, 'catalogue');
-    const seen = new Set();
-    index.objects.forEach(entry => {
-      fields(entry, ['id', 'name', 'coverage', 'data', 'provenance', 'validation']);
-      requireValue(validId(entry.id) && !seen.has(entry.id), 'identity');
-      seen.add(entry.id);
-      requireValue(validName(entry.name, entry.id) && Array.isArray(entry.coverage)
-        && entry.coverage.length === 2 && entry.coverage[0] === START
-        && entry.coverage[1] === START + STEP * (COUNT - 1), 'metadata');
-      reference(entry.data, 'objects/', 2 * 1024 * 1024);
-      fields(entry.provenance, ['vectors', 'midpoints']);
-      for (const [kind, source] of Object.entries(entry.provenance)) {
-        fields(source, ['url', 'sha256', 'retrieved_at', 'target', 'solution', 'header', 'api_version']);
-        requireValue(Object.values(source).every(v => typeof v === 'string' && v.length)
-          && ['1.2', '1.3'].includes(source.api_version) && utcTimestamp(source.retrieved_at)
-          && source.url === sourceQuery(entry.id, kind === 'midpoints')
-          && source.target === entry.name && /^JPL#[A-Za-z0-9\/._-]+$/.test(source.solution)
-          && /^[a-f0-9]{64}$/.test(source.sha256), 'provenance');
-      }
-      requireValue(entry.provenance.vectors.solution === entry.provenance.midpoints.solution, 'solution');
-      const v = entry.validation;
-      fields(v, ['method', 'samples', 'max_error_au', 'worst_jd', 'tolerance_au', 'references']);
-      requireValue(v.method === 'all-midpoints-final-serialized' && v.samples === COUNT - 1
-        && v.tolerance_au === 0.000052 && Number.isFinite(v.max_error_au)
-        && v.max_error_au >= 0 && v.max_error_au <= v.tolerance_au && Array.isArray(v.references)
-        && v.references.length > 0 && v.references.every(r => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite))
-        && v.references.some(r => r[0] === v.worst_jd), 'validation');
-    });
+    validateCometIndex(index);
     check(signal);
     return new CometSource(indexURL, latest.index.sha256, index);
   }
@@ -102,14 +111,19 @@ export class CometSource {
     Object.defineProperties(this, { url: { value: url }, sourceId: { value: sourceId, enumerable: true },
       info: { value: freeze(info), enumerable: true } });
     this.lifetime = new AbortController();
+    this.entries = info.objects;
     this.cache = new Map();
     this.pending = new Map();
   }
   async load(id, { signal } = {}) {
     check(signal); check(this.lifetime.signal);
-    const entry = this.info.objects.find(v => v.id === id);
+    const entry = this.entries.find(v => v.id === id);
     requireValue(entry, 'selection');
-    if (this.cache.has(id)) return this.cache.get(id);
+    if (this.cache.has(id)) {
+      const value = this.cache.get(id);
+      this.cache.delete(id); this.cache.set(id, value);
+      return value;
+    }
     let pending = this.pending.get(id);
     if (!pending) {
       const controller = new AbortController();
@@ -117,15 +131,11 @@ export class CometSource {
       this.pending.set(id, pending);
       pending.promise = (async () => {
         try {
-          const bytes = await fetchVerified(entry.data,
-            new URL(entry.data.url, this.url).href, controller.signal, 'comet');
+          const bytes = await this.fetchEntry(entry, controller.signal);
           check(controller.signal);
-          const value = validateComet(decode(bytes), id);
-          for (const row of entry.validation.references) requireValue(
-            Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
-            'interpolation tolerance');
+          const value = this.validatePayload(decode(bytes), entry);
           check(controller.signal);
-          this.cache.set(id, freeze(value));
+          this.cacheValue(id, freeze(value));
           return value;
         } finally {
           pending.settled = true;
@@ -157,5 +167,16 @@ export class CometSource {
       if (signals.some(signal => signal.aborted)) cancel();
     });
   }
+  fetchEntry(entry, signal) {
+    return fetchVerified(entry.data, new URL(entry.data.url, this.url).href, signal, 'comet');
+  }
+  validatePayload(value, entry) {
+    validateComet(value, entry.id);
+    for (const row of entry.validation.references) requireValue(
+      Math.hypot(...interpolateComet(value.series, row[0]).map((v, k) => v - row[k + 1])) <= 0.000052,
+      'interpolation tolerance');
+    return value;
+  }
+  cacheValue(id, value) { this.cache.set(id, value); }
   close() { this.lifetime.abort(); this.cache.clear(); }
 }
