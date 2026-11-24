@@ -29,6 +29,22 @@ class HistoryCandidateTests(unittest.TestCase):
             with self.subTest(mutate=mutate), patch.object(candidate.pilot, 'validate_metadata', return_value=value), self.assertRaises(DataError):
                 candidate.construct()
 
+    def test_public_metadata_semantics_do_not_depend_on_pilot_validation(self):
+        original = candidate.pilot.validate_metadata(candidate.ROOT/'research/comet-history')
+        mutations = [
+            lambda o:o['events'][0]['date'].update(precision='invalid'),
+            lambda o:o['events'][0]['date'].update(calendar='invalid'),
+            lambda o:o['events'][0]['date'].update(year_numbering='civil'),
+            lambda o:o['events'][0]['date'].update(month=99),
+            lambda o:o['events'][0]['date'].update(precision='day',year=2026,month=2,day=30),
+            lambda o:o['events'][0].update(kind='fiction'),
+            lambda o:o['catalogue_provenance'].update(raw_file='../source'),
+        ]
+        for mutation in mutations:
+            value=copy.deepcopy(original);mutation(value['objects'][0])
+            with self.subTest(mutation=mutation),self.assertRaises(DataError):candidate.validate_metadata(value)
+            with patch.object(candidate.pilot,'validate_metadata',return_value=value),self.assertRaises(DataError):candidate.construct()
+
     def test_changed_historical_target_or_solution_rejected_before_acquisition(self):
         _, original = candidate.inspect_comets(candidate.ROOT/'data/comets', contract=candidate.CometContract(2))
         for field in ('name', 'solution'):

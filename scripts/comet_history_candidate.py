@@ -43,7 +43,7 @@ def interval(start, end, inclusive=True):
 
 
 def validate_metadata(value):
-    """Public metadata structure in addition to the pilot's source/date checks."""
+    """Complete public metadata validation, independent of source acquisition."""
     def fields(obj, required, optional=()):
         if not isinstance(obj, dict) or not set(required) <= obj.keys() or not obj.keys() <= set(required) | set(optional):
             raise DataError('Invalid public metadata fields')
@@ -70,7 +70,8 @@ def validate_metadata(value):
         require(url.scheme == 'https' and url.hostname and not url.username and not url.password)
         day(source['checked_on'])
         require(all(text(source[k]) for k in ('note', 'description') if k in source))
-    require(isinstance(value['objects'], list) and [o.get('id') for o in value['objects'] if isinstance(o, dict)] == IDS)
+    require(isinstance(value['objects'], list) and len(value['objects']) == len(IDS)
+            and all(isinstance(o, dict) for o in value['objects']) and [o.get('id') for o in value['objects']] == IDS)
     for obj in value['objects']:
         fields(obj, ['id', 'catalogue_discovery', 'catalogue_provenance', 'events', 'event_inventory_complete'])
         require(obj['event_inventory_complete'] is False)
@@ -78,7 +79,7 @@ def validate_metadata(value):
         require(all(nullable(v) for v in obj['catalogue_discovery'].values()))
         p = obj['catalogue_provenance']
         fields(p, ['url','raw_file','sha256','retrieved_on','retrieved_at','note'])
-        require(p['url'] == f"https://ssd-api.jpl.nasa.gov/sbdb.api?sstr={obj['id']}&discovery=true&full-prec=true"
+        require(p['raw_file'] == f"sources/{obj['id']}-sbdb.json" and p['url'] == f"https://ssd-api.jpl.nasa.gov/sbdb.api?sstr={obj['id']}&discovery=true&full-prec=true"
                 and isinstance(p['sha256'], str) and bool(re.fullmatch(r'[a-f0-9]{64}', p['sha256'])) and nullable(p['note']))
         day(p['retrieved_on'])
         if p['retrieved_at'] is not None:
@@ -92,7 +93,22 @@ def validate_metadata(value):
                 and isinstance(event['sources'], list) and bool(event['sources'])
                 and all(text(v) and v in value['sources'] for v in event['sources']))
             fields(event['date'], ['year','month','day','precision','calendar','year_numbering'])
-            require(type(event['date']['year']) is int and abs(event['date']['year']) <= 9999)
+            d = event['date']
+            require(event['kind'] in ('discovery', 'independent_discovery', 'recovery', 'earlier_sighting',
+                                      'photographic_observation', 'discovery_recognition'))
+            require(type(d['year']) is int and abs(d['year']) <= 9999
+                    and d['year_numbering'] == 'astronomical'
+                    and d['calendar'] in ('gregorian', 'historical-unspecified')
+                    and d['precision'] in ('year', 'month', 'day'))
+            if d['precision'] == 'year':
+                require(d['month'] is None and d['day'] is None)
+            else:
+                require(type(d['month']) is int and 1 <= d['month'] <= 12)
+                if d['precision'] == 'month':
+                    require(d['day'] is None)
+                else:
+                    require(type(d['day']) is int and d['calendar'] == 'gregorian' and d['year'] > 0)
+                    day(f"{d['year']:04d}-{d['month']:02d}-{d['day']:02d}")
 
 
 def construct(modern=ROOT / 'data/comets'):
