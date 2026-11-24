@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import CometSource, { interpolateComet } from '../consumer/CometCatalogSource.js';
 
-const root = path.resolve('data/comets');
+const root = path.resolve('tests/fixtures/comets-schema2');
 const base = 'https://example.test/sub/comets/';
 async function fixture(t, fault) {
   const calls = [];

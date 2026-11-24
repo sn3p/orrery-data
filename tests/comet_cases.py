@@ -61,7 +61,7 @@ class CometCases(CometFixture):
         self.root = Path(tmp.name)
         self.output = self.root / 'data' / self.product_name
         self.output.parent.mkdir()
-        shutil.copytree(ROOT / 'data' / self.product_name, self.output)
+        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.output)
 
     def test_committed_projection_and_fresh_cli(self):
         result = self.comets.verify_comets(self.output)
@@ -253,7 +253,7 @@ class PreflightCases(CometFixture):
         self.site = self.root / 'data'
         self.output = self.site / self.product_name
         shutil.copytree(ROOT / 'tests/fixtures/browser-v1/ties', self.site)
-        shutil.copytree(ROOT / 'data' / self.product_name, self.output)
+        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.output)
 
     def snapshot(self):
         result = {}
@@ -321,7 +321,7 @@ class PublicationCases(CometFixture):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.output = self.root / 'data' / self.product_name
-        shutil.copytree(ROOT / 'data' / self.product_name, self.output)
+        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.output)
 
     def test_orphan_comets_do_not_block_asteroid_update_but_block_publication(self):
         orphan = self.output / 'objects' / ('0' * 64 + '.json')
@@ -351,7 +351,7 @@ class PublicationCases(CometFixture):
             verify_site(self.output.parent)
             verify.assert_called_once_with(self.output)
         shutil.rmtree(self.output)
-        self.output.symlink_to(ROOT / 'data' / self.product_name, target_is_directory=True)
+        self.output.symlink_to(ROOT / 'tests/fixtures/comets-schema2', target_is_directory=True)
         with self.assertRaises(DataError): verify_browser(self.output.parent)
 
     def test_asteroid_export_preserves_comets_and_site_reconciles_both(self):

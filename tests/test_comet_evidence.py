@@ -21,7 +21,13 @@ SCRIPT = ROOT / 'scripts/rebuild_comet_evidence.py'
 
 
 def product_index(root):
-    return read_json(root / read_json(root / 'latest.json')['index']['url'])
+    index = read_json(root / read_json(root / 'latest.json')['index']['url'])
+    if index['comet_contract_version'] == 3:
+        # Scientific midpoint evidence follows the actual published modern segments.
+        index = dict(index, objects=[dict(
+            next(segment for segment in entry['segments'] if segment['key'] == 'modern'),
+            id=entry['id'], name=entry['name']) for entry in index['objects']])
+    return index
 
 
 class NumericalEvidence(unittest.TestCase):

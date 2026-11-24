@@ -23,7 +23,7 @@ class Catalogue(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.output = self.root / 'data/comets'
-        shutil.copytree(ROOT / 'data/comets', self.output)
+        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.output)
         self.index = read_json(self.output / read_json(self.output / 'latest.json')['index']['url'])
 
     def install_index(self, index):

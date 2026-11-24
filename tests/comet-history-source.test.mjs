@@ -126,16 +126,31 @@ test('corruption/missing pin assets reject and retry uses same pin; close reject
   const pending=s.loadSegment('2P','modern');const rejected=assert.rejects(pending,{name:'AbortError'});
   await new Promise(resolve=>setImmediate(resolve));s.close();await rejected;release();
 });
-const real=process.env.COMET_HISTORY_CANDIDATE;
-test('real serialized candidate: all segment references, seams, support-only boundaries and modern bytes',{skip:!real},async t=>{
+const real=process.env.COMET_HISTORY_CANDIDATE || 'data/comets';
+test('real serialized release: all segment references, seams, support-only boundaries and modern bytes',async t=>{
   const files=new Map();const latest=JSON.parse(await fs.readFile(`${real}/latest.json`));
   const index=JSON.parse(await fs.readFile(`${real}/${latest.index.url}`));
   for(const name of ['latest.json',latest.index.url,...index.objects.flatMap(o=>o.segments.map(s=>s.data.url))])files.set(name,await fs.readFile(`${real}/${name}`));
   transport(t,{files});const s=await open();
   for(const o of index.objects) {
     for(const segment of o.segments)await s.loadSegment(o.id,segment.key);
-    const modern=o.segments.at(-1);assert.deepEqual(files.get(modern.data.url),await fs.readFile(`data/comets/${modern.data.url}`));
-    if(o.transition){assert.equal((await s.load(o.id,{jd:T-1e-6})).segment,'historical');assert.equal((await s.load(o.id,{jd:T})).comet_contract_version,2);await s.pathSegments(o.id,T-2,T+2);}
+    const modern=o.segments.at(-1);assert.deepEqual(files.get(modern.data.url),await fs.readFile(`tests/fixtures/comets-schema2/${modern.data.url}`));
+    const start = o.segments[0].coverage.start, end = modern.coverage.end;
+    assert.equal(await s.positionAt(o.id, start - 1), null);
+    assert.equal(await s.positionAt(o.id, end + 1), null);
+    assert.ok(await s.positionAt(o.id, start));
+    assert.ok(await s.positionAt(o.id, end));
+    assert.equal(end, 2488067.5);
+    if(o.transition){
+      assert.equal(start, o.id === '1P' ? 2391511.5 : 2402592.5);
+      assert.equal((await s.load(o.id,{jd:T-1e-6})).segment,'historical');
+      assert.equal((await s.load(o.id,{jd:T})).comet_contract_version,2);
+      const strips = await s.pathSegments(o.id,T-2,T+2);
+      assert.deepEqual(strips.map(strip => strip.key), ['historical', 'modern']);
+      assert.ok(strips[0].points.at(-1)[0] < T);
+      assert.equal(strips[1].points[0][0], T);
+      if(o.id === '55P') assert.equal((await s.load(o.id,{jd:T+1})).comet_contract_version,2);
+    } else assert.equal(start, T);
   }
   s.close();
 });

@@ -22,7 +22,7 @@ def inventory(root):
 
 
 def history_fixture(directory):
-    shutil.copytree(ROOT / 'data/comets', directory)
+    shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', directory)
     for p in directory.glob('index-*.json'): p.unlink()
     raw = (ROOT / 'tests/fixtures/comet-history-index.json').read_bytes()
     index = json.loads(raw)
@@ -44,7 +44,7 @@ class CometRollout(unittest.TestCase):
         self.root = Path(temp.name)
         self.site = self.root / 'data'
         shutil.copytree(ROOT / 'tests/fixtures/browser-v1/ties', self.site)
-        shutil.copytree(ROOT / 'data/comets', self.site / 'comets')
+        shutil.copytree(ROOT / 'tests/fixtures/comets-schema2', self.site / 'comets')
         self.candidate = self.root / 'candidate'
         history_fixture(self.candidate)
         self.pin = json.loads((self.site / 'comets/latest.json').read_bytes())['index']['sha256']
