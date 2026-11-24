@@ -13,12 +13,20 @@ CANDIDATE_NAME = re.compile(r"(?:snapshot|export|release|delivery)-v1-[a-f0-9]{6
 CANDIDATE_MARKERS = ("snapshot.json", "manifest.json", "release.json", "index.json")
 
 
+def in_comet_candidate_namespace(path):
+    """Recognize lexical and resolved spellings, including redirected namespaces."""
+    for root in (Path(path).absolute(), resolved_path(path)):
+        if any(p.name.casefold() == 'comet-candidates' and p.parent.name.casefold() == '.context'
+               for p in (root, *root.parents)):
+            return True
+    return False
+
+
 def historical_candidate(directory):
     marker = directory / 'latest.json'
     if not (marker.exists() or marker.is_symlink()):
         return False
-    if any(parent.name.casefold() == 'comet-candidates' and parent.parent.name.casefold() == '.context'
-           for parent in directory.parents):
+    if in_comet_candidate_namespace(directory):
         return True
     # Retained copies and redirected namespaces lose the lexical namespace.
     # Schema 3 is immutable; schema-2 and asteroid site pointers stay mutable.

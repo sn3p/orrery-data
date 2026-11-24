@@ -33,8 +33,15 @@ python3 scripts/prepare_browser_site.py \
 
 Use the actually verified current pin if the source changes; do not bypass a
 mismatch without reassessment. Output must be new and disjoint from both inputs.
-Preparation locks the source site against cooperating writers, copies and verifies
-both trees, then atomically exposes `release/site` and `release/rollback` together.
+Preparation captures both source descriptors and copies one rollback snapshot
+under the shared source lock. It then releases that lock, verifies the snapshot,
+and derives the replacement from it without copying obsolete comet payloads.
+The copied descriptors and final approved historical pin must match. An atomic
+exclusive rename exposes `release/site` and `release/rollback` together, refusing
+any output entry created concurrently. macOS and Linux are supported; other
+platforms or filesystems without exclusive rename fail closed.
+Explicit `--source` Pages staging copies and verifies its immutable input without
+creating lock files in the release bundle.
 Failure leaves inputs unchanged and no partially installed release. A retry uses
 a new output or removes only the failed operator-owned output after inspection.
 Nothing acquires JPL data, writes `data/`, commits, dispatches Pages or deploys.

@@ -53,10 +53,6 @@ class CometFixture:
     def verify_command(self):
         return 'verify-' + self.product_name
 
-    @property
-    def verifier_name(self):
-        return 'verify_comets'
-
 
 class CometCases(CometFixture):
     def setUp(self):

@@ -4,7 +4,8 @@
 import argparse
 import json
 from pathlib import Path
-import shutil
+import tempfile
+from contextlib import nullcontext
 import subprocess
 import sys
 from urllib.request import urlopen
@@ -13,7 +14,9 @@ from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.storage import writer_lock, site_lock_path
+from orrery_data.storage import writer_lock, site_lock_path, rename_new
+from orrery_data.site import copy_site_snapshot
+from orrery_data.paths import validate_writable_path, validate_disjoint_paths
 # Keep in sync with the workflow's non-data push paths. The CLI imports the
 # producer package transitively; no installation or external config is needed.
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
@@ -63,13 +66,24 @@ def main():
     source = (args.source if args.source is not None else ROOT / 'data').resolve()
     if output.is_relative_to(source) or source.is_relative_to(output):
         parser.error('staging output must not overlap source data')
-    with writer_lock(site_lock_path(source)):
-        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', source],
+    validate_writable_path(output, label='Pages output')
+    validate_disjoint_paths(output, (source,), label='Pages output')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.pages-', dir=output.parent) as temporary:
+        snapshot = Path(temporary) / 'site'
+        # Explicit sources are immutable release inputs. Never add lock files
+        # inside their bundle; validate a private, descriptor-pinned copy instead.
+        with (writer_lock(site_lock_path(source)) if args.source is None else nullcontext()):
+            copy_site_snapshot(source, snapshot)
+        result = subprocess.run([sys.executable, '-m', 'orrery_data', 'verify-site', '--directory', snapshot],
                                 cwd=ROOT, capture_output=True, text=True)
         if result.returncode:
             print(result.stderr, file=sys.stderr)
             return result.returncode
         verified = json.loads(result.stdout)
+        verified['path'] = str(source)
+        if verified.get('comets') is not None:
+            verified['comets']['path'] = str(source / 'comets')
         force = args.force
         if args.publication_base is not None:
             comparison = subprocess.run(
@@ -79,10 +93,11 @@ def main():
             # skip a publication-code change. Local data has already passed verification.
             force = force or comparison.returncode != 0
         unchanged = bool(args.latest_url and not force
-                         and published_site_matches(source, args.latest_url))
+                         and published_site_matches(snapshot, args.latest_url))
         if not unchanged:
-            shutil.copytree(source, output)
-            (output / '.nojekyll').write_text('')
+            (snapshot / '.nojekyll').write_text('')
+            validate_writable_path(output, label='Pages output')
+            rename_new(snapshot, output)
         print(json.dumps({**verified, 'status': 'unchanged' if unchanged else 'prepared', 'output': str(output)}))
         return 0
 

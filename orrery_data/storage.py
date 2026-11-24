@@ -254,3 +254,28 @@ def site_lock_path(site):
     """Shared lock identity for all writers/readers of a complete browser site."""
     site = Path(site).resolve()
     return site.parent / ('.' + site.name + '-browser-lock')
+
+
+def rename_new(source, destination):
+    """Atomically install a directory without replacing any concurrent entry.
+
+    macOS renamex_np(RENAME_EXCL) and Linux renameat2(RENAME_NOREPLACE).
+    Unsupported platforms/filesystems fail closed; never emulate with exists().
+    """
+    import ctypes
+    import sys
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == 'darwin':
+        rename = libc.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        args = (os.fsencode(source), os.fsencode(destination), 4)  # RENAME_EXCL
+    elif sys.platform == 'linux' and hasattr(libc, 'renameat2'):
+        rename = libc.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        args = (-100, os.fsencode(source), -100, os.fsencode(destination), 1)  # AT_FDCWD, NOREPLACE
+    else:
+        raise DataError('Atomic exclusive directory installation is unavailable')
+    rename.restype = ctypes.c_int
+    if rename(*args) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
