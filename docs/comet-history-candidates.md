@@ -144,9 +144,10 @@ PR116's chooser. Integrate in a fresh Orrery workspace, not this producer worktr
 5. Verify actual accepted payload → acquisition → both renderers and fresh state, historical starts, T−epsilon/T/T+epsilon, January 2 support overlap and December 30 end, timeline jumps, selection, path toggle/Fit parity, missing files, cancellation, retries, new pin/close, keyboard/focus and representative narrow/wide layouts. No app acceptance is claimed by producer tests.
 
 Rollout is a separate reviewed action: ship a dual-version Orrery reader first,
-then approve the hosted switch, retention/pruning and old-client behavior. Existing
-site publication only supports schema 2 and is deliberately unchanged. Preserve
-schema-2 pin/assets and the app's separately identified bundled rollback. Neither
+then approve the hosted switch, retention/pruning and old-client behavior.
+Production preparation now accepts the approved schema-3 pin; see the rollout
+follow-up below. Preserve an offline schema-2 rollback snapshot and the app's
+separately identified bundled rollback during migration. Neither
 ancient trajectories, other-four historical extensions nor Orrery3D are implied.
 
 ## Evidence and test boundaries
@@ -157,3 +158,11 @@ references, exercising strict serialization/transport boundaries without raw
 network evidence in Git. Setting `COMET_HISTORY_CANDIDATE` also exercises all real
 files, representative references, seam comparisons and exact modern byte reuse.
 Full raw scientific replay is a local retained-evidence check, not a CI claim.
+
+## Production preparation follow-up
+
+[Production rollout support](comet-production-rollout.md) now stages the approved
+candidate as a complete replacement at `comets/latest.json`, with a separate
+verified offline rollback snapshot. The candidate builder remains immutable and
+unpublished; only coordinated activation changes committed data. Older-client
+breakage is accepted for this migration; no permanent legacy API is retained.
