@@ -1,8 +1,9 @@
 # Unpublished comet history research
 
-These files are research inputs, not a public schema or a Pages product. No
-consumer or publication path reads this directory. Hosted schema 2 and `data/`
-remain unchanged.
+This draft PR is a research step. Hosted data, schema 2 and `data/` remain
+unchanged. The public-format change and Orrery integration are still pending.
+These files are not a public schema or a Pages product; no consumer or publication
+path reads this directory.
 
 `discoveries.json` contains all six catalogue discovery assertions verbatim,
 together with separately sourced historical events. `sources/` retains original
@@ -78,9 +79,9 @@ interpolated position differs from the baseline by 2.35e-9 AU and velocity by
 1.46e-7 AU. These are agreement measurements, not a finalized seam policy.
 
 The full files exceed 2 MiB (2,097,152 bytes); the historical subsets each fit.
-Recommend evaluating one historical segment plus the existing modern segment per
-pilot instead of mandatory 50-year chunks. Keep an explicit byte limit, overlap
-selection and gap rules. The Tempel–Tuttle grid phase must be resolved deliberately
+The agreed next direction is one historical file plus the existing modern file
+per pilot, with an explicit 1980 transition, instead of mandatory 50-year chunks.
+Keep an explicit byte limit, overlap selection and gap rules. The Tempel–Tuttle grid phase must be resolved deliberately
 when specifying the final seam, and its full experimental file must not replace
 modern data because it ends three days earlier. Schema, chunking, application
 integration and publication remain unfinalized. Ancient trajectories and the other
@@ -96,7 +97,7 @@ Final local checks: 129 Python tests on Python 3.12.7, 38 Node tests and complet
 site verification passed. The Python selection excluded 12 modules that start
 HTTP servers or depend on those fixtures; the exact selection is retained in the
 workspace evidence. Python 3.11/3.13 and the browser workflow were not run (server
-and image restrictions apply). No push/CI/publication was requested or performed.
+and image restrictions apply). These are the initial local verification results.
 A final hosted-descriptor fetch matched the assessment's unchanged catalogue pin.
 
 
@@ -134,5 +135,39 @@ Review verification: 42 distinct focused Python tests passed (the 41-test affect
 suite followed by the final 13-test pilot suite containing one additional test).
 Offline replay preserves every previously reported measurement and artifact hash;
 the result record adds the pin, explicit limits and maximum velocity difference.
-No public data bytes changed. No push, PR, CI run or publication occurred. The full
-CI suites were not run; earlier server/browser restrictions still apply.
+No public data bytes changed. Full CI runs on the draft PR; the earlier local
+server/browser restrictions still apply.
+
+
+## Retained next steps
+
+1. Implement historical + modern files with an explicit transition at
+   **1980-01-01 00:00 UT (JD 2444239.5)**. Define which file supplies the boundary,
+   overlap handling, path continuity and position/velocity acceptance before
+   finalizing the public format. Resolve Tempel–Tuttle's offset grid deliberately;
+   its current historical pilot ends on January 2. Keep the modern coverage through
+   2099-12-30 and retain provenance and byte limits. Never extrapolate or bridge
+   unsupported gaps.
+   This direction is agreed; the public wire format and transition mechanics are
+   not implemented or published by this PR.
+2. Then integrate the public format into Orrery: reader/loading, timeline,
+   coverage states, paths and Fit in both Pixi and Three. Include the following
+   exact note in the comet options:
+
+   > Comet paths are calculated from JPL orbit models. Historical positions are approximate, with uncertainty varying by comet and date.
+
+   The copy is an integration requirement retained here; it is not yet present in
+   Orrery's UI. No Orrery3D integration is implied. Ancient trajectories and the
+   other four historical extensions remain deferred.
+
+## CI coverage of shared production helpers
+
+The PR workflow has no path filter. On every PR update, Python 3.11, 3.12 and 3.13
+run `python -m unittest discover -s tests -v`, including
+`test_history_science_helpers.py`, `test_comet_history_pilot.py` and the existing
+production comet, catalogue, transport and numerical-evidence regressions. These
+exercise the shared Horizons parser and Hermite evaluator used by production.
+Python 3.13 also verifies the complete data site. The separate browser job runs
+Node consumer tests and the full browser workflow. Coverage is configured for the
+production-helper changes; a passing result must be confirmed separately for the
+final PR head. No workflow expansion is necessary for these files.
