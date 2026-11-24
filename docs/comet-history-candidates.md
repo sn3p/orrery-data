@@ -1,8 +1,8 @@
 # Unpublished historical comet candidates and Orrery handoff
 
-This is a candidate contract, not the hosted product. `data/`, its schema-2
-producer, site staging and hosted latest remain unchanged. No deployment or
-Orrery application changes are part of this work. Discovery-based visibility is
+This describes the historical candidate contract and scientific replay. The
+activation change installs the approved candidate in `data/comets`; publication
+requires the separately gated rollout below. Discovery-based visibility is
 **app-owned**; event metadata does not hide objects or authorize extrapolation.
 
 ## Build and verify
@@ -12,9 +12,25 @@ as described in the [research README](../research/comet-history/README.md).
 No network acquisition occurs in this command. Run from the repository checkout:
 
 ```sh
-python3 scripts/comet_history_candidate.py --output .context/comet-candidates/history-v3
-python3 scripts/comet_history_candidate.py --output .context/comet-candidates/history-v3 --verify
+python3 scripts/comet_history_candidate.py
+python3 scripts/comet_history_candidate.py --verify
 COMET_HISTORY_CANDIDATE=.context/comet-candidates/history-v3 npm run test:comets
+```
+
+The builder defaults to the frozen schema-2 baseline, authenticating its index
+against approved pin `b1b10e6d1fba1cb94cd1e03c2e39ea7ec93b584a89f74ece193dcdf8ba379567`
+and verifying every referenced payload before scientific replay. Shared writers
+reject this fixture and aliases into it. The fixture is never staged or published;
+[portable Git recovery](comet-activation.md#portable-rollback-preparation) preserves
+rollback availability without depending on a local Mac.
+
+To compare the committed production release directly with a fresh raw replay:
+
+```sh
+python3 - <<'PYTHON'
+from scripts.comet_history_candidate import ROOT, construct, verify
+print(verify(ROOT / 'data/comets', construct()))
+PYTHON
 ```
 
 Output must be a named directory under `.context/comet-candidates/`; aliases into
@@ -29,9 +45,11 @@ not part of the installed `orrery-data` CLI.
 
 Verification replays the retained source evidence and compares the complete file
 inventory and exact bytes. It therefore requires raw inputs, not just the candidate.
-Each build captures the validated modern index and payload bytes under the shared
-site publication lock, then releases it before historical replay. A concurrent
-refresh can therefore prune old modern files without invalidating this snapshot.
+Every input path, including copies and aliases, must match the approved baseline
+pin. Builds read the immutable frozen snapshot without creating a fixture-parent
+lock. Explicit mutable copies still use their site publication lock. Captured
+payload bytes are authenticated again against the pinned references before replay,
+so mutation or pruning fails closed without changing the scientific input.
 Each build reuses parsed API provenance and shared file encoding/hash-reference
 helpers. It validates modern schema 2, exact six-object membership, raw discovery
 assertions, strict metadata, historical target/solution/model identity, all final

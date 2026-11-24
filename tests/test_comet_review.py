@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comet_product, comets, horizons
 from orrery_data.comet_product import descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ReviewRegressions(unittest.TestCase):
     def test_object_validation_enforces_version_selection(self):
-        root = ROOT / 'data/comets'
+        root = SCHEMA2_BASELINE
         index = read_json(root / read_json(root / 'latest.json')['index']['url'])
         for entry in index['objects']:
             value = read_json(root / entry['data']['url'])
@@ -29,7 +30,7 @@ class ReviewRegressions(unittest.TestCase):
         for builder_result in (None, {'pin': 'wrong', 'bytes': -1}):
             with self.subTest(builder_result=builder_result), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve(); output = root / 'data/comets'
-                shutil.copytree(ROOT / 'data/comets', output)
+                shutil.copytree(SCHEMA2_BASELINE, output)
                 orphan = 'objects/' + '0' * 64 + '.json'
                 (output / orphan).write_text('{}')
                 def build(records, stage, previous):
@@ -47,7 +48,7 @@ class ReviewRegressions(unittest.TestCase):
     def test_installed_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); output = root / 'data/comets'
-            shutil.copytree(ROOT / 'data/comets', output)
+            shutil.copytree(SCHEMA2_BASELINE, output)
             def build(records, stage, previous):
                 shutil.copytree(output, stage, dirs_exist_ok=True)
                 return comets.verify_comets(stage)
@@ -65,14 +66,22 @@ class ReviewRegressions(unittest.TestCase):
     def test_previous_index_uses_snapshot_once_without_site_lock(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); output = root / 'data/comets'
-            shutil.copytree(ROOT / 'data/comets', output)
+            shutil.copytree(SCHEMA2_BASELINE, output)
             descriptor = output / 'latest.json'
             original = descriptor.read_bytes()
             snapshot = comet_product.descriptor_bytes
             inspect = comet_product.inspect_comets
+            acquired = mutated = False
+            def acquire(*args, **kwargs):
+                nonlocal acquired
+                acquired = True
+                return {}
             def snapshot_then_edit(path):
+                nonlocal mutated
                 value = snapshot(path)
-                if snapshot_mock.call_count == 1:
+                # Target the previous-product snapshot, after read-only preflight.
+                if acquired and not mutated:
+                    mutated = True
                     path.write_bytes(b'changed during previous-product read')
                 return value
             def inspect_previous(directory, **kwargs):
@@ -87,7 +96,7 @@ class ReviewRegressions(unittest.TestCase):
             def build(records, stage, previous):
                 self.assertEqual(previous, read_json(output / json.loads(original)['index']['url']))
                 shutil.copytree(output, stage, dirs_exist_ok=True)
-            with patch.object(comets.PRODUCT, 'acquire', return_value={}), \
+            with patch.object(comets.PRODUCT, 'acquire', side_effect=acquire), \
                  patch.object(comets.PRODUCT, 'build_candidate', side_effect=build), \
                  patch.object(comet_product, 'descriptor_bytes', side_effect=snapshot_then_edit) as snapshot_mock, \
                  patch.object(comet_product, 'inspect_comets', side_effect=inspect_previous):
@@ -95,7 +104,7 @@ class ReviewRegressions(unittest.TestCase):
             self.assertEqual(result['status'], 'unchanged')
 
     def test_previous_snapshot_rejects_duplicate_keys_and_nonfinite_json(self):
-        root = ROOT / 'data/comets'
+        root = SCHEMA2_BASELINE
         original = (root / 'latest.json').read_bytes()
         for prefix in (b'{"comet_contract_version":2,', b'{"unexpected":NaN,'):
             with self.subTest(prefix=prefix), self.assertRaises(DataError):
@@ -139,7 +148,7 @@ class ReviewRegressions(unittest.TestCase):
     def test_candidate_releases_site_lock_and_rejects_changed_pointer(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); output = root/'data/comets'
-            shutil.copytree(ROOT/'data/comets',output)
+            shutil.copytree(SCHEMA2_BASELINE,output)
             original = (output/'latest.json').read_bytes()
             def build(records, stage, previous):
                 with writer_lock(root/'.data-browser-lock'):

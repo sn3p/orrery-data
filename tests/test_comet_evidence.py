@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comet_product, comets
 from orrery_data.browser import reference
 from orrery_data.horizons import parse_response
@@ -30,23 +31,32 @@ class NumericalEvidence(unittest.TestCase):
         index = product_index(root)
         samples = json.loads(gzip.decompress(FIXTURE.read_bytes()))
         self.assertEqual(set(samples), {entry['id'] + '-midpoints' for entry in index['objects']})
-        for entry in index['objects']:
-            series = read_json(root / entry['data']['url'])['series']
-            check = samples[entry['id'] + '-midpoints']
-            self.assertEqual(check['source'], entry['provenance']['midpoints'])
-            self.assertEqual(len(check['rows']), comets.COUNT - 1)
-            errors = []
-            for i, row in enumerate(check['rows']):
-                self.assertEqual(row[0], comets.START + 2 + i * comets.STEP)
-                errors.append(math.dist(comets.interpolate(series, row[0]), row[1:]))
-            worst = max(range(len(errors)), key=errors.__getitem__)
-            self.assertEqual(errors[worst], entry['validation']['max_error_au'])
-            self.assertEqual(check['rows'][worst][0], entry['validation']['worst_jd'])
-            self.assertLessEqual(max(errors), comets.TOLERANCE)
+        seen = set()
+        for obj in index['objects']:
+            for entry in obj.get('segments', [obj]):
+                payload = read_json(root / entry['data']['url'])
+                if payload['comet_contract_version'] != 2:
+                    continue
+                self.assertNotIn(payload['id'], seen)
+                seen.add(payload['id'])
+                series = payload['series']
+                check = samples[payload['id'] + '-midpoints']
+                self.assertEqual(check['source'], entry['provenance']['midpoints'])
+                self.assertEqual(len(check['rows']), comets.COUNT - 1)
+                errors = []
+                for i, row in enumerate(check['rows']):
+                    self.assertEqual(row[0], comets.START + 2 + i * comets.STEP)
+                    errors.append(math.dist(comets.interpolate(series, row[0]), row[1:]))
+                worst = max(range(len(errors)), key=errors.__getitem__)
+                self.assertEqual(errors[worst], entry['validation']['max_error_au'])
+                self.assertEqual(check['rows'][worst][0], entry['validation']['worst_jd'])
+                self.assertLessEqual(max(errors), comets.TOLERANCE)
+
+        self.assertEqual(seen, {obj['id'] for obj in index['objects']})
 
     def test_seed_projection_preserves_supplied_series_and_provenance(self):
         # Projection must preserve supplied source series and provenance.
-        root = ROOT / 'data/comets'
+        root = SCHEMA2_BASELINE
         index = product_index(root)
         records, originals = {}, {}
         for entry in index['objects']:
@@ -71,9 +81,9 @@ class NumericalEvidence(unittest.TestCase):
     def test_rebuild_cli_follows_refreshed_series_and_provenance_and_preserves_failed_output(self):
         # Full-sized synthetic raw tables exercise the real offline parser/CLI.
         # They are never committed as scientific data or substituted for real evidence.
-        original = product_index(ROOT / 'data/comets')['objects'][0]
+        original = product_index(SCHEMA2_BASELINE)['objects'][0]
         object_id = original['id']
-        series = copy.deepcopy(read_json(ROOT / 'data/comets' / original['data']['url'])['series'])
+        series = copy.deepcopy(read_json(SCHEMA2_BASELINE / original['data']['url'])['series'])
         series['states'][0][0] += 1e-8
         middle = json.loads(gzip.decompress(FIXTURE.read_bytes()))[object_id + '-midpoints']['rows']
         targets = {object_id: original['name']}

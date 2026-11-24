@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comets
 from orrery_data.browser import reference
 from orrery_data.cli import main
@@ -23,7 +24,7 @@ class Catalogue(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.output = self.root / 'data/comets'
-        shutil.copytree(ROOT / 'data/comets', self.output)
+        shutil.copytree(SCHEMA2_BASELINE, self.output)
         self.index = read_json(self.output / read_json(self.output / 'latest.json')['index']['url'])
 
     def install_index(self, index):

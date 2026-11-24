@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {createHash} from 'node:crypto';
+import path from 'node:path';
+import {SCHEMA2_BASELINE, HISTORY_INDEX, HISTORY_PRODUCT} from './comet-fixtures.mjs';
 import Source,{T,END} from '../consumer/CometHistorySource.js';
 import {modelIdentity} from '../consumer/cometHistoryContract.js';
 import {CONVENTIONS} from '../consumer/cometSourceCore.js';
 const base='https://example.test/sub/comets/';
-const template=JSON.parse(await fs.readFile('tests/fixtures/comet-history-index.json'));
+const templateBytes=await fs.readFile(HISTORY_INDEX);
+const template=JSON.parse(templateBytes);
 const ref=(body,prefix)=>{const sha256=createHash('sha256').update(body).digest('hex');return {url:`${prefix}${sha256}.json`,sha256,bytes:body.length};};
 function fixture(mutate=()=>{}) {
   const index=structuredClone(template), files=new Map();
@@ -126,18 +129,55 @@ test('corruption/missing pin assets reject and retry uses same pin; close reject
   const pending=s.loadSegment('2P','modern');const rejected=assert.rejects(pending,{name:'AbortError'});
   await new Promise(resolve=>setImmediate(resolve));s.close();await rejected;release();
 });
-const real=process.env.COMET_HISTORY_CANDIDATE;
-test('real serialized candidate: all segment references, seams, support-only boundaries and modern bytes',{skip:!real},async t=>{
-  const files=new Map();const latest=JSON.parse(await fs.readFile(`${real}/latest.json`));
-  const index=JSON.parse(await fs.readFile(`${real}/${latest.index.url}`));
-  for(const name of ['latest.json',latest.index.url,...index.objects.flatMap(o=>o.segments.map(s=>s.data.url))])files.set(name,await fs.readFile(`${real}/${name}`));
-  transport(t,{files});const s=await open();
-  for(const o of index.objects) {
-    for(const segment of o.segments)await s.loadSegment(o.id,segment.key);
-    const modern=o.segments.at(-1);assert.deepEqual(files.get(modern.data.url),await fs.readFile(`data/comets/${modern.data.url}`));
-    if(o.transition){assert.equal((await s.load(o.id,{jd:T-1e-6})).segment,'historical');assert.equal((await s.load(o.id,{jd:T})).comet_contract_version,2);await s.pathSegments(o.id,T-2,T+2);}
+async function serializedProduct(directory) {
+  const files=new Map(), latest=JSON.parse(await fs.readFile(path.join(directory,'latest.json')));
+  const index=JSON.parse(await fs.readFile(path.join(directory,latest.index.url)));
+  for(const name of ['latest.json',latest.index.url,...index.objects.flatMap(o=>o.segments.map(s=>s.data.url))])
+    files.set(name,await fs.readFile(path.join(directory,name)));
+  return {files,index,latest};
+}
+
+test('real serialized product: segment references, coverage and transition ownership',async t=>{
+  const product=await serializedProduct(HISTORY_PRODUCT);
+  transport(t,product);const source=await open();
+  try {
+    for(const object of product.index.objects) {
+      for(const segment of object.segments)await source.loadSegment(object.id,segment.key);
+      const start=object.segments[0].coverage.start;
+      const last=object.segments.at(-1), end=last.coverage.end;
+      assert.equal(await source.positionAt(object.id,start-1),null);
+      assert.equal(await source.positionAt(object.id,end+1),null);
+      assert.ok(await source.positionAt(object.id,start));
+      assert.equal(Boolean(await source.positionAt(object.id,end)),last.coverage.end_inclusive);
+      if(object.transition) {
+        const seam=object.transition.jd;
+        const historical=object.segments.find(segment=>segment.key==='historical');
+        const modern=object.segments.find(segment=>segment.key===object.transition.owner);
+        assert.equal((await source.load(object.id,{jd:seam-1e-6})).segment,historical.key);
+        assert.equal((await source.load(object.id,{jd:seam})).comet_contract_version,modern.payload_contract_version);
+        const strips=await source.pathSegments(object.id,seam-2,seam+2);
+        assert.deepEqual(strips.map(strip=>strip.key),[historical.key,modern.key]);
+        assert.ok(strips[0].points.at(-1)[0]<seam);
+        assert.equal(strips[1].points[0][0],seam);
+        // Any historical support beyond its owned interval belongs to the modern segment.
+        if(historical.sample_coverage[1]>seam)
+          assert.equal((await source.load(object.id,{jd:historical.sample_coverage[1]})).comet_contract_version,modern.payload_contract_version);
+      }
+    }
+  } finally { source.close(); }
+});
+
+test('initial approved release preserves the frozen schema-2 modern payload bytes',async t=>{
+  const product=await serializedProduct(HISTORY_PRODUCT);
+  const initialPin=createHash('sha256').update(templateBytes).digest('hex');
+  if(product.latest.index.sha256!==initialPin) {
+    t.skip('Modern byte reuse is an initial-release assertion; generic product coverage runs separately.');
+    return;
   }
-  s.close();
+  for(const object of product.index.objects) {
+    const modern=object.segments.find(segment=>segment.key==='modern');
+    assert.deepEqual(product.files.get(modern.data.url),await fs.readFile(path.join(SCHEMA2_BASELINE,modern.data.url)));
+  }
 });
 
 test('review: historical-only and retry reads cannot bypass transition validation',async t=>{

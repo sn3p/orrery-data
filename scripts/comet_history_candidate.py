@@ -5,6 +5,7 @@ No acquisition or installation mode. Verification replays scientific checks from
 raw responses, rather than trusting a candidate's self-reported evidence.
 """
 import argparse
+from contextlib import nullcontext
 import math
 import re
 from datetime import date
@@ -17,6 +18,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import comet_history_pilot as pilot
+from scripts.comet_baseline import SCHEMA2_BASELINE, authenticate_baseline
 from orrery_data.comet_product import CometContract, inspect_comets, interpolate_state
 from orrery_data.formats import DataError
 from orrery_data.paths import validate_disjoint_paths, path_within
@@ -106,14 +108,21 @@ def validate_metadata(value):
 def snapshot_modern(modern):
     """Capture validated bytes while excluding refresh publication/pruning."""
     modern = Path(modern).resolve()
-    with writer_lock(site_lock_path(modern.parent)):
-        _, baseline = inspect_comets(modern, contract=CometContract(2))
+    # The frozen snapshot is protected by the existing immutable namespace.
+    # Mutable copies still coordinate with site writers. Neither path changes trust.
+    lock = nullcontext() if path_within(modern, SCHEMA2_BASELINE) else writer_lock(site_lock_path(modern.parent))
+    with lock:
+        report, baseline = inspect_comets(modern, contract=CometContract(2))
+        authenticate_baseline(report)
         files = {e['data']['url']: (modern / e['data']['url']).read_bytes()
                  for e in baseline['objects']}
+        for entry in baseline['objects']:
+            if reference(files[entry['data']['url']], 'objects/') != entry['data']:
+                raise DataError('Modern payload changed during snapshot capture')
     return baseline, files
 
 
-def construct(modern=ROOT / 'data/comets'):
+def construct(modern=SCHEMA2_BASELINE):
     """Revalidate raw model identity and all serialized historical intervals."""
     baseline, modern_files = snapshot_modern(modern)
     if [e['id'] for e in baseline['objects']] != IDS:

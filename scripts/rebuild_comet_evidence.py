@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from orrery_data import comets
+from orrery_data.comet_rollout import verify_current_comets
 from orrery_data.comet_product import serialize_states, measure_interpolation
 from orrery_data.formats import DataError
 from orrery_data.horizons import parse_response, read_raw
@@ -27,6 +27,19 @@ def pinned_rows(cache, source, object_id, midpoint, targets):
     return rows
 
 
+def modern_entries(index):
+    """Select replay inputs after product authentication, with explicit errors."""
+    if index['comet_contract_version'] == 2:
+        return index['objects']
+    entries = []
+    for entry in index['objects']:
+        matches = [segment for segment in entry['segments'] if segment['key'] == 'modern']
+        if len(matches) != 1:
+            raise DataError(f"{entry['id']}: expected exactly one modern segment for evidence replay")
+        entries.append(dict(matches[0], id=entry['id'], name=entry['name']))
+    return entries
+
+
 def rebuild(directory, cache, output):
     directory, cache, output = Path(directory), Path(cache), Path(output)
     # Never let fixture output replace public products or retained scientific inputs.
@@ -35,11 +48,13 @@ def rebuild(directory, cache, output):
     directory, cache, output = directory.resolve(), cache.resolve(), output.resolve()
     lock = site_lock_path(directory.parent)
     with writer_lock(lock):
-        verified = comets.verify_comets(directory)
+        verified = verify_current_comets(directory)
         index = read_json(directory / verified['pin']['url'])
-        targets = {entry['id']: entry['name'] for entry in index['objects']}
+        # Historical quarter-point evidence is replayed by comet_history_candidate.py.
+        entries = modern_entries(index)
+        targets = {entry['id']: entry['name'] for entry in entries}
         evidence = {}
-        for entry in index['objects']:
+        for entry in entries:
             object_id = entry['id']
             rows = pinned_rows(cache, entry['provenance']['vectors'], object_id, False, targets)
             middle = pinned_rows(cache, entry['provenance']['midpoints'], object_id, True, targets)

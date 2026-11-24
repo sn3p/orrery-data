@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts import comet_history_candidate as candidate
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data.formats import DataError
 
 
@@ -17,7 +18,7 @@ class HistoryCandidateTests(unittest.TestCase):
         import shutil
         with tempfile.TemporaryDirectory() as temp:
             modern=Path(temp)/'site/comets'
-            shutil.copytree(candidate.ROOT/'data/comets',modern)
+            shutil.copytree(SCHEMA2_BASELINE,modern)
             inspect=candidate.inspect_comets
             lock=site_lock_path(modern.parent)
             def inspect_during_refresh(*args, **kwargs):
@@ -51,8 +52,11 @@ class HistoryCandidateTests(unittest.TestCase):
                         with self.assertRaisesRegex(DataError,'immutable'):
                             with writer_lock(path): pass
                         candidate.verify(installed,files)
-            # Site products remain refreshable; namespace staging stays writable.
-            validate_writable_path(candidate.ROOT/'data/comets')
+            # Activated history and frozen replay input are immutable; staging stays writable.
+            with self.assertRaisesRegex(DataError, 'immutable'):
+                validate_writable_path(candidate.ROOT/'data/comets')
+            with self.assertRaisesRegex(DataError, 'immutable'):
+                validate_writable_path(SCHEMA2_BASELINE)
             validate_writable_path(root/'sibling')
 
     def test_redirected_namespace_and_retained_copies_are_immutable(self):
@@ -93,7 +97,7 @@ class HistoryCandidateTests(unittest.TestCase):
             with patch.object(candidate.pilot, 'validate_metadata', return_value=value), patch.object(
                     candidate.pilot, 'acquire', side_effect=AssertionError('metadata reached acquisition')) as acquire:
                 with self.assertRaisesRegex(DataError, 'metadata|Discovery'):
-                    candidate.construct()
+                    candidate.construct(SCHEMA2_BASELINE)
                 acquire.assert_not_called()
 
     def test_public_metadata_semantics_do_not_depend_on_pilot_validation(self):
@@ -110,7 +114,7 @@ class HistoryCandidateTests(unittest.TestCase):
         for mutation in mutations:
             value=copy.deepcopy(original);mutation(value['objects'][0])
             with self.subTest(mutation=mutation),self.assertRaises(DataError):candidate.validate_metadata(value)
-            with patch.object(candidate.pilot,'validate_metadata',return_value=value),self.assertRaises(DataError):candidate.construct()
+            with patch.object(candidate.pilot,'validate_metadata',return_value=value),self.assertRaises(DataError):candidate.construct(SCHEMA2_BASELINE)
 
     def test_shared_serialization_and_names_match_file_helpers(self):
         from orrery_data.storage import write_json
@@ -136,14 +140,14 @@ class HistoryCandidateTests(unittest.TestCase):
             self.assertEqual(decode.call_count,1)
 
     def test_changed_historical_target_or_solution_rejected_before_acquisition(self):
-        _, original = candidate.inspect_comets(candidate.ROOT/'data/comets', contract=candidate.CometContract(2))
+        verified, original = candidate.inspect_comets(SCHEMA2_BASELINE, contract=candidate.CometContract(2))
         for field in ('name', 'solution'):
             index=copy.deepcopy(original)
             if field == 'name': index['objects'][0]['name']='1P/Renamed'
             else: index['objects'][0]['provenance']['vectors']['solution']='JPL#76'
-            with patch.object(candidate,'inspect_comets',return_value=({},index)), patch.object(candidate.pilot,'acquire') as acquire:
+            with patch.object(candidate,'inspect_comets',return_value=(verified,index)), patch.object(candidate.pilot,'acquire') as acquire:
                 with self.assertRaisesRegex(DataError,'changed'):
-                    candidate.construct()
+                    candidate.construct(SCHEMA2_BASELINE)
                 acquire.assert_not_called()
 
     def test_public_output_rejected_before_replay_or_writes(self):
@@ -222,16 +226,17 @@ class HistoryCandidateTests(unittest.TestCase):
 
     def test_construct_serializes_historical_grids_and_preserves_modern_bytes(self):
         # Production inspect/references run over a synthetic zero trajectory.
-        # Acquisition is the only mocked boundary; real parsing lives in pilot tests.
+        # Synthetic science inputs bypass the release pin gate, tested independently.
+        # Real raw parsing lives in pilot tests.
         with tempfile.TemporaryDirectory() as temp:
             # Mirror the site/product hierarchy so its sibling publication lock
             # stays in this fixture on Linux as well as macOS.
             root=Path(temp)/'data/comets';(root/'objects').mkdir(parents=True)
-            latest=json.loads((candidate.ROOT/'data/comets/latest.json').read_text())
-            index=json.loads((candidate.ROOT/'data/comets'/latest['index']['url']).read_text())
+            latest=json.loads((SCHEMA2_BASELINE/'latest.json').read_text())
+            index=json.loads((SCHEMA2_BASELINE/latest['index']['url']).read_text())
             originals={}
             for e in index['objects']:
-                value=json.loads((candidate.ROOT/'data/comets'/e['data']['url']).read_text())
+                value=json.loads((SCHEMA2_BASELINE/e['data']['url']).read_text())
                 value['series']['states']=[[0]*6 for _ in value['series']['states']]
                 raw=candidate.json_bytes(value);e['data']=candidate.reference(raw,'objects/')
                 (root/e['data']['url']).write_bytes(raw);originals[e['data']['url']]=raw
@@ -261,7 +266,7 @@ class HistoryCandidateTests(unittest.TestCase):
                                 f'Test lock escaped temporary directory: {path}')
                 return writer_lock(path)
             try:
-                with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
+                with patch.object(candidate,'authenticate_baseline'), patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
                         candidate.pilot,'validate_metadata',side_effect=prune_after_snapshot), patch.object(
                         candidate,'writer_lock',side_effect=confined_lock):
                     files=candidate.construct(root)
@@ -278,7 +283,7 @@ class HistoryCandidateTests(unittest.TestCase):
                 self.assertEqual(e['transition']['owner'],'modern')
             # Perturbing modern velocity escapes position-only reference checks but
             # must fail the actual transition velocity check after acquisition.
-            with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(candidate,'interpolate_state',side_effect=[([0]*3,[1]*3),([0]*3,[0]*3)]), self.assertRaisesRegex(DataError,'position/velocity'):
+            with patch.object(candidate,'authenticate_baseline'), patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(candidate,'interpolate_state',side_effect=[([0]*3,[1]*3),([0]*3,[0]*3)]), self.assertRaisesRegex(DataError,'position/velocity'):
                 candidate.construct(root)
 
     @classmethod

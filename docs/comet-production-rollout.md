@@ -1,7 +1,9 @@
 # Historical comet production rollout
 
-This support change does **not** activate schema 3. Committed `data/comets` and
-`comets/latest.json` remain unchanged until coordinated with Orrery's loader.
+The activation change replaces committed `data/comets` with the approved schema-3
+release. It remains a draft pending the deployment and acceptance gates recorded
+in [the activation record](comet-activation.md). Preparing or merging support
+code alone does not establish production readiness.
 The approved migration replaces that URL with schema 3. Older clients may break;
 there will be no permanent schema-2 API or versioned public catalogue.
 
@@ -16,8 +18,8 @@ release-pinned publication policy, not a general schema-3 science validator.
 A different index, metadata change or orbital solution needs scientific replay,
 reader compatibility checks and a reviewed update to the approved pin.
 
-The candidate builder and its raw-evidence replay remain unchanged. Restore the
-retained candidate or build/verify it as described in
+The candidate builder now uses the authenticated frozen schema-2 baseline; its
+scientific replay is unchanged. Restore the retained candidate or build/verify it as described in
 [the candidate contract](comet-history-candidates.md). Then:
 
 ```sh
@@ -81,6 +83,8 @@ No schema-2-only index or historical staging endpoint is added to production.
 
 ## Rollback and subsequent refresh
 
+The [portable Git recovery procedure](comet-activation.md#portable-rollback-preparation)
+restores the exact baseline on any checkout without requiring local retained files.
 During rollout, restore `rollback/comets` to the committed comet product, verify
 and redeploy the complete current site; preserve newer unrelated asteroid data.
 The transitional Orrery loader must still accept schema 2. For an app regression,
