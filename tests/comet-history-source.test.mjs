@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import Source,{T,END} from '../consumer/CometHistorySource.js';
+import {modelIdentity} from '../consumer/cometHistoryContract.js';
 import {CONVENTIONS} from '../consumer/cometSourceCore.js';
 const base='https://example.test/sub/comets/';
 const template=JSON.parse(await fs.readFile('tests/fixtures/comet-history-index.json'));
@@ -79,12 +80,15 @@ test('malformed rehashed metadata, coverage and provenance fail before object re
 test('actual seam velocity fails even if position checks and declared limits pass, in either load order',async t=>{
   for(const first of ['historical','modern']) {
     const f=fixture((kind,v,o,s)=>{if(kind==='payload'&&o.id==='1P'&&s.key==='historical')v.series.states.at(-1)[3]=.00005;});
-    const calls=transport(t,f);const source=await open();await assert.rejects(source.loadSegment('1P',first),/transition evidence/);
+    const calls=transport(t,f);const source=await open();
+    if(first==='historical')await assert.rejects(source.loadSegment('1P',first),/transition evidence/);
+    else await source.loadSegment('1P',first);
     const second=first==='historical'?'modern':'historical';
-    await assert.rejects(source.loadSegment('1P',second),/transition evidence/);
+    if(second==='historical')await assert.rejects(source.loadSegment('1P',second),/transition evidence/);
+    else await source.loadSegment('1P',second);
     const before=calls.length;
     await assert.rejects(source.pathSegments('1P',T-1,T+1),/transition evidence/);
-    assert.equal(calls.length,before+2); // inconsistent pair was evicted, neither side silently reused
+    assert.equal(calls.length,before+1); // failed history is retried; authoritative modern remains reusable
     source.close();
   }
 });
@@ -163,14 +167,46 @@ test('complete fixed inventory stays cached without eviction or extra downloads'
   for(const o of f.index.objects)for(const seg of o.segments)await s.loadSegment(o.id,seg.key);
   assert.equal(calls.length,10);s.close();
 });
-test('concurrent pair callers both reject corruption and release their subscribers',async t=>{
+test('failed historical path preserves an independent modern subscriber',async t=>{
   const f=fixture(), old=f.index.objects[0].segments[0].data.url;
   f.files.set(old,'{}');let release, signal;
   transport(t,f,async(n,options)=>{if(n.startsWith('objects/')&&n!==old){signal=options.signal;await new Promise(r=>{release=r;});}});
   const s=await open();
-  // Both are public pair subscribers. Failure cancels path-owned subscribers,
-  // and the other read independently rejects its own invalid pair.
   const path=assert.rejects(s.pathSegments('1P',T-2,T+2));
-  const other=assert.rejects(s.loadSegment('1P','modern'));
-  await Promise.all([path,other]);assert.equal(signal.aborted,true);release();s.close();
+  const other=s.loadSegment('1P','modern');
+  await path;assert.equal(signal.aborted,false);release();
+  assert.equal((await other).id,'1P');s.close();
+});
+
+test('review eight: modern read is independent of historical availability',async t=>{
+  const f=fixture();const old=f.index.objects[0].segments[0].data.url;f.files.delete(old);
+  const calls=transport(t,f),s=await open();
+  assert.deepEqual(await s.positionAt('1P',T),[0,0,0]);
+  assert.equal(calls.includes(old),false);s.close();
+});
+test('review eight: equivalent Python line endings are accepted',async t=>{
+  const f=fixture((kind,index)=>{if(kind==='index'){
+    const p=index.objects[0].segments[0].provenance;
+    for(const [i,v] of Object.values(p).entries())v.header=v.header.replaceAll('\n',['\r','\r\n','\u0085','\n'][i]);
+  }});transport(t,f);const s=await open();s.close();
+});
+test('review eight: empty source references are rejected',async t=>{
+  const f=fixture((kind,index)=>{if(kind==='index'){
+    index.sources['']=index.sources.sbdb;index.objects[0].discovery.events[0].sources=[''];
+  }});transport(t,f);await assert.rejects(open());
+});
+test('review eight: successful seam check is reused across reads and crossing paths',async t=>{
+  const f=fixture();transport(t,f);const s=await open();
+  let checks=0;const original=s.validateTransition.bind(s);s.validateTransition=(...args)=>{checks++;return original(...args);};
+  await s.pathSegments('1P',T-2,T+2);
+  await s.positionAt('1P',T-1);await s.positionAt('1P',T+1);
+  assert.equal(checks,1);s.close();
+});
+
+test('model header normalization preserves science for every Python line separator',()=>{
+  for(const separator of ['\n','\r','\r\n','\v','\f','\x1c','\x1d','\x1e','\x85','\u2028','\u2029']) {
+    const header=['Start time: request','EOP file: observed','Stop  time: request','Model: DE441'].join(separator)+separator;
+    assert.equal(modelIdentity(header),'EOP file: observed\nModel: DE441');
+    assert.notEqual(modelIdentity(header.replace('DE441','DE440')),modelIdentity(header));
+  }
 });

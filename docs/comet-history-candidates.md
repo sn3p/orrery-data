@@ -26,7 +26,8 @@ not part of the installed `orrery-data` CLI.
 
 Verification replays the retained source evidence and compares the complete file
 inventory and exact bytes. It therefore requires raw inputs, not just the candidate.
-Each build validates modern schema 2, exact six-object membership, raw discovery
+Each build reuses parsed API provenance and shared file encoding/hash-reference
+helpers. It validates modern schema 2, exact six-object membership, raw discovery
 assertions, strict metadata, historical target/solution/model identity, all final
 serialized historical interval quarter points, and position plus analytic velocity
 at the seam and support-overlap endpoint. Changed historical target or modern
@@ -77,9 +78,12 @@ representative first/worst/last references for each grid. Transition records
 contain `jd`, `owner: "modern"`, position/velocity limits and measured
 `comparisons` at T and, for 55P, January 2. Limits are 0.000052 AU and
 0.000013 AU/day. These are numerical compatibility guards, not physical uncertainty
-or a continuous interpolation bound. Reader loads both members of a transition pair and checks actual position/velocity
-comparisons before returning either member, including historical-only sessions and
-retries. A failing pair evicts both cached payloads.
+or a continuous interpolation bound. Modern reads are independently authoritative and never require a historical
+download. Before returning historical data, the reader loads its modern partner
+and checks actual position/velocity comparisons, including historical-only
+sessions and retries. Successful checks are reused for the same immutable payload
+pair within one source generation. Failure evicts history, retaining valid modern
+data; failure is never memoized as success. Closing the source clears this state.
 
 ## Reference reader API
 
