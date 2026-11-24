@@ -12,7 +12,6 @@ import io
 import json
 import os
 from pathlib import Path
-from scripts.comet_baseline import SCHEMA2_BASELINE
 import re
 import shutil
 import subprocess
@@ -21,6 +20,7 @@ import tempfile
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comets, horizons
 from orrery_data.browser import sync_candidate, verify_browser
 from orrery_data.cli import main

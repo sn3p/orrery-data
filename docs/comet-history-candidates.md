@@ -45,9 +45,11 @@ not part of the installed `orrery-data` CLI.
 
 Verification replays the retained source evidence and compares the complete file
 inventory and exact bytes. It therefore requires raw inputs, not just the candidate.
-Each build captures the validated modern index and payload bytes under the shared
-site publication lock, then releases it before historical replay. A concurrent
-refresh can therefore prune old modern files without invalidating this snapshot.
+Every input path, including copies and aliases, must match the approved baseline
+pin. Builds read the immutable frozen snapshot without creating a fixture-parent
+lock. Explicit mutable copies still use their site publication lock. Captured
+payload bytes are authenticated again against the pinned references before replay,
+so mutation or pruning fails closed without changing the scientific input.
 Each build reuses parsed API provenance and shared file encoding/hash-reference
 helpers. It validates modern schema 2, exact six-object membership, raw discovery
 assertions, strict metadata, historical target/solution/model identity, all final

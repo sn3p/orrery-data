@@ -3,12 +3,12 @@ import copy
 import json
 import os
 from pathlib import Path
-from scripts.comet_baseline import SCHEMA2_BASELINE
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from scripts import comet_history_candidate as candidate
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data.formats import DataError
 
 
@@ -226,7 +226,8 @@ class HistoryCandidateTests(unittest.TestCase):
 
     def test_construct_serializes_historical_grids_and_preserves_modern_bytes(self):
         # Production inspect/references run over a synthetic zero trajectory.
-        # Acquisition is the only mocked boundary; real parsing lives in pilot tests.
+        # Synthetic science inputs bypass the release pin gate, tested independently.
+        # Real raw parsing lives in pilot tests.
         with tempfile.TemporaryDirectory() as temp:
             # Mirror the site/product hierarchy so its sibling publication lock
             # stays in this fixture on Linux as well as macOS.
@@ -265,7 +266,7 @@ class HistoryCandidateTests(unittest.TestCase):
                                 f'Test lock escaped temporary directory: {path}')
                 return writer_lock(path)
             try:
-                with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
+                with patch.object(candidate,'authenticate_baseline'), patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(
                         candidate.pilot,'validate_metadata',side_effect=prune_after_snapshot), patch.object(
                         candidate,'writer_lock',side_effect=confined_lock):
                     files=candidate.construct(root)
@@ -282,7 +283,7 @@ class HistoryCandidateTests(unittest.TestCase):
                 self.assertEqual(e['transition']['owner'],'modern')
             # Perturbing modern velocity escapes position-only reference checks but
             # must fail the actual transition velocity check after acquisition.
-            with patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(candidate,'interpolate_state',side_effect=[([0]*3,[1]*3),([0]*3,[0]*3)]), self.assertRaisesRegex(DataError,'position/velocity'):
+            with patch.object(candidate,'authenticate_baseline'), patch.object(candidate.pilot,'acquire',side_effect=acquire), patch.object(candidate,'interpolate_state',side_effect=[([0]*3,[1]*3),([0]*3,[0]*3)]), self.assertRaisesRegex(DataError,'position/velocity'):
                 candidate.construct(root)
 
     @classmethod

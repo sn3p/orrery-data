@@ -2,7 +2,6 @@
 import gzip
 import json
 from pathlib import Path
-from scripts.comet_baseline import SCHEMA2_BASELINE
 import shutil
 import subprocess
 import sys
@@ -10,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data.comet_rollout import HISTORY_PIN, prepare_rollout, verify_history
 from orrery_data.formats import DataError
 from orrery_data.site import verify_site

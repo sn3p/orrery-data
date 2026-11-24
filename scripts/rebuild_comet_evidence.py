@@ -27,6 +27,19 @@ def pinned_rows(cache, source, object_id, midpoint, targets):
     return rows
 
 
+def modern_entries(index):
+    """Select replay inputs after product authentication, with explicit errors."""
+    if index['comet_contract_version'] == 2:
+        return index['objects']
+    entries = []
+    for entry in index['objects']:
+        matches = [segment for segment in entry['segments'] if segment['key'] == 'modern']
+        if len(matches) != 1:
+            raise DataError(f"{entry['id']}: expected exactly one modern segment for evidence replay")
+        entries.append(dict(matches[0], id=entry['id'], name=entry['name']))
+    return entries
+
+
 def rebuild(directory, cache, output):
     directory, cache, output = Path(directory), Path(cache), Path(output)
     # Never let fixture output replace public products or retained scientific inputs.
@@ -37,15 +50,11 @@ def rebuild(directory, cache, output):
     with writer_lock(lock):
         verified = verify_current_comets(directory)
         index = read_json(directory / verified['pin']['url'])
-        if index['comet_contract_version'] == 3:
-            # Replay the retained modern provenance; historical quarter-point
-            # evidence is independently replayed by comet_history_candidate.py.
-            index = dict(index, objects=[dict(
-                next(segment for segment in entry['segments'] if segment['key'] == 'modern'),
-                id=entry['id'], name=entry['name']) for entry in index['objects']])
-        targets = {entry['id']: entry['name'] for entry in index['objects']}
+        # Historical quarter-point evidence is replayed by comet_history_candidate.py.
+        entries = modern_entries(index)
+        targets = {entry['id']: entry['name'] for entry in entries}
         evidence = {}
-        for entry in index['objects']:
+        for entry in entries:
             object_id = entry['id']
             rows = pinned_rows(cache, entry['provenance']['vectors'], object_id, False, targets)
             middle = pinned_rows(cache, entry['provenance']['midpoints'], object_id, True, targets)

@@ -5,6 +5,7 @@ No acquisition or installation mode. Verification replays scientific checks from
 raw responses, rather than trusting a candidate's self-reported evidence.
 """
 import argparse
+from contextlib import nullcontext
 import math
 import re
 from datetime import date
@@ -107,12 +108,17 @@ def validate_metadata(value):
 def snapshot_modern(modern):
     """Capture validated bytes while excluding refresh publication/pruning."""
     modern = Path(modern).resolve()
-    with writer_lock(site_lock_path(modern.parent)):
+    # The frozen snapshot is protected by the existing immutable namespace.
+    # Mutable copies still coordinate with site writers. Neither path changes trust.
+    lock = nullcontext() if path_within(modern, SCHEMA2_BASELINE) else writer_lock(site_lock_path(modern.parent))
+    with lock:
         report, baseline = inspect_comets(modern, contract=CometContract(2))
-        if modern == SCHEMA2_BASELINE.resolve():
-            authenticate_baseline(report)
+        authenticate_baseline(report)
         files = {e['data']['url']: (modern / e['data']['url']).read_bytes()
                  for e in baseline['objects']}
+        for entry in baseline['objects']:
+            if reference(files[entry['data']['url']], 'objects/') != entry['data']:
+                raise DataError('Modern payload changed during snapshot capture')
     return baseline, files
 
 

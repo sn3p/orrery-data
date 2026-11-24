@@ -2,12 +2,12 @@
 import io
 import json
 from pathlib import Path
-from scripts.comet_baseline import SCHEMA2_BASELINE
 import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comet_product, comets, horizons
 from orrery_data.comet_product import descriptor_bytes, valid_id, valid_name
 from orrery_data.formats import DataError
@@ -71,9 +71,17 @@ class ReviewRegressions(unittest.TestCase):
             original = descriptor.read_bytes()
             snapshot = comet_product.descriptor_bytes
             inspect = comet_product.inspect_comets
+            acquired = mutated = False
+            def acquire(*args, **kwargs):
+                nonlocal acquired
+                acquired = True
+                return {}
             def snapshot_then_edit(path):
+                nonlocal mutated
                 value = snapshot(path)
-                if snapshot_mock.call_count == 1:
+                # Target the previous-product snapshot, after read-only preflight.
+                if acquired and not mutated:
+                    mutated = True
                     path.write_bytes(b'changed during previous-product read')
                 return value
             def inspect_previous(directory, **kwargs):
@@ -88,7 +96,7 @@ class ReviewRegressions(unittest.TestCase):
             def build(records, stage, previous):
                 self.assertEqual(previous, read_json(output / json.loads(original)['index']['url']))
                 shutil.copytree(output, stage, dirs_exist_ok=True)
-            with patch.object(comets.PRODUCT, 'acquire', return_value={}), \
+            with patch.object(comets.PRODUCT, 'acquire', side_effect=acquire), \
                  patch.object(comets.PRODUCT, 'build_candidate', side_effect=build), \
                  patch.object(comet_product, 'descriptor_bytes', side_effect=snapshot_then_edit) as snapshot_mock, \
                  patch.object(comet_product, 'inspect_comets', side_effect=inspect_previous):

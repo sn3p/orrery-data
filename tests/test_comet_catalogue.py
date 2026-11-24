@@ -4,12 +4,12 @@ import gzip
 import io
 import json
 from pathlib import Path
-from scripts.comet_baseline import SCHEMA2_BASELINE
 import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comets
 from orrery_data.browser import reference
 from orrery_data.cli import main
