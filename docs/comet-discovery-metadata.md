@@ -59,7 +59,11 @@ text remains unchanged; `catalogue_date` is its conservative structured parse,
 or null when absent/unparseable. Catalogue assertions are not automatically
 promoted into historical discovery events: the original six demonstrate why.
 Dates have year/month/day, precision, calendar and astronomical year numbering.
-No missing month/day is filled. New source dates use `historical-unspecified`
+No missing month/day is filled. Unspecified-calendar dates are retained when
+possible in either the Julian or Gregorian calendar (including 1700-02-29);
+acceptance does not choose a calendar. Explicit Gregorian dates and source
+`checked_on` dates use Gregorian validation. The reader independently checks
+that each catalogue date equals the conservative projection of its raw text. New source dates use `historical-unspecified`
 unless a source explicitly establishes a calendar; no UTC instant or JD is
 implied. Existing historical dates retain their original calendar conventions.
 Events distinguish discovery, independent discovery, rediscovery, recovery,
@@ -75,13 +79,13 @@ explicitly **not** a hash of original HTTP response bytes. Original-six raw
 provenance is unchanged. `events.json` is the reviewed editorial input.
 
 ```sh
-python scripts/comet_discovery_metadata.py --output .context/discovery/metadata.json
+python scripts/comet_discovery_metadata.py --output .context/comet-candidates/discovery/metadata.json
 python -m unittest discover -s tests -p test_comet_discovery_metadata.py -v
 node --test tests/comet-discovery-metadata.test.mjs
 ```
 
 The offline builder checks identities, rejects conflicting original citations,
-and rejects writes outside `.context`; an existing different candidate is not
+and rejects writes outside `.context/comet-candidates`; an existing different candidate is not
 overwritten. Rebuilding against another directory pin requires reassessment.
 
 ## Orrery handoff and activation boundary
@@ -158,3 +162,18 @@ temporary directory; local Firefox acceptance remains unverified. CI includes it
 Independent review prompted and verified regressions for provenance overwrites,
 malformed partial dates, path escape, source-lifetime cancellation and directory
 rebinding. GitHub CI status is reported separately at PR creation, without waiting.
+
+Review follow-up: the fresh-checkout test now owns an isolated root and verifies
+creation of `.context/comet-candidates`, escape rejection and immutable reuse.
+Every citation insertion checks conflicts, including generated per-object keys.
+Producer/reader share date expectation fixtures, accept Julian-compatible dates
+without choosing a calendar, reject impossible Gregorian source-check dates and
+require raw/structured catalogue-date agreement. The loader uses shared transport
+cancellation and labels errors with the metadata product and requested URL.
+Status rules are explicit, original histories use an ID map, and browser counts
+come from the input fixtures. The retained metadata bytes and coverage are unchanged.
+Seven focused Python tests, 79 server-free Node tests and isolated Chromium/WebKit
+rollback/production/candidate lanes pass after these fixes. The earlier GitHub
+Python 3.12 job failed on the missing `.context` fixture; its sibling Python jobs
+were cancelled and its browser job passed. The fix push runs all selected CI jobs;
+these local results do not claim the new CI run has completed.

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import {validateDiscoveryMetadata,loadDiscoveryMetadata} from '../consumer/cometDiscoveryMetadata.js';
+import {validateDiscoveryMetadata,loadDiscoveryMetadata,catalogueDate} from '../consumer/cometDiscoveryMetadata.js';
 import Directory from '../consumer/CometDirectorySource.js';
 const read=p=>JSON.parse(fs.readFileSync(p));
 const root='data/comets/',descriptor=read(root+'latest.json'),directory=read(root+descriptor.index.url),legacy=read(root+directory.legacy.url);
@@ -55,4 +55,35 @@ test('pending metadata download aborts on source close or caller cancellation',a
     await assert.rejects(loadDiscoveryMetadata(source,ref,'https://example.test/metadata.json'));
     assert.equal(observed,null);
   }
+});
+
+test('Python/JS date projections share calendar-neutral expectations',()=>{
+  for(const {raw,expected} of read('tests/comet-discovery-dates.json'))assert.deepEqual(catalogueDate(raw),expected);
+});
+test('calendar rules distinguish Gregorian from unspecified historical dates',()=>{
+  for(const [calendar,year,day,valid] of [['historical-unspecified',1700,29,true],['gregorian',1700,29,false],['historical-unspecified',1701,29,false],['historical-unspecified',1700,30,false]]) {
+    const v=structuredClone(metadata),e=v.objects.find(x=>x.id==='c1000068').discovery.events[0];
+    Object.assign(e,{certainty:'documented',date:{year,month:2,day,precision:'day',calendar,year_numbering:'astronomical'}});
+    if(valid)assert.doesNotThrow(()=>validate(v));else assert.throws(()=>validate(v));
+  }
+});
+test('reject mismatched catalogue date and impossible source check dates',()=>{
+  for(const mutate of [v=>v.objects.find(x=>x.id==='c1000068').discovery.catalogue_date.year=1800,
+    v=>v.objects.find(x=>x.id==='c1000068').discovery.catalogue_date=null,
+    ...['2026-13-45','2026-02-30','1900-02-29'].map(day=>v=>v.sources['pons-brooks-history'].checked_on=day)]) {
+    const v=structuredClone(metadata);mutate(v);assert.throws(()=>validate(v));
+  }
+});
+test('loader errors identify metadata and the requested URL',async t=>{
+  const old=globalThis.fetch;t.after(()=>globalThis.fetch=old);
+  const source=new Directory('https://example.test/index.json',descriptor.index.sha256,directory,{info:legacy,close(){}});
+  t.after(()=>source.close());
+  const url='https://example.test/metadata.json',ref={sha256:'a'.repeat(64),bytes:2};
+  for(const response of [()=>new Response('',{status:404}),()=>new Response('x'),()=>new Response('{}')]) {
+    globalThis.fetch=async()=>response();
+    await assert.rejects(loadDiscoveryMetadata(source,ref,url),e=>e.message.includes(url)&&!e.message.includes('undefined')&&/comet discovery metadata/i.test(e.message));
+  }
+  const controller=new AbortController();controller.abort();
+  globalThis.fetch=async()=>assert.fail('pre-cancelled request fetched');
+  await assert.rejects(loadDiscoveryMetadata(source,ref,url,{signal:controller.signal}),e=>e.name==='AbortError'&&e.message==='Comet discovery metadata read cancelled.');
 });
