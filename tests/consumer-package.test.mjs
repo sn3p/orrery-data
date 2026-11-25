@@ -21,5 +21,7 @@ test('documented consumer files load from an isolated copied package', async t =
   assert.equal(typeof CometCatalogSource.openLatest, 'function');
   const { default: History } = await import(pathToFileURL(path.join(directory, 'CometHistorySource.js')));
   assert.equal(typeof History.openLatest, 'function');
+  const { default: Directory } = await import(pathToFileURL(path.join(directory, 'CometDirectorySource.js')));
+  assert.equal(typeof Directory.openLatest, 'function');
   assert.equal(fetchVerified.length, 3);
 });
