@@ -149,8 +149,8 @@ redistributed artifacts; the code license does not relicense upstream data.
 
 ## Comet trajectories
 
-The separate [comet catalogue](docs/comets.md) provides validated Horizons
-a searchable directory of 4,089 entries with fourteen validated trajectories,
+The separate [comet catalogue](docs/comets.md) provides a searchable
+directory of 4,089 entries with fourteen validated Horizons trajectories,
 including the preserved six modern comets and historical segments for Halley
 and Tempel–Tuttle. The committed schema-4 replacement is subject to the
 [activation gates and rollback procedure](docs/comet-directory-activation.md). Use

@@ -46,15 +46,13 @@ wording. Both adapters share bounded transport, while the public
 `CatalogSource.js` export `fetchVerified(ref, url, signal)` remains an asteroid
 compatibility wrapper with the same three-argument API.
 
-For the comet catalogue use `CometCatalogSource.js` and the separate
-`comets/latest.json` endpoint; see [catalogue contract](../docs/comets.md).
-The comet reader requires `cometSourceCore.js`, `contract.js` and `transport.js`.
-The core retains interpolation,
-validation, verified loading and cancellation for the supported catalogue.
+For the committed schema-4 comet catalogue at `comets/latest.json`, use
+`CometDirectorySource.js` and the full comet file set listed above. It accepts
+schema 4 and the retained schema-3 rollback product. Schema-2 acquisition/bundled
+rollback uses `CometCatalogSource.js`; `CometHistorySource.js` is the schema-3
+adapter. Do not use either older adapter alone for the schema-4 endpoint.
 
-The unpublished schema-3 candidate adapter is `CometHistorySource.js`, with
-`cometHistoryContract.js`, `cometSourceCore.js`, `contract.js`, and `transport.js`.
-It does not replace the hosted schema-2 adapter. See the
-[candidate contract and Orrery handoff](../docs/comet-history-candidates.md).
-
-Unpublished catalogue v4: see [the contract and Orrery handoff](../docs/comet-directory.md). `CometDirectorySource` accepts production schema 3 and the exact expanded candidate; it does not change the hosted endpoint.
+See the [directory contract](../docs/comet-directory.md) and
+[activation and rollback record](../docs/comet-directory-activation.md).
+The draft prepares the committed replacement; hosted activation requires a
+separately authorized merge/deployment. The endpoint URL remains unchanged.

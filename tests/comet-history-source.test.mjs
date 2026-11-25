@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
+import os from 'node:os';
 import {SCHEMA2_BASELINE, HISTORY_INDEX, HISTORY_PRODUCT} from './comet-fixtures.mjs';
 import Source,{T,END} from '../consumer/CometHistorySource.js';
 import {modelIdentity} from '../consumer/cometHistoryContract.js';
@@ -131,17 +132,19 @@ test('corruption/missing pin assets reject and retry uses same pin; close reject
 });
 async function serializedProduct(directory) {
   const files=new Map();
-  let latest=JSON.parse(await fs.readFile(path.join(directory,'latest.json')));
+  let descriptor=await fs.readFile(path.join(directory,'latest.json'));
+  let latest=JSON.parse(descriptor);
   if(latest.comet_contract_version===4) {
     const raw=await fs.readFile(path.join(directory,latest.index.url));
     assert.equal(createHash('sha256').update(raw).digest('hex'),latest.index.sha256);
     assert.equal(raw.length,latest.index.bytes);
     latest={comet_contract_version:3,index:JSON.parse(raw).legacy};
+    descriptor=Buffer.from(JSON.stringify(latest));
   }
   const index=JSON.parse(await fs.readFile(path.join(directory,latest.index.url)));
   for(const name of ['latest.json',latest.index.url,...index.objects.flatMap(o=>o.segments.map(s=>s.data.url))])
     files.set(name,await fs.readFile(path.join(directory,name)));
-  files.set('latest.json',JSON.stringify(latest));
+  files.set('latest.json',descriptor);
   return {files,index,latest};
 }
 
@@ -267,4 +270,20 @@ test('model header normalization preserves science for every Python line separat
     assert.equal(modelIdentity(header),'EOP file: observed\nModel: DE441');
     assert.notEqual(modelIdentity(header.replace('DE441','DE440')),modelIdentity(header));
   }
+});
+
+test('serialized schema-3 input retains descriptor bytes and rejects an oversized descriptor',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'comet-history-descriptor-'));
+  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const product=await serializedProduct(HISTORY_PRODUCT);
+  for(const [name,raw] of product.files) {
+    await fs.mkdir(path.dirname(path.join(directory,name)),{recursive:true});
+    await fs.writeFile(path.join(directory,name),raw);
+  }
+  const descriptor=Buffer.from(JSON.stringify(product.latest,null,2)+'\n'+' '.repeat(4096));
+  await fs.writeFile(path.join(directory,'latest.json'),descriptor);
+  const loaded=await serializedProduct(directory);
+  assert.deepEqual(loaded.files.get('latest.json'),descriptor);
+  transport(t,loaded);
+  await assert.rejects(open(),/latest descriptor size/);
 });

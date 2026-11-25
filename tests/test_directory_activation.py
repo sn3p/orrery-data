@@ -48,7 +48,6 @@ class DirectoryActivation(unittest.TestCase):
         self.assertFalse((self.root/'stale').exists())
 
     def test_corrupt_missing_extra_symlink_and_unapproved_fail_closed(self):
-        original = inventory(self.candidate)
         for kind in ('pin', 'manifest', 'payload', 'legacy', 'missing', 'extra', 'symlink'):
             with self.subTest(kind=kind):
                 shutil.rmtree(self.candidate)
@@ -73,7 +72,7 @@ class DirectoryActivation(unittest.TestCase):
     def test_immutable_v4_writers_reject_before_acquisition(self):
         before = inventory(self.candidate)
         with patch('orrery_data.horizons.acquire') as acquire:
-            with self.assertRaisesRegex(DataError, 'immutable schema-4'):
+            with self.assertRaisesRegex(DataError, r'immutable schema-4 release; .*docs/comet-directory-activation\.md'):
                 refresh_comets(self.root/'cache', self.candidate)
             acquire.assert_not_called()
         alias = self.root/'alias'; alias.symlink_to(self.candidate, target_is_directory=True)
@@ -82,3 +81,30 @@ class DirectoryActivation(unittest.TestCase):
                 validate_writable_path(target)
         self.assertFalse((self.root/'cache').exists())
         self.assertEqual(inventory(self.candidate), before)
+
+    def test_schema3_rollback_cli_guards_current_v4_pin_and_source_lock(self):
+        from orrery_data.storage import writer_lock, site_lock_path
+        rollback = self.root/'historical'
+        history_fixture(rollback)
+        shutil.rmtree(self.site/'comets')
+        shutil.copytree(self.candidate, self.site/'comets')
+        before = inventory(self.site)
+        output = self.root/'recovery'
+        command = [sys.executable, '-m', 'orrery_data', 'prepare-comet-rollout',
+                   '--site', str(self.site), '--candidate', str(rollback),
+                   '--output', str(output), '--expected-current-pin', DIRECTORY_PIN]
+        with writer_lock(site_lock_path(self.site)):
+            run = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('Another writer', run.stderr)
+        run = subprocess.run(command[:-1]+[HISTORY_PIN], capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('pin changed', run.stderr)
+        self.assertFalse(output.exists())
+        run = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(verify_current_comets(output/'site/comets')['pin']['sha256'], HISTORY_PIN)
+        self.assertEqual(inventory(output/'rollback'), before)
+        self.assertEqual(inventory(self.site), before)
+        self.assertEqual({k:v for k,v in inventory(output/'site').items() if not k.startswith('comets/')},
+                         {k:v for k,v in before.items() if not k.startswith('comets/')})

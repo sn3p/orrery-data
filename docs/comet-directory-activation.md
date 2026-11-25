@@ -59,22 +59,18 @@ mkdir -p .context
 rollback_work=$(mktemp -d .context/directory-rollback.XXXXXX)
 git archive 53a6ce491c5b5a119236fc629e54449bf15920a5 data/comets | tar -x -C "$rollback_work"
 python3 -m orrery_data verify-comets --directory "$rollback_work/data/comets"
-python3 - "$rollback_work" <<'PYTHON'
-import json, shutil, sys
-from pathlib import Path
-root = Path(sys.argv[1])
-assert json.loads((root/'data/comets/latest.json').read_bytes())['index']['sha256'] == \
-    'a9de1f2f711dd65e880102de7c1f0c14bf20598a20d9cc4e001081406e40c2e2'
-shutil.copytree('data', root/'site', ignore=lambda directory, names:
-                ['comets'] if Path(directory) == Path('data') else [])
-shutil.copytree(root/'data/comets', root/'site/comets')
-PYTHON
-python3 -m orrery_data verify-site --directory "$rollback_work/site"
-python3 scripts/prepare_browser_site.py --source "$rollback_work/site" --output "$rollback_work/pages"
+python3 -m orrery_data prepare-comet-rollout --site data \
+  --candidate "$rollback_work/data/comets" --output "$rollback_work/release" \
+  --expected-current-pin 907f8cb552c65db81eb3ec3167b0d422e764ab5fef1fcbbb948e63cae21f1070
+python3 scripts/prepare_browser_site.py --source "$rollback_work/release/site" --output "$rollback_work/pages"
 ```
 
-This prepares local recovery only. For an explicitly authorized rollback, use a
-fresh reviewed PR replacing **only** `data/comets` with the verified rollback
+This prepares local recovery only. The CLI snapshots current data under the
+site writer lock, requires the expected v4 pin, checks asteroid preservation and
+retains the pre-rollback v4 site in `release/rollback`. A changed current comet
+pin must be reassessed; do not substitute a new pin just to bypass the guard.
+
+For an explicitly authorized rollback, use a fresh reviewed PR replacing **only** `data/comets` with the verified rollback
 product, removing v4-only files. Preserve current asteroid files, recheck deployed
 reader schema-3 support, and repeat complete-site staging. Keep the rollback PR,
 source commit, index pin and deployment ID in the recovery record. The older

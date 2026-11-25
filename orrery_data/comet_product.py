@@ -274,9 +274,11 @@ def refresh_comets(cache, output, *, acquire_records, build, verify, inspect):
     previous = descriptor_bytes(output / 'latest.json')
     descriptor = None if previous is None else loads_json(previous)
     if isinstance(descriptor, dict) and descriptor.get('comet_contract_version') in (3, 4):
-        raise DataError(f"refresh-comets cannot refresh an immutable schema-{descriptor['comet_contract_version']} historical release; "
-                        'prepare a scientifically verified replacement as described in '
-                        'docs/comet-production-rollout.md')
+        version = descriptor['comet_contract_version']
+        guide = ('docs/comet-directory-activation.md' if version == 4
+                 else 'docs/comet-production-rollout.md')
+        raise DataError(f'refresh-comets cannot refresh an immutable schema-{version} release; '
+                        f'prepare a scientifically verified replacement as described in {guide}')
     output = validate_writable_path(output, label='Comet output')
     site = output.parent
     # A failed acquisition must not leave locks/raw inputs in either product.
