@@ -14,8 +14,27 @@ spec.loader.exec_module(module)
 
 @unittest.skipUnless(shutil.which('node'), 'Candidate verification requires Node')
 class DirectoryCandidateTests(unittest.TestCase):
+    def setUp(self):
+        # Each case starts in a new checkout-like namespace, independent of order
+        # and of any candidates already assembled in the developer workspace.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        for name in ('data', 'scripts'):
+            (self.root / name).symlink_to(ROOT / name, target_is_directory=True)
+        root_patch = patch.object(module, 'ROOT', self.root)
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
+        self.parent = self.root / '.context/comet-candidates'
+        self.parent.mkdir(parents=True)
+
+    def test_build_creates_missing_namespace(self):
+        self.parent.rmdir()
+        result = module.build(self.parent / 'fresh')
+        self.assertEqual(result['files'], 27)
+
     def test_exact_immutable_candidate_and_baseline_preservation(self):
-        parent = ROOT / '.context/comet-candidates'
+        parent = self.parent
         parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=parent) as temporary:
             output = Path(temporary)
@@ -34,7 +53,7 @@ class DirectoryCandidateTests(unittest.TestCase):
     def test_public_output_and_alias_rejected(self):
         with self.assertRaisesRegex(ValueError, 'direct directory'):
             module.build(ROOT / 'data/comets')
-        parent = ROOT / '.context/comet-candidates'
+        parent = self.parent
         with tempfile.TemporaryDirectory(dir=parent) as temporary:
             alias = Path(temporary) / 'alias'
             alias.symlink_to(ROOT / 'data/comets', target_is_directory=True)
@@ -42,7 +61,7 @@ class DirectoryCandidateTests(unittest.TestCase):
                 module.build(alias)
 
     def test_alias_introduced_during_verification_is_rejected(self):
-        parent = ROOT / '.context/comet-candidates'
+        parent = self.parent
         with tempfile.TemporaryDirectory(dir=parent) as temporary:
             output = Path(temporary)
             output.rmdir()
@@ -63,4 +82,4 @@ class DirectoryCandidateTests(unittest.TestCase):
             (fixture / 'fixture.json').write_text(json.dumps(spec))
             with patch.object(module, 'FIXTURE', fixture):
                 with self.assertRaisesRegex(ValueError, 'pin differs'):
-                    module.build(ROOT / '.context/comet-candidates/invalid-pin-test')
+                    module.build(self.parent / 'invalid-pin-test')
