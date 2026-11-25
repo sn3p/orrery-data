@@ -58,6 +58,14 @@ export function validateDirectory(v) {
     } else need(e.trajectory === null,'empty trajectory');
   }
   for(const e of v.objects) need(e.parent_id === null || e.parent_id !== e.id && seen.has(e.parent_id),'parent');
+  const parents=new Map(v.objects.map(e=>[e.id,e.parent_id])),finished=new Set();
+  for(const e of v.objects) {
+    const path=new Set();let current=e.id;
+    while(current!==null&&!finished.has(current)) {
+      need(!path.has(current),'parent cycle');path.add(current);current=parents.get(current);
+    }
+    for(const visited of path)finished.add(visited);
+  }
   for(const d of v.defaults) need(v.objects.some(e=>e.id === d && e.trajectory?.kind === 'legacy'),'legacy membership');
   return freeze(v);
 }
@@ -73,10 +81,6 @@ export function validateManifest(v,e) {
     need(id(s.key) && !seen.has(s.key),'segment key');seen.add(s.key);
     const previous=v.segments[index-1],touching=previous?.coverage.end===s.coverage.start;
     need(touching?['continuous','separate'].includes(s.join):s.join===null,'join policy');
-    if(s.join==='continuous') need(s.provenance.vectors.target===previous.provenance.vectors.target
-      && s.provenance.vectors.solution===previous.provenance.vectors.solution
-      && modelIdentity(s.provenance.vectors.header).split('\n').filter(l=>!l.startsWith('Step-size')).join('\n')
-        ===modelIdentity(previous.provenance.vectors.header).split('\n').filter(l=>!l.startsWith('Step-size')).join('\n'),'join model');
     fields(s.grid,['start','step','count']);
     const g=s.grid,end=g.start+g.step*(g.count-1);
     need(Number.isFinite(g.start) && Number.isFinite(g.step) && g.step > 0 && g.start+g.step>g.start && end-g.step<end && Number.isSafeInteger(g.count) && g.count >= 2
@@ -92,6 +96,10 @@ export function validateManifest(v,e) {
       need(p.target === s.provenance.vectors.target && (p.target === e.name || e.aliases.includes(p.target)) && p.solution === s.provenance.vectors.solution
         && modelIdentity(p.header) === modelIdentity(s.provenance.vectors.header),'model identity');
     }
+    if(s.join==='continuous') need(s.provenance.vectors.target===previous.provenance.vectors.target
+      && s.provenance.vectors.solution===previous.provenance.vectors.solution
+      && modelIdentity(s.provenance.vectors.header).split('\n').filter(l=>!l.startsWith('Step-size')).join('\n')
+        ===modelIdentity(previous.provenance.vectors.header).split('\n').filter(l=>!l.startsWith('Step-size')).join('\n'),'join model');
     const a=s.validation;fields(a,['method','samples','tolerance_au','max_error_au','references']);
     need(['all-midpoints-final-serialized','all-quarter-points-final-serialized'].includes(a.method)
       && a.samples === (g.count-1)*(a.method.startsWith('all-quarter')?3:1)

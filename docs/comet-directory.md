@@ -93,6 +93,13 @@ The candidate verifier checks every retained midpoint for all eight additions.
 Production historical evidence and ordinary science tests remain independently
 applicable; this change does not relabel midpoint validation as quarter-point
 validation. Future adaptive generation must supply its declared validation evidence.
+Offline acceptance verifies the full declared grid, sample count and measured
+maximum separately for every segment. Existing flat independent-proof rows use
+exact coverage ownership (exclusive ends belong to the following segment).
+For overlapping sample supports or support-only dates outside owned coverage,
+proofs must use `{segments:{[key]:rows}}` to bind each row to its source block.
+Missing, duplicate, off-grid and unowned flat rows fail explicitly. The pinned
+first-release evidence and payload bytes are unchanged.
 
 ## Reference reader
 
@@ -121,7 +128,9 @@ not confused with an unassessed known entry. Selection reconciliation must retai
 missing saved IDs according to the settled Mogadishu behaviour.
 
 Search eagerly reads bounded metadata only; no trajectory fetches. It searches
-identity, designation, name and aliases in the entire pin. The stable cursor
+identity, designation, name and aliases in the entire pin, retaining Unicode
+letters and numbers. An empty/whitespace query browses; punctuation-only queries
+return no matches and cannot resolve an identity. The stable cursor
 includes the pin/query and rejects reuse across generations or queries. It
 returns `items`, `total`, `complete:true`, `nextCursor`. Sorting/filtering the
 selected section remains app work; search does not mutate selection.
@@ -129,14 +138,23 @@ selected section remains app work; search does not mutate selection.
 `availabilityAt` returns `available_at_date`, `outside_coverage`, or the
 assessment state for objects without coverage. A scoped unsupported assessment returns
 `not_yet_assessed` outside its evaluated intervals. Runtime loading/error is separate.
-`loadWindow` returns `{id,status,segments}`; `status` concerns the start date,
-while segments cover any intersecting supported ranges. No intersection returns
-an empty list without downloading. A required-file failure rejects the operation;
-no successful partial Fit. Intersecting files are lazy, and adjacent continuous
-join support may also load. `positionAt` returns null outside published coverage.
+`load(id,{jd,signal})` returns one `{key,coverage,series}` segment or null, so
+existing date readers can continue using `.series`. `loadWindow` returns
+`{id,status,startStatus,complete,segments}`. `status:'available'` means the window
+intersects published coverage and has returned segments; `complete` says whether
+coverage contains the entire requested interval, including its endpoints.
+`startStatus` is the separate `availabilityAt(id,start)` result. Thus a window
+starting before coverage can return data with `complete:false`; a window crossing
+a gap also has `complete:false`. With no intersection, `status` is `startStatus`,
+`complete:false` and `segments:[]`, without downloading. The chooser must use
+`availabilityAt(id,jd)` for date labels, not window status. A required-file failure
+rejects the operation; no successful partial Fit. Intersecting files are lazy,
+and adjacent continuous join support may also load. `positionAt` returns null
+outside published coverage.
 
 Requests share subscriber cancellation, retry and source lifetime semantics.
-New-data downloads have a two-request queue and a 16 MiB decoded-byte FIFO cache;
+New-data downloads share a two-request queue and use a 16 MiB LRU cache
+accounted by serialized bytes;
 requests exceeding a 16 MiB window fail explicitly instead of accumulating an
 unbounded result. The fixed legacy inventory has a separate existing bound of
 16 MiB. These are serialized-byte accounting limits, not measured JavaScript
@@ -186,7 +204,7 @@ that separately authorized switch. Producer tests are not app acceptance.
 
 ## Producer verification record
 
-Local verification on 25 November 2026:
+Initial local verification on 25 November 2026 (before attached-review fixes):
 
 - 195 Python tests in the inspected server-free selection passed; four final
   candidate-builder tests passed after review fixes (overlapping coverage, not
@@ -209,9 +227,19 @@ Local verification on 25 November 2026:
 - Independent review findings were fixed with boundary regressions; final
   independent reader/contract/builder review reported no remaining blockers.
 
+Review follow-up on 25 November 2026: 66 focused comet/transport/package Node
+tests and five isolated candidate-builder tests passed, including unchanged
+production and exact-candidate acceptance. Isolated Chromium and WebKit also
+passed both exact pins again after these fixes. The earlier published head's
+browser CI passed, including Firefox. Its Python job exposed a test-order dependency on
+an existing `.context/comet-candidates` directory; each builder test now has an
+isolated root, with an additional fresh-namespace regression. These results do
+not imply passing CI for the review-fix revision.
+
 Full selected CI consists of Python 3.11/3.12/3.13 discovery, the 3.13 site
 verification and the browser job (npm tests, new directory-browser lanes and
-existing browser-workflows). It has not run for these unpublished commits.
+existing browser-workflows). The review-fix push reruns these jobs; report the
+available status without waiting.
 Local full discovery and the existing HTTP browser suites are not run because
 of the standing prohibition on starting servers. Excluded Python modules:
 `test_cli`, `test_source_cache`, `test_browser_scripts`, `test_releases`,

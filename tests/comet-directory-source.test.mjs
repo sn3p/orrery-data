@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import Source from '../consumer/CometDirectorySource.js';
 import {CONVENTIONS} from '../consumer/cometSourceCore.js';
 import {verify} from '../scripts/verify_comet_directory.mjs';
+import {verifyObjectProof,proofOwner} from '../scripts/comet_directory_proof.mjs';
 const base='https://example.test/comets/';
 const spec=JSON.parse(await fs.readFile('research/comet-expansion/fixture.json'));
 const template=new Map();
@@ -27,8 +28,11 @@ test('exact expanded fixture preserves legacy bytes, defaults, IDs and all measu
  assert.equal(calls.length,3);assert.equal(s.search('',{limit:30}).total,4089);assert.deepEqual(s.info.defaults,legacy.objects.map(e=>e.id));
  for(const e of legacy.objects){assert.equal(s.getObject(e.id).id,e.id);assert.deepEqual((await s.getDetails(e.id)).discovery,e.discovery);for(const seg of e.segments){assert.deepEqual(await s.positionAt(e.id,seg.coverage.start),(await s.legacy.positionAt(e.id,seg.coverage.start)));}}
  const proof=JSON.parse(gunzipSync(await fs.readFile('research/comet-expansion/midpoints.json.gz')));
- const {interpolateComet}=await import('../consumer/cometSourceCore.js');let count=0;
- for(const [id,rows] of Object.entries(proof)) {const e=s.getObject(id),result=await s.loadWindow(id,{start:e.coverage[0].start,end:e.coverage.at(-1).end});let max=0;for(const r of rows){max=Math.max(max,Math.hypot(...interpolateComet(result.segments[0].series,r[0]).map((x,i)=>x-r[i+1])));count++;}assert.ok(max<=.000052);assert.ok(Math.abs(max-(await s.manifest(e)).segments[0].validation.max_error_au)<1e-14);}
+ let count=0;
+ for(const [id,rows] of Object.entries(proof)) {
+  const e=s.getObject(id),result=await s.loadWindow(id,{start:e.coverage[0].start,end:e.coverage.at(-1).end});
+  count+=verifyObjectProof(result.segments,(await s.manifest(e)).segments,rows);
+ }
  assert.equal(count,87656);assert.equal(s.info.objects.filter(e=>e.coverage.length).length,14);
 });
 function shortFixture(edit=()=>{}) {return fixture((index,files)=>{
@@ -109,4 +113,55 @@ test('cache eviction releases block descriptors as well as payloads',async t=>{
  const f=shortFixture();transport(t,f);const s=await open();await s.positionAt('1995 O1',2450001);assert.ok(s.entries.some(e=>e.kind==='block'));
  s.cacheBudget=1;s.trim();assert.equal(s.cache.size,0);assert.equal(s.entries.filter(e=>e.kind==='block').length,0);
  s.cacheBudget=16*1024*1024;assert.deepEqual(await s.positionAt('1995 O1',2450001),[1,0,0]);s.close();
+});
+test('Unicode aliases remain searchable and punctuation is not an empty browse query',async t=>{
+ const f=fixture(i=>i.objects[0].aliases.push('百武','Галлей','!!!'));transport(t,f);const s=await open();
+ assert.equal(s.search('百武').total,1);assert.equal(s.getObject('百武').id,'1P');assert.equal(s.search('Галлей').total,1);
+ assert.equal(s.search('!!!').total,0);assert.throws(()=>s.getObject('!!!'),/unknown identity/);assert.equal(s.search(' ').total,4089);s.close();
+});
+test('missing legacy member rejects on open and parent cycles reject',async t=>{
+ const f=fixture((i,files)=>{const v=structuredClone(legacy);v.objects.pop();i.legacy=put(files,v,'index-');});transport(t,f);await assert.rejects(open(),/catalogue|legacy/);
+ for(const length of [2,3]){const f=fixture(i=>{for(let k=0;k<length;k++)i.objects[k].parent_id=i.objects[(k+1)%length].id;});transport(t,f);await assert.rejects(open(),/parent cycle/);}
+});
+test('malformed continuous provenance always reports a contract error',async t=>{
+ for(const mutate of [s=>delete s.provenance,s=>s.provenance=null,s=>s.provenance.vectors.header=42]){
+  const f=shortFixture((i,e,m)=>mutate(m.segments[1]));transport(t,f);const s=await open();await assert.rejects(s.positionAt('1995 O1',2450002),/^Error: Invalid comet directory/);s.close();
+ }
+});
+test('window status describes returned coverage and date load returns one series or null',async t=>{
+ const f=shortFixture();transport(t,f);const s=await open();
+ const partial=await s.loadWindow('1995 O1',{start:2449999,end:2450001});assert.equal(partial.status,'available');assert.equal(partial.startStatus,'outside_coverage');assert.equal(partial.complete,false);assert.ok(partial.segments.length);
+ const gap=await s.loadWindow('1995 O1',{start:2450000,end:2450012});assert.equal(gap.status,'available');assert.equal(gap.complete,false);
+ const empty=await s.loadWindow('1995 O1',{start:2450004,end:2450005});assert.equal(empty.status,'outside_coverage');assert.equal(empty.complete,false);assert.deepEqual(empty.segments,[]);
+ const full=await s.loadWindow('1995 O1',{start:2450000,end:2450003});assert.equal(full.complete,true);
+ assert.ok((await s.load('1995 O1',{jd:2450001})).series);assert.equal(await s.load('1995 O1',{jd:2450004}),null);
+ assert.ok((await s.load('1P',{jd:2450001})).series);assert.equal(await s.load('1P',{jd:1}),null);s.close();
+});
+test('repeated reads keep a hot block resident under cache pressure',async t=>{
+ const f=shortFixture((i,e,m)=>m.segments[1].join='separate');const calls=transport(t,f),s=await open();const e=s.getObject('1995 O1');
+ const m=await s.manifest(e),[a,b,c]=m.segments;s.cacheBudget=e.trajectory.manifest.bytes+a.data.bytes+b.data.bytes+c.data.bytes-1;
+ await s.positionAt(e.id,a.coverage.start);await s.positionAt(e.id,b.coverage.start);await s.positionAt(e.id,a.coverage.start);await s.positionAt(e.id,c.coverage.start);
+ await s.positionAt(e.id,a.coverage.start);assert.equal(calls.filter(n=>n===a.data.url).length,1);s.close();
+});
+test('independent acceptance verifies every segment, its full grid and exact ownership',()=>{
+ const descriptors=[0,2].map((start,i)=>({key:`part-${i}`,coverage:{start,end:start+2,end_inclusive:i===1},
+  grid:{start,step:1,count:3},validation:{method:'all-midpoints-final-serialized',samples:2,tolerance_au:.000052,max_error_au:(i+1)*.00001}}));
+ const segments=descriptors.map(s=>({...s,series:{start:s.grid.start,step:1,states:Array.from({length:3},()=>[0,0,0,0,0,0])}}));
+ const rows=[[.5,.00001,0,0],[1.5,0,0,0],[2.5,.00002,0,0],[3.5,0,0,0]];
+ assert.equal(verifyObjectProof(segments,descriptors,rows),4);
+ assert.equal(proofOwner(descriptors,2).key,'part-1');assert.equal(proofOwner(descriptors,4).key,'part-1');
+ assert.throws(()=>proofOwner(descriptors,5),/Proof date 5.*found 0/);
+ assert.throws(()=>verifyObjectProof(segments,descriptors,[...rows,[5,0,0,0]]),/Proof date 5.*found 0/);
+ const wrong=structuredClone(descriptors);wrong[1].validation.max_error_au=.00001;
+ assert.throws(()=>verifyObjectProof(segments,wrong,rows),/part-1: recorded maximum/);
+ assert.throws(()=>verifyObjectProof(segments,descriptors,rows.slice(0,-1)),/part-1: proof sample count/);
+ assert.throws(()=>verifyObjectProof(segments,descriptors,[rows[0],rows[0],...rows.slice(2)]),/duplicate or off-grid/);
+ // A support-only interval can overlap another segment's owned interval. Its
+ // independent model evidence must be explicitly attached to the right block.
+ const overlap=structuredClone(descriptors);overlap[0].coverage.end=1;
+ const grouped={segments:{'part-0':rows.slice(0,2),'part-1':rows.slice(2)}};
+ assert.equal(verifyObjectProof(segments,overlap,grouped),4);
+ assert.throws(()=>verifyObjectProof(segments,overlap,rows),/Proof date 1.5.*found 0/);
+ const quarter=structuredClone(descriptors.slice(0,1));quarter[0].validation={...quarter[0].validation,method:'all-quarter-points-final-serialized',samples:6,max_error_au:0};
+ assert.equal(verifyObjectProof(segments.slice(0,1),quarter,[.25,.5,.75,1.25,1.5,1.75].map(t=>[t,0,0,0])),6);
 });

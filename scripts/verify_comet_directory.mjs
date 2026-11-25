@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {gunzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 import Source from '../consumer/CometDirectorySource.js';
-import {interpolateComet} from '../consumer/cometSourceCore.js';
+import {verifyObjectProof} from './comet_directory_proof.mjs';
 export async function verify(directory) {
   const root=path.resolve(directory),base='https://candidate.invalid/',original=globalThis.fetch;
   globalThis.fetch=async url=>{
@@ -28,14 +28,8 @@ export async function verify(directory) {
         assert.ok((await source.positionAt(e.id,s.coverage.start)).every(Number.isFinite));
       }
       if(proof[e.id]) {
-        let maximum=0;
-        for(const row of proof[e.id]) {
-          const s=result.segments.find(s=>row[0]>=s.coverage.start&&row[0]<=s.coverage.end);
-          maximum=Math.max(maximum,Math.hypot(...interpolateComet(s.series,row[0]).map((v,i)=>v-row[i+1])));checks++;
-        }
-        assert.ok(maximum<=.000052);
         const manifest=await source.manifest(e);
-        assert.ok(Math.abs(maximum-manifest.segments[0].validation.max_error_au)<1e-14);
+        checks+=verifyObjectProof(result.segments,manifest.segments,proof[e.id]);
       }
     }
     assert.deepEqual(source.info.defaults,['1P','2P','55P','9P','10P','67P']);
