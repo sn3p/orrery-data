@@ -5,7 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {gunzipSync} from 'node:zlib';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 const root=process.cwd(),spec=JSON.parse(await fs.readFile('research/comet-expansion/fixture.json'));
+const metadata=await fs.readFile('research/comet-discovery/metadata.json');
+const metadataRef={sha256:createHash('sha256').update(metadata).digest('hex'),bytes:metadata.length};
 const candidate=new Map();
 for(const [name,item] of Object.entries(spec.files))candidate.set(name,gunzipSync(await fs.readFile('research/comet-expansion/payloads/'+item.file)));
 const legacy=JSON.parse(await fs.readFile('data/comets/'+spec.legacy.url));
@@ -23,6 +26,7 @@ for(const browserName of selected) {
     const url=new URL(route.request().url());
     if(url.origin!=='https://directory.test')return route.abort();
     const name=url.pathname.slice(1);
+    if(name==='metadata.json')return route.fulfill({contentType:'application/json',body:metadata});
     if(!name)return route.fulfill({contentType:'text/html',body:'<!doctype html><title>Reader acceptance</title>'});
     if(name.startsWith('consumer/')&&/^[A-Za-z]+\.js$/.test(path.basename(name)))return route.fulfill({contentType:'text/javascript',body:await fs.readFile(path.join(root,name))});
     if(name.startsWith('data/')) {
@@ -36,13 +40,18 @@ for(const browserName of selected) {
     return route.fulfill({status:404,body:''});
    });
    await page.goto('https://directory.test/');
-   const result=await page.evaluate(async()=>{
+   const result=await page.evaluate(async metadataRef=>{
     const {default:Source}=await import('/consumer/CometDirectorySource.js');const s=await Source.openLatest('https://directory.test/data/latest.json');
+    if(s.info.comet_contract_version===4){
+     const {loadDiscoveryMetadata}=await import('/consumer/cometDiscoveryMetadata.js');
+     const metadata=await loadDiscoveryMetadata(s,metadataRef,'https://directory.test/metadata.json');
+     if(metadata.objects.length!==4089||metadata.objects.filter(o=>['preserved','sourced'].includes(o.status)).length!==126)throw Error('Metadata coverage');
+    }
     let available=0;
     try {for(const e of s.info.objects)if(e.coverage.length){available++;for(const c of e.coverage){const p=await s.positionAt(e.id,c.start);if(!p?.every(Number.isFinite))throw Error('Missing position');} }
      return {pin:s.sourceId,count:s.search('').total,available,defaults:s.info.defaults,discovery:(await s.getDetails('1P')).discovery};
     } finally {s.close();}
-   });
+   },metadataRef);
    assert.equal(result.pin,lane==='rollback'?spec.legacy.sha256:spec.candidate.sha256);
    assert.equal(result.count,lane==='rollback'?6:4089);assert.equal(result.available,lane==='rollback'?6:14);
    assert.deepEqual(result.defaults,['1P','2P','55P','9P','10P','67P']);assert.deepEqual(result.discovery,legacy.objects[0].discovery);assert.deepEqual(errors,[]);
