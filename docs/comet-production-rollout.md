@@ -1,5 +1,10 @@
 # Historical comet production rollout
 
+This document records the historical schema-3 rollout. For the subsequent
+schema-4 directory replacement and its schema-3 rollback, use
+[the directory activation record](comet-directory-activation.md).
+
+
 The activation change replaces committed `data/comets` with the approved schema-3
 release. It remains a draft pending the deployment and acceptance gates recorded
 in [the activation record](comet-activation.md). Preparing or merging support

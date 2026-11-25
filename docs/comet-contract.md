@@ -1,10 +1,10 @@
 # Comet catalogue wire format and scientific provenance
 
 This documents the schema-2 acquisition and rollback contract. The committed
-product at `comets/latest.json` now uses the pinned [schema-3 historical
-contract](comet-history-candidates.md), pending [activation gates](comet-activation.md).
+product at `comets/latest.json` contains the pinned [schema-4 directory
+contract](comet-directory.md), pending [activation gates](comet-directory-activation.md).
 The refresh commands below apply only to a schema-2 working product; they
-intentionally reject the activated historical product. See [catalogue operation](comets.md).
+intentionally reject immutable schema-3 and schema-4 products. See [catalogue operation](comets.md).
 
 ## Commands and ownership
 

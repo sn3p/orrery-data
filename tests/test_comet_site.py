@@ -33,7 +33,7 @@ class SitePublication(unittest.TestCase):
         run = subprocess.run([sys.executable, str(self.root/'scripts/prepare_browser_site.py'),
                               '--output', str(output)], cwd=self.root, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(json.loads(run.stdout)['comets']['objects'], 6)
+        self.assertEqual(json.loads(run.stdout)['comets']['objects'], 4089)
         expected = {str(p.relative_to(self.data)): p.read_bytes() for p in self.data.rglob('*') if p.is_file()}
         actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob('*') if p.is_file()}
         self.assertEqual(actual, {**expected, '.nojekyll': b''})

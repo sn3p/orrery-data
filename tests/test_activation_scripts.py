@@ -97,7 +97,7 @@ class ActivationScripts(unittest.TestCase):
 
     def test_production_refresh_has_release_specific_error_before_acquisition(self):
         with tempfile.TemporaryDirectory() as temp, patch('orrery_data.horizons.acquire') as acquire:
-            with self.assertRaisesRegex(DataError, 'refresh-comets cannot refresh.*schema-3 historical release'):
+            with self.assertRaisesRegex(DataError, 'refresh-comets cannot refresh.*schema-[34] release'):
                 comets.refresh_comets(Path(temp) / 'cache', ROOT / 'data/comets')
             acquire.assert_not_called()
             self.assertEqual(list(Path(temp).iterdir()), [])

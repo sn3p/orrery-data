@@ -1,8 +1,10 @@
-# Unpublished searchable comet catalogue contract
+# Searchable comet catalogue contract
 
 Contract 4 separates catalogue identity, assessment and published trajectory
-coverage. It is an unpublished candidate alongside production contract 3;
-`data/`, publication commands and the active endpoint are unchanged.
+coverage. The [draft activation record](comet-directory-activation.md) prepares
+this exact candidate in `data/`; hosted activation remains a separate authorized
+release step. The implementation and acceptance handoff below records the original
+reader-first rollout requirements.
 
 ## Exact acceptance inputs
 

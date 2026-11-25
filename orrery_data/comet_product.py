@@ -20,7 +20,7 @@ CONVENTIONS = {'center': 'Sun', 'frame': 'Ecliptic J2000', 'time': 'UT',
 MAX_OBJECT_BYTES = 2 * 1024 * 1024
 MAX_INDEX_BYTES = 256 * 1024
 TOLERANCE = 0.000052
-MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|objects/[a-f0-9]{64}\.json)')
+MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|(?:objects|manifests)/[a-f0-9]{64}\.json)')
 
 
 def number(value):
@@ -58,7 +58,7 @@ class CometContract:
 
 
 def managed_files(directory):
-    return managed_tree(directory, MANAGED, children=('objects',), label='Comet output')
+    return managed_tree(directory, MANAGED, children=('objects', 'manifests'), label='Comet output')
 
 
 def validate_series(series):
@@ -273,10 +273,12 @@ def refresh_comets(cache, output, *, acquire_records, build, verify, inspect):
     # non-regular and oversized entries; the CLI reports parsing/I/O errors.
     previous = descriptor_bytes(output / 'latest.json')
     descriptor = None if previous is None else loads_json(previous)
-    if isinstance(descriptor, dict) and descriptor.get('comet_contract_version') == 3:
-        raise DataError('refresh-comets cannot refresh an immutable schema-3 historical release; '
-                        'prepare a scientifically verified replacement as described in '
-                        'docs/comet-production-rollout.md')
+    if isinstance(descriptor, dict) and descriptor.get('comet_contract_version') in (3, 4):
+        version = descriptor['comet_contract_version']
+        guide = ('docs/comet-directory-activation.md' if version == 4
+                 else 'docs/comet-production-rollout.md')
+        raise DataError(f'refresh-comets cannot refresh an immutable schema-{version} release; '
+                        f'prepare a scientifically verified replacement as described in {guide}')
     output = validate_writable_path(output, label='Comet output')
     site = output.parent
     # A failed acquisition must not leave locks/raw inputs in either product.

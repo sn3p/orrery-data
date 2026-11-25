@@ -1,16 +1,18 @@
 # Comet catalogue
 
-The committed product at `comets/latest.json` uses schema 3, with six unchanged
-schema-2 modern payloads and two schema-3 historical payloads. Halley starts
-1835-08-21 and Tempel–Tuttle starts 1865-12-22; the other four remain modern-only.
-Modern owns 1980-01-01 onward and all coverage ends 2099-12-30. See the
-[historical wire contract](comet-history-candidates.md) and
-[activation gates](comet-activation.md); committed does not mean deployed.
+The committed replacement at `comets/latest.json` uses schema 4: 4,089 searchable
+entries and fourteen published trajectories. The existing six modern payloads
+and two historical payloads are unchanged. Halley starts 1835-08-21 and
+Tempel–Tuttle starts 1865-12-22; the other twelve trajectories are modern-only.
+Modern owns 1980-01-01 onward and all published coverage ends 2099-12-30. See the
+[directory contract](comet-directory.md) and
+[activation record and rollback](comet-directory-activation.md); committed does
+not mean deployed.
 
 The sections below document the preserved **schema-2 baseline**, its acquisition,
-science and transition reader. Ordinary refresh cannot overwrite schema 3.
-Production verification accepts only the exact approved historical pin;
-[rollout and rollback](comet-production-rollout.md) govern replacement.
+science and transition reader. Ordinary refresh cannot overwrite schemas 3 or 4.
+Production verification accepts only the exact approved historical/directory
+pins; each replacement requires a separately reviewed scientific release.
 
 ## Catalogue contract
 
@@ -97,14 +99,15 @@ python3 -m orrery_data refresh-comets --offline
 python3 -m orrery_data refresh-comets       # acquire only missing cached inputs
 python3 -m orrery_data refresh-comets --refresh  # explicitly reacquire twelve queries
 # After any refresh, regenerate the matching committed evidence offline.
-# Supports verified schema 2 or the approved schema-3 modern segments.
+# Replays the six legacy modern segments from schema 2, 3 or 4.
+# The eight directory additions have separate retained midpoint evidence.
 python3 scripts/rebuild_comet_evidence.py
 python3 -m orrery_data verify-comets --directory data/comets
 python3 -m orrery_data verify-site --directory data
 python3 scripts/prepare_browser_site.py --output .context/pages-site-new
 ```
 
-Commit refreshed `data/comets` and `tests/fixtures/comet-midpoints.json.gz`
+For an authorized schema-2 refresh, commit `data/comets` and `tests/fixtures/comet-midpoints.json.gz`
 together. The evidence command reads the exact raw SHA-256 files pinned by the
 published index, so newer cache query records cannot silently substitute another
 acquisition. It reparses both vector and independent midpoint responses, checks
