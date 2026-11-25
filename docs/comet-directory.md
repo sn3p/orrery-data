@@ -183,3 +183,40 @@ pins. Preserve one acceptance record per lane with app revision, reader revision
 index pin, environment and limitations. Deployed accepting-reader acceptance
 must precede the hosted data switch; actual live expanded-data acceptance follows
 that separately authorized switch. Producer tests are not app acceptance.
+
+## Producer verification record
+
+Local verification on 25 November 2026:
+
+- 195 Python tests in the inspected server-free selection passed; four final
+  candidate-builder tests passed after review fixes (overlapping coverage, not
+  199 distinct tests). Python 3.12 was used locally.
+- 60 comet/transport/package Node tests passed, including the exact unmodified
+  expanded descriptor, every addition's independent midpoint, production
+  compatibility, joins, decimal steps, status scopes, cancellation and eviction.
+- Isolated headless Chromium and WebKit each passed both exact pins using real
+  payload bytes through browser fetch/module/crypto APIs. No server, personal
+  browser profile or image capture was used. This is reader acceptance, not
+  Orrery UI/Pixi/Three acceptance.
+- Firefox failed before reader execution with “Could not find profile folder”,
+  including a retry with a workspace-local temporary directory. Firefox reader
+  acceptance remains unverified locally. CI runs all three engines via
+  `npm run test:directory-browser`. A specific engine can be diagnosed with,
+  for example, `npm run test:directory-browser -- webkit`.
+- All ten live production comet files were downloaded read-only and matched
+  committed bytes; latest was checked again after the reads. Complete local
+  production-site verification passed and `data/` remains unchanged.
+- Independent review findings were fixed with boundary regressions; final
+  independent reader/contract/builder review reported no remaining blockers.
+
+Full selected CI consists of Python 3.11/3.12/3.13 discovery, the 3.13 site
+verification and the browser job (npm tests, new directory-browser lanes and
+existing browser-workflows). It has not run for these unpublished commits.
+Local full discovery and the existing HTTP browser suites are not run because
+of the standing prohibition on starting servers. Excluded Python modules:
+`test_cli`, `test_source_cache`, `test_browser_scripts`, `test_releases`,
+`test_release_contract`, `test_release_paths`, `test_release_review`,
+`test_release_boundaries`, `test_candidate_inventory`, `test_identity_order`,
+`test_export_activation`. Node `browser-source.test.mjs` and
+`browser-workflows.mjs` also start servers and remain CI checks. Do not interpret
+the permitted local selection as a passing full CI suite.
