@@ -4,7 +4,15 @@ import {modelIdentity} from './cometHistoryContract.js';
 import {reference, CONVENTIONS, interpolateCometState} from './cometSourceCore.js';
 export const need = (ok, label) => requireValue(ok, label, 'comet directory');
 export const fields = (v,k) => keys(v,k,[],'comet directory');
-export const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+// JSON object keys are unordered; array positions and primitive values are not.
+export function same(a,b) {
+  if(a===b)return true;
+  if(a===null||b===null||typeof a!=='object'||typeof b!=='object')return false;
+  if(Array.isArray(a)||Array.isArray(b))return Array.isArray(a)&&Array.isArray(b)
+    && a.length===b.length&&a.every((value,i)=>same(value,b[i]));
+  const keys=Object.keys(a);
+  return keys.length===Object.keys(b).length&&keys.every(key=>Object.hasOwn(b,key)&&same(a[key],b[key]));
+}
 export const text = v => typeof v === 'string' && v.length > 0 && v.length <= 512 && !/[\x00-\x1f\x7f]/.test(v);
 export const id = v => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(v);
 // Decimal steps can round the computed endpoint offset just above count-1.

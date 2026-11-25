@@ -59,6 +59,25 @@ test('short coverage, dense blocks, gaps, aliases, fragments and separate status
  const pending=s.getObject('1996 B2');assert.equal(s.availabilityAt(pending.id,2450000),'under_assessment');
  s.close();assert.throws(()=>s.search(''),{name:'AbortError'});await assert.rejects(s.positionAt(e.id,2450000),{name:'AbortError'});
 });
+test('legacy coverage ignores JSON object-key order during open and window selection',async t=>{
+ const f=fixture(index=>{for(const e of index.objects.filter(e=>e.trajectory?.kind==='legacy'))
+  e.coverage=e.coverage.map(c=>({end_inclusive:c.end_inclusive,end:c.end,start:c.start}));
+ });transport(t,f);const s=await open();t.after(()=>s.close());
+ for(const e of legacy.objects)for(const segment of e.segments) {
+  const jd=segment.coverage.start,window=await s.loadWindow(e.id,{start:jd,end:jd});
+  assert.equal(window.segments.length,1);assert.equal(window.segments[0].key,segment.key);
+  assert.deepEqual(await s.positionAt(e.id,jd),await s.legacy.positionAt(e.id,jd));
+ }
+});
+test('manifest coverage ignores JSON object-key order during validation and window selection',async t=>{
+ const f=shortFixture((index,e,m)=>{for(const segment of m.segments){const c=segment.coverage;
+  segment.coverage={end_inclusive:c.end_inclusive,end:c.end,start:c.start};
+ }});transport(t,f);const s=await open();t.after(()=>s.close());
+ const window=await s.loadWindow('1995 O1',{start:2450000,end:2450012});
+ assert.deepEqual(window.segments.map(s=>s.key),['early','dense','after-gap']);
+ assert.deepEqual(await s.positionAt('1995 O1',2450002),[2,0,0]);
+ assert.equal((await s.pathSegments('1995 O1',2450000,2450012)).length,3);
+});
 test('unsupported requires a scoped assessment and never follows from a load error',async t=>{
  const f=fixture(index=>{const e=index.objects.find(e=>e.designation==='3D');e.assessment={state:'unsupported',reason:'no-source-solution',evidence:{assessed_at:'2026-11-25',policy:'fixture-only',source:'fixture',sha256:'a'.repeat(64)},scope:[{start:2450000,end:2450002,end_inclusive:true}]};});
  transport(t,f);const s=await open();t.after(()=>s.close());assert.equal(s.availabilityAt('3D',2450001),'unsupported');assert.equal(s.availabilityAt('3D',2500000),'not_yet_assessed');
@@ -68,6 +87,7 @@ test('unsupported requires a scoped assessment and never follows from a load err
 test('rehashed contract violations fail closed',async t=>{
  for(const mutate of [
    i=>i.defaults.reverse(),i=>i.objects[0].coverage[0].start++,i=>i.objects[0].id=i.objects[1].id,
+   i=>delete i.objects[0].coverage[0].end_inclusive,i=>i.objects[0].coverage[0].extra=true,
    i=>i.objects.find(e=>!e.coverage.length).assessment.state='available',
    i=>i.objects.find(e=>!e.coverage.length).assessment={state:'unsupported',reason:'no test',scope:[],evidence:null},
  ]){const f=fixture(mutate);transport(t,f);await assert.rejects(open());}
@@ -76,6 +96,7 @@ test('rehashed contract violations fail closed',async t=>{
    (i,e,m)=>m.segments[0].provenance.vectors.target='wrong comet',
    (i,e,m)=>m.segments[0].grid.step=0,
    (i,e,m)=>m.segments[0].coverage.end_inclusive=true,
+   (i,e,m)=>m.segments[2].coverage={...m.segments[2].coverage,end_inclusive:false},
    (i,e,m)=>m.segments[0].validation.max_error_au=1,
  ]){const f=shortFixture(mutate);transport(t,f);let s;try{s=await open();await assert.rejects(s.positionAt('1995 O1',2450001));}catch(error){assert.match(error.message,/Invalid/);}finally{s?.close();}}
 });
