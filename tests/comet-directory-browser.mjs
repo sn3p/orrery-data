@@ -17,7 +17,7 @@ for(const browserName of selected) {
  const engine=engines[browserName];
  const browser=await engine.launch({headless:true});
  try {
-  for(const lane of ['production','candidate']) {
+  for(const lane of ['rollback','production','candidate']) {
    const context=await browser.newContext(),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
    await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
@@ -28,7 +28,8 @@ for(const browserName of selected) {
     if(name.startsWith('data/')) {
      const relative=name.slice(5);
      if(relative.includes('..'))return route.abort();
-     try {const body=lane==='candidate'?candidate.get(relative):await fs.readFile(path.join(root,'data/comets',relative));
+     try {const body=lane==='rollback'&&relative==='latest.json'?Buffer.from(JSON.stringify({comet_contract_version:3,index:spec.legacy})):
+       lane==='candidate'?candidate.get(relative):await fs.readFile(path.join(root,'data/comets',relative));
       if(body)return route.fulfill({contentType:'application/json',body});
      }catch{}
     }
@@ -42,8 +43,8 @@ for(const browserName of selected) {
      return {pin:s.sourceId,count:s.search('').total,available,defaults:s.info.defaults,discovery:(await s.getDetails('1P')).discovery};
     } finally {s.close();}
    });
-   assert.equal(result.pin,lane==='candidate'?spec.candidate.sha256:spec.legacy.sha256);
-   assert.equal(result.count,lane==='candidate'?4089:6);assert.equal(result.available,lane==='candidate'?14:6);
+   assert.equal(result.pin,lane==='rollback'?spec.legacy.sha256:spec.candidate.sha256);
+   assert.equal(result.count,lane==='rollback'?6:4089);assert.equal(result.available,lane==='rollback'?6:14);
    assert.deepEqual(result.defaults,['1P','2P','55P','9P','10P','67P']);assert.deepEqual(result.discovery,legacy.objects[0].discovery);assert.deepEqual(errors,[]);
    console.log(JSON.stringify({browser:browserName,lane,pin:result.pin,objects:result.count,available:result.available}));await context.close();
   }

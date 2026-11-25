@@ -130,10 +130,18 @@ test('corruption/missing pin assets reject and retry uses same pin; close reject
   await new Promise(resolve=>setImmediate(resolve));s.close();await rejected;release();
 });
 async function serializedProduct(directory) {
-  const files=new Map(), latest=JSON.parse(await fs.readFile(path.join(directory,'latest.json')));
+  const files=new Map();
+  let latest=JSON.parse(await fs.readFile(path.join(directory,'latest.json')));
+  if(latest.comet_contract_version===4) {
+    const raw=await fs.readFile(path.join(directory,latest.index.url));
+    assert.equal(createHash('sha256').update(raw).digest('hex'),latest.index.sha256);
+    assert.equal(raw.length,latest.index.bytes);
+    latest={comet_contract_version:3,index:JSON.parse(raw).legacy};
+  }
   const index=JSON.parse(await fs.readFile(path.join(directory,latest.index.url)));
   for(const name of ['latest.json',latest.index.url,...index.objects.flatMap(o=>o.segments.map(s=>s.data.url))])
     files.set(name,await fs.readFile(path.join(directory,name)));
+  files.set('latest.json',JSON.stringify(latest));
   return {files,index,latest};
 }
 

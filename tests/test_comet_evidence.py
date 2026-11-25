@@ -22,7 +22,13 @@ SCRIPT = ROOT / 'scripts/rebuild_comet_evidence.py'
 
 
 def product_index(root):
-    return read_json(root / read_json(root / 'latest.json')['index']['url'])
+    index = read_json(root / read_json(root / 'latest.json')['index']['url'])
+    if index['comet_contract_version'] == 4:
+        from orrery_data.comet_rollout import verify_current_comets
+        from orrery_data.comet_product import read_reference
+        verify_current_comets(root)
+        return read_reference(root, index['legacy'], 'index-', 256 * 1024)
+    return index
 
 
 class NumericalEvidence(unittest.TestCase):

@@ -22,7 +22,7 @@ class RolloutReview(unittest.TestCase):
                 src = self.site / 'comets'
             return copy(src, dst, *args, **kwargs)
         with patch.object(rollout.shutil, 'copytree', side_effect=swapping):
-            with self.assertRaisesRegex(DataError, 'approved historical'): self.prepare()
+            with self.assertRaisesRegex(DataError, 'approved release'): self.prepare()
         self.assertFalse(self.output.exists())
 
     def test_valid_asteroid_swap_during_snapshot_is_rejected(self):

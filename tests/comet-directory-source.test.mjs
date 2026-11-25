@@ -22,7 +22,12 @@ function fixture(edit=()=>{}){
 }
 function transport(t,f,gate){const calls=[];t.mock.method(globalThis,'fetch',async(url,options)=>{const name=new URL(url).href.slice(base.length);calls.push(name);if(gate)await gate(name,options);return new Response(f.files.get(name)??'',{status:f.files.has(name)?200:404});});return calls;}
 const open=()=>Source.openLatest(base+'latest.json');
-test('existing production reader acceptance uses real unchanged files',async()=>{const v=await verify('data/comets');assert.equal(v.available,6);});
+test('expanded production reader acceptance uses the exact approved files',async()=>{const v=await verify('data/comets');assert.equal(v.pin,spec.candidate.sha256);assert.equal(v.objects,4089);assert.equal(v.available,14);assert.equal(v.independentMidpoints,87656);});
+test('retained schema-3 rollback remains readable with all six trajectories',async t=>{
+ const f={files:new Map(template)};f.files.set('latest.json',encode({comet_contract_version:3,index:spec.legacy}));
+ transport(t,f);const s=await open();t.after(()=>s.close());assert.equal(s.sourceId,spec.legacy.sha256);assert.equal(s.info.objects.length,6);
+ for(const e of legacy.objects)for(const segment of e.segments)assert.ok((await s.positionAt(e.id,segment.coverage.start)).every(Number.isFinite));
+});
 test('exact expanded fixture preserves legacy bytes, defaults, IDs and all measured midpoint errors',async t=>{
  const f={files:new Map(template)},calls=transport(t,f),s=await open();t.after(()=>s.close());assert.equal(s.sourceId,spec.candidate.sha256);
  assert.equal(calls.length,3);assert.equal(s.search('',{limit:30}).total,4089);assert.deepEqual(s.info.defaults,legacy.objects.map(e=>e.id));
