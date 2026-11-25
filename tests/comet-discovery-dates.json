@@ -1,0 +1,104 @@
+[
+  {
+    "raw": "1700-Feb-29",
+    "expected": {
+      "year": 1700,
+      "month": 2,
+      "day": 29,
+      "precision": "day",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "1900-Feb-29",
+    "expected": {
+      "year": 1900,
+      "month": 2,
+      "day": 29,
+      "precision": "day",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "2000-Feb-29",
+    "expected": {
+      "year": 2000,
+      "month": 2,
+      "day": 29,
+      "precision": "day",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "1701-Feb-29",
+    "expected": null
+  },
+  {
+    "raw": "1700-Feb-30",
+    "expected": null
+  },
+  {
+    "raw": "1700-Apr-31",
+    "expected": null
+  },
+  {
+    "raw": "1700-Feb-00",
+    "expected": {
+      "year": 1700,
+      "month": 2,
+      "day": null,
+      "precision": "month",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "1700-??-29",
+    "expected": null
+  },
+  {
+    "raw": "1700-??",
+    "expected": {
+      "year": 1700,
+      "month": null,
+      "day": null,
+      "precision": "year",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "1700",
+    "expected": {
+      "year": 1700,
+      "month": null,
+      "day": null,
+      "precision": "year",
+      "calendar": "historical-unspecified",
+      "year_numbering": "astronomical"
+    }
+  },
+  {
+    "raw": "0000-Jan-01",
+    "expected": null
+  },
+  {
+    "raw": "1700-Foo",
+    "expected": null
+  },
+  {
+    "raw": null,
+    "expected": null
+  },
+  {
+    "raw": 1700,
+    "expected": null
+  },
+  {
+    "raw": "1700-Feb-29\n",
+    "expected": null
+  }
+]

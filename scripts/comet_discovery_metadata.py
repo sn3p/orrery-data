@@ -22,9 +22,9 @@ def sha(raw):
 
 def structured_date(value):
     """Never infer dates from designations, orbital epochs or first observations."""
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
-    match = re.fullmatch(r'(\d{4})(?:-([A-Za-z]{3}|\?\?)(?:-(\d{2}|\?\?))?)?', value)
+    match = re.fullmatch(r'([0-9]{4})(?:-([A-Za-z]{3}|\?\?)(?:-([0-9]{2}|\?\?))?)?', value)
     if not match:
         return None
     year, month, day = match.groups()
@@ -34,10 +34,19 @@ def structured_date(value):
         return None
     month = months.index(month) if month in months[1:] else None
     day = int(day) if day and day not in ('??', '00') else None
-    if not year or (day is not None and (month is None or not 1 <= day <= calendar.monthrange(year, month)[1])):
+    # Unspecified calendar: keep dates possible in either Julian or Gregorian.
+    # Acceptance does not identify a calendar or convert to an instant.
+    days = [31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if not year or (day is not None and (month is None or not 1 <= day <= days[month - 1])):
         return None
     return dict(year=year, month=month, day=day, precision='day' if day else 'month' if month else 'year',
                 calendar='historical-unspecified', year_numbering='astronomical')
+
+
+def add_source(sources, key, source):
+    if key in sources and sources[key] != source:
+        raise ValueError('Conflicting source: ' + key)
+    sources[key] = source
 
 
 def build():
@@ -57,9 +66,7 @@ def build():
     curated = json.loads((EVIDENCE / 'events.json').read_bytes())
     sources = dict(legacy['sources'])
     for key, source in curated['sources'].items():
-        if key in sources and sources[key] != source:
-            raise ValueError('Conflicting legacy source: ' + key)
-        sources[key] = source
+        add_source(sources, key, source)
     rows = []
     originals = {o['id']: o['discovery'] for o in legacy['objects']}
     for obj in index['objects']:
@@ -75,7 +82,7 @@ def build():
                 raise ValueError('SBDB identity mismatch: ' + identity)
             catalogue = response.get('discovery') or None
             key = 'sbdb-' + identity
-            sources[key] = dict(url=record['url'], checked_on=record['retrieved_at'][:10])
+            add_source(sources, key, dict(url=record['url'], checked_on=record['retrieved_at'][:10]))
             provenance = dict(source=key, sha256=sha(encoded(response)), representation='canonical-json',
                               retrieved_at=record['retrieved_at'])
         events = curated['objects'].get(identity, [])
@@ -88,10 +95,12 @@ def build():
 
 
 def write_candidate(output):
-    namespace = ROOT / '.context'
+    namespace = ROOT.resolve() / '.context/comet-candidates'
     output = Path(output)
-    if namespace.is_symlink() or not output.resolve().is_relative_to(namespace.resolve()):
-        raise ValueError('Output must be inside workspace .context')
+    if (namespace.parent.is_symlink() or namespace.is_symlink()
+            or not output.resolve().is_relative_to(namespace)
+            or output.resolve() == namespace):
+        raise ValueError('Output must be inside workspace .context/comet-candidates')
     raw = encoded(build())
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
