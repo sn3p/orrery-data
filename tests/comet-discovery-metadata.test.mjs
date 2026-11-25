@@ -87,3 +87,23 @@ test('loader errors identify metadata and the requested URL',async t=>{
   globalThis.fetch=async()=>assert.fail('pre-cancelled request fetched');
   await assert.rejects(loadDiscoveryMetadata(source,ref,url,{signal:controller.signal}),e=>e.name==='AbortError'&&e.message==='Comet discovery metadata read cancelled.');
 });
+
+test('loader contextualizes authenticated parse/schema and network failures',async t=>{
+  const old=globalThis.fetch;t.after(()=>globalThis.fetch=old);
+  const source=new Directory('https://example.test/index.json',descriptor.index.sha256,directory,{info:legacy,close(){}});
+  t.after(()=>source.close());
+  const url='https://example.test/metadata.json';
+  for(const [raw,causeType] of [[Buffer.from('{'),SyntaxError],[Buffer.from('{}'),Error],[Buffer.from([255]),TypeError]]) {
+    const ref={sha256:crypto.createHash('sha256').update(raw).digest('hex'),bytes:raw.length};
+    globalThis.fetch=async()=>new Response(raw);
+    await assert.rejects(loadDiscoveryMetadata(source,ref,url),error=>
+      error.message.includes(url)&&/comet discovery metadata/i.test(error.message)
+      &&error.cause instanceof causeType&&!/SHA-256|byte length/i.test(error.cause.message));
+  }
+  const networkError=new TypeError('Failed to fetch');
+  globalThis.fetch=async()=>{throw networkError;};
+  await assert.rejects(loadDiscoveryMetadata(source,{sha256:'a'.repeat(64),bytes:2},url),error=>
+    error.message.includes(url)&&/comet discovery metadata/i.test(error.message)&&error.cause===networkError);
+  globalThis.fetch=async()=>assert.fail('invalid reference fetched');
+  await assert.rejects(loadDiscoveryMetadata(source,{},url),error=>error.message.includes(url)&&/reference/.test(error.cause.message));
+});

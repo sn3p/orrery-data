@@ -89,16 +89,21 @@ export function validateDiscoveryMetadata(value, directory, legacy, pin) {
 }
 // Caller supplies an explicit trusted reference; no latest/automatic activation.
 export async function loadDiscoveryMetadata(source, reference, url, {signal}={}) {
-  need(source.info.comet_contract_version===4&&source.legacy,'schema-4 source');
-  need(reference&&hash(reference.sha256)&&Number.isSafeInteger(reference.bytes)&&reference.bytes>0&&reference.bytes<=8*1024*1024,'reference');
   const product='comet discovery metadata';
   const controller=new AbortController();
-  const unlink=linkCancellation(controller,[source.lifetime.signal,...(signal?[signal]:[])]);
+  let unlink=()=>{};
   try {
+    need(source.info.comet_contract_version===4&&source.legacy,'schema-4 source');
+    need(reference&&hash(reference.sha256)&&Number.isSafeInteger(reference.bytes)&&reference.bytes>0&&reference.bytes<=8*1024*1024,'reference');
+    unlink=linkCancellation(controller,[source.lifetime.signal,...(signal?[signal]:[])]);
     check(controller.signal,product);
     const ref={...reference,url};
     const parsed=decodeJSON(await fetchVerified(ref,url,controller.signal,product),product);
     check(controller.signal,product);
     return validateDiscoveryMetadata(parsed,source.info,source.legacy.info,source.sourceId);
+  } catch(error) {
+    check(controller.signal,product);
+    if(error?.name==='AbortError')throw error;
+    throw new Error(`Comet discovery metadata read failed (${url}): ${error?.message??String(error)}`,{cause:error});
   } finally {unlink();}
 }

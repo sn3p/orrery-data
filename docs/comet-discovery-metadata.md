@@ -19,7 +19,12 @@ handoff remains current. The deployed app was not inspected in this task.
 
 ## Source assessment (before implementation)
 
-All fourteen priority objects have JPL discovery records. The
+The fourteen priority objects are the fourteen numbered comets with trajectories.
+Each has a retained, nonempty JPL discovery record and curated events. Hale–Bopp
+and NEOWISE are two additional unnumbered objects without trajectories: their
+curated events come from NASA articles, not meaningful JPL discovery records.
+Thus curated events cover sixteen objects, while priority trajectory coverage is
+fourteen of fourteen. The
 [JPL discovery documentation](https://ssd-api.jpl.nasa.gov/doc/sbdb.html) limits
 this facility to numbered comets; its
 [overview](https://ssd.jpl.nasa.gov/discovery.html) says selected comets.
