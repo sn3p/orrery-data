@@ -1,0 +1,326 @@
+{
+  "sources": {
+    "pons-brooks-history": {
+      "url": "https://observatoiredeparis.psl.eu/facts-about-comet-12p-pons.html",
+      "checked_on": "2026-11-25"
+    },
+    "wirtanen-history": {
+      "url": "https://wirtanen.astro.umd.edu/46P/46P_history.shtml",
+      "checked_on": "2026-11-25"
+    },
+    "giacobini-history": {
+      "url": "https://doi.org/10.1088/0004-6256/136/3/1127",
+      "checked_on": "2026-11-25"
+    },
+    "swift-tuttle-history": {
+      "url": "https://science.nasa.gov/solar-system/comets/109p-swift-tuttle/",
+      "checked_on": "2026-11-25"
+    },
+    "pons-brooks-esa": {
+      "url": "https://www.esa.int/Space_Safety/Planetary_Defence/Mother_of_Dragons_comet_visible_in_the_night_sky",
+      "checked_on": "2026-11-25"
+    },
+    "hale-bopp": {
+      "url": "https://science.nasa.gov/solar-system/comets/c-1995-o1-hale-bopp/",
+      "checked_on": "2026-11-25"
+    },
+    "neowise": {
+      "url": "https://www.nasa.gov/general/how-to-see-comet-neowise/",
+      "checked_on": "2026-11-25"
+    },
+    "herschel-comets": {
+      "url": "https://archives.esac.esa.int/hsa/legacy/HPDP/SSO/Active_Comet_Catalogue/Comet%20Catalogue%20Explanatory%20Supplement_rev.pdf",
+      "checked_on": "2026-11-25",
+      "note": "HERSCHEL-HSC-DOC-2200 v1.0, section 8.1.8.2, printed page 57."
+    }
+  },
+  "objects": {
+    "c1000068": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1812,
+          "month": 7,
+          "day": null,
+          "precision": "month",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Pons, Jean Louis"
+        ],
+        "sources": [
+          "sbdb-c1000068",
+          "pons-brooks-esa"
+        ],
+        "certainty": "day-disputed",
+        "note": "JPL records July 21; ESA records July 12. The day remains unresolved."
+      },
+      {
+        "kind": "rediscovery",
+        "date": {
+          "year": 1883,
+          "month": null,
+          "day": null,
+          "precision": "year",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "William R. Brooks"
+        ],
+        "sources": [
+          "pons-brooks-history"
+        ],
+        "certainty": "documented",
+        "note": null
+      }
+    ],
+    "c1000005": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1904,
+          "month": 12,
+          "day": 28,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Borrelly"
+        ],
+        "sources": [
+          "sbdb-c1000005"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      }
+    ],
+    "c1000032": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1900,
+          "month": 12,
+          "day": 20,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Giacobini, M."
+        ],
+        "sources": [
+          "sbdb-c1000032"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      },
+      {
+        "kind": "rediscovery",
+        "date": {
+          "year": 1913,
+          "month": null,
+          "day": null,
+          "precision": "year",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Ernst Zinner"
+        ],
+        "sources": [
+          "giacobini-history"
+        ],
+        "certainty": "documented",
+        "note": "The cited paper describes rediscovery two apparitions later; this is distinct from the 1900 discovery."
+      }
+    ],
+    "c1000079": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1927,
+          "month": 11,
+          "day": 15,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Schwassmann, A. and Wachmann, A. A."
+        ],
+        "sources": [
+          "sbdb-c1000079"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      },
+      {
+        "kind": "photographic_observation",
+        "date": {
+          "year": 1902,
+          "month": 3,
+          "day": 4,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [],
+        "sources": [
+          "herschel-comets"
+        ],
+        "certainty": "documented",
+        "note": "Pre-discovery images identified later; this is not the 1927 discovery."
+      }
+    ],
+    "c1000109": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1948,
+          "month": 1,
+          "day": null,
+          "precision": "month",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Wirtanen, Carl A."
+        ],
+        "sources": [
+          "sbdb-c1000109",
+          "wirtanen-history"
+        ],
+        "certainty": "day-disputed",
+        "note": "JPL records January 15; University of Maryland records January 17. The day remains unresolved."
+      }
+    ],
+    "c1000107": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1978,
+          "month": 1,
+          "day": 6,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Wild, Paul"
+        ],
+        "sources": [
+          "sbdb-c1000107"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      }
+    ],
+    "c1000041": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1986,
+          "month": 3,
+          "day": 15,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Hartley, Malcolm"
+        ],
+        "sources": [
+          "sbdb-c1000041"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      }
+    ],
+    "c1000140": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 1862,
+          "month": 7,
+          "day": 16,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Swift, Lewis"
+        ],
+        "sources": [
+          "sbdb-c1000140"
+        ],
+        "certainty": "documented",
+        "note": "Discovery attribution as recorded by JPL SBDB; not a complete apparition history."
+      },
+      {
+        "kind": "independent_discovery",
+        "date": {
+          "year": 1862,
+          "month": null,
+          "day": null,
+          "precision": "year",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Horace Tuttle"
+        ],
+        "sources": [
+          "swift-tuttle-history"
+        ],
+        "certainty": "documented",
+        "note": "NASA documents independent discovery by Swift and Tuttle in 1862; no day inferred for Tuttle."
+      }
+    ],
+    "c1000132": [
+      {
+        "kind": "independent_discovery",
+        "date": {
+          "year": 1995,
+          "month": 7,
+          "day": 23,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "Alan Hale",
+          "Thomas Bopp"
+        ],
+        "sources": [
+          "hale-bopp"
+        ],
+        "certainty": "documented",
+        "note": null
+      }
+    ],
+    "c1003667": [
+      {
+        "kind": "discovery",
+        "date": {
+          "year": 2020,
+          "month": 3,
+          "day": 27,
+          "precision": "day",
+          "calendar": "historical-unspecified",
+          "year_numbering": "astronomical"
+        },
+        "people": [
+          "NEOWISE mission"
+        ],
+        "sources": [
+          "neowise"
+        ],
+        "certainty": "documented",
+        "note": null
+      }
+    ]
+  }
+}
