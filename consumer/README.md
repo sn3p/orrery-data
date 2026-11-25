@@ -14,6 +14,7 @@ CometCatalogSource.js
 CometHistorySource.js
 CometDirectorySource.js
 cometDirectoryContract.js
+cometDiscoveryMetadata.js
 cometHistoryContract.js
 cometSourceCore.js
 contract.js
