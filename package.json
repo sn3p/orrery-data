@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/browser-source.test.mjs tests/comet-catalog-source.test.mjs tests/consumer-transport.test.mjs tests/consumer-package.test.mjs tests/comet-history-source.test.mjs",
+    "test": "node --test tests/browser-source.test.mjs tests/comet-catalog-source.test.mjs tests/consumer-transport.test.mjs tests/consumer-package.test.mjs tests/comet-history-source.test.mjs tests/comet-directory-source.test.mjs",
     "test:browser": "node tests/browser-workflows.mjs",
-    "test:comets": "node --test tests/comet-catalog-source.test.mjs tests/consumer-transport.test.mjs tests/consumer-package.test.mjs tests/comet-history-source.test.mjs"
+    "test:comets": "node --test tests/comet-catalog-source.test.mjs tests/consumer-transport.test.mjs tests/consumer-package.test.mjs tests/comet-history-source.test.mjs tests/comet-directory-source.test.mjs",
+    "test:directory-browser": "node tests/comet-directory-browser.mjs"
   },
   "devDependencies": {
     "playwright": "1.63.0"

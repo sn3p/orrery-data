@@ -12,6 +12,8 @@ relative paths):
 CatalogSource.js
 CometCatalogSource.js
 CometHistorySource.js
+CometDirectorySource.js
+cometDirectoryContract.js
 cometHistoryContract.js
 cometSourceCore.js
 contract.js
@@ -54,3 +56,5 @@ The unpublished schema-3 candidate adapter is `CometHistorySource.js`, with
 `cometHistoryContract.js`, `cometSourceCore.js`, `contract.js`, and `transport.js`.
 It does not replace the hosted schema-2 adapter. See the
 [candidate contract and Orrery handoff](../docs/comet-history-candidates.md).
+
+Unpublished catalogue v4: see [the contract and Orrery handoff](../docs/comet-directory.md). `CometDirectorySource` accepts production schema 3 and the exact expanded candidate; it does not change the hosted endpoint.

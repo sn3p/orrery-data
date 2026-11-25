@@ -45,6 +45,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm test
+      - run: npm run test:directory-browser
       - run: npm run test:browser
         env:
           FULL_BROWSER_DATA: data
