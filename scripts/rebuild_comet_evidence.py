@@ -50,6 +50,8 @@ def rebuild(directory, cache, output):
     with writer_lock(lock):
         verified = verify_current_comets(directory)
         index = read_json(directory / verified['pin']['url'])
+        if index['comet_contract_version'] == 4:
+            index = read_json(directory / index['legacy']['url'])
         # Historical quarter-point evidence is replayed by comet_history_candidate.py.
         entries = modern_entries(index)
         targets = {entry['id']: entry['name'] for entry in entries}

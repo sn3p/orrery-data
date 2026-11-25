@@ -29,13 +29,13 @@ def historical_candidate(directory):
     if in_comet_candidate_namespace(directory):
         return True
     # Retained copies and redirected namespaces lose the lexical namespace.
-    # Schema 3 is immutable; schema-2 and asteroid site pointers stay mutable.
+    # Schemas 3 and 4 are immutable; schema-2 and asteroid site pointers stay mutable.
     try:
         info = marker.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
             return False
         value = json.loads(marker.read_bytes())
-        return isinstance(value, dict) and value.get('comet_contract_version') == 3
+        return isinstance(value, dict) and value.get('comet_contract_version') in (3, 4)
     except (OSError, ValueError):
         return False
 

@@ -128,7 +128,7 @@ def parser():
     comet.add_argument("--refresh", action="store_true", help="explicitly reacquire all twelve Horizons queries")
     comet_verify = commands.add_parser("verify-comets")
     comet_verify.add_argument("--directory", type=Path, default=Path("data/comets"))
-    rollout = commands.add_parser("prepare-comet-rollout", help="stage schema-3 site and offline rollback; never publish")
+    rollout = commands.add_parser("prepare-comet-rollout", help="stage approved comet site and offline rollback; never publish")
     rollout.add_argument("--site", type=Path, default=Path("data"))
     rollout.add_argument("--candidate", type=Path, required=True)
     rollout.add_argument("--output", type=Path, required=True, help="new directory containing site/ and rollback/")
