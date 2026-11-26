@@ -29,3 +29,27 @@ capacity deferral, publication-confirmation clocks and manual rollback limitatio
 
 Check current provider state and actual hosted descriptor/reader before rollout.
 No merge, mark-ready, deployment, server or live-browser permission is conveyed.
+
+## Initial reviewed candidate (not yet hosted)
+
+```json
+{
+  "paired_catalogue_version": 1,
+  "asteroids": {
+    "url": "https://sn3p.github.io/orrery-data/paired/generations/ae8e7b4b6437fb596acfbc66d37f874b7e432cbe7e8acfec8a8306a56c01a1f1/asteroids/index-f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8.json",
+    "sha256": "f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8",
+    "bytes": 256907
+  },
+  "namedBodies": {
+    "url": "https://sn3p.github.io/orrery-data/paired/generations/ae8e7b4b6437fb596acfbc66d37f874b7e432cbe7e8acfec8a8306a56c01a1f1/named/index-ef3423709abd3436393059b835ba1c3db5f9543559a99009d1239a324c30b4a2.json",
+    "sha256": "ef3423709abd3436393059b835ba1c3db5f9543559a99009d1239a324c30b4a2",
+    "bytes": 415
+  }
+}
+```
+
+This candidate has 895,910 asteroid rows, all thirteen definitions and all five
+present dwarf mappings. It reuses the retained PR22 candidate exactly; the
+previous hosted e33e6b… asteroid generation cannot use this mapping. Local complete
+site staging and disk-backed reference-reader verification passed. Recheck PR/CI
+and hosted status when activating; these local results are not app acceptance.
