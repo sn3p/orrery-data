@@ -121,6 +121,8 @@ def parser():
     browser_verify.add_argument("--index-sha256")
     site_verify = commands.add_parser("verify-site", help="verify the complete asteroid and optional comet site")
     site_verify.add_argument("--directory", type=Path, default=Path("data"))
+    asteroid_verify = commands.add_parser("verify-asteroids", help="verify legacy and paired asteroid products independently of comets")
+    asteroid_verify.add_argument("--directory", type=Path, default=Path("data"))
     comet = commands.add_parser("refresh-comets", help="validate cached Horizons responses and export; network only for missing inputs or --refresh")
     comet.add_argument("--cache", type=Path, default=Path(".data/horizons"))
     comet.add_argument("--output", type=Path, default=Path("data/comets"))
@@ -184,6 +186,9 @@ def main(argv=None):
         elif args.command == "verify-site":
             from .site import verify_site
             result = verify_site(args.directory)
+        elif args.command == "verify-asteroids":
+            from .site import verify_asteroids
+            result = verify_asteroids(args.directory)
         elif args.command == "verify-browser":
             result = verify_browser(args.directory, args.index_sha256)
         elif args.command == "export":

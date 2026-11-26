@@ -25,7 +25,7 @@ the old scene, reacquire pairedLatest once and validate a complete new pair;
 show retry if it still fails. Never retry by independently reading asteroid latest.
 Permanent fixed clients must store their own complete product copy. Legacy root
 asteroid URLs retain their previous current-only policy. See the contract for
-metadata-only capacity deferral, configured-host publication-confirmation clocks and manual rollback limitations.
+pair-only capacity deferral with continued legacy asteroid refresh, configured-host publication-confirmation clocks and manual rollback limitations.
 
 Check current provider state and actual hosted descriptor/reader before rollout.
 No merge, mark-ready, deployment, server or live-browser permission is conveyed.
@@ -36,7 +36,7 @@ No merge, mark-ready, deployment, server or live-browser permission is conveyed.
 {
   "paired_catalogue_version": 1,
   "asteroids": {
-    "url": "https://sn3p.github.io/orrery-data/paired/generations/ae8e7b4b6437fb596acfbc66d37f874b7e432cbe7e8acfec8a8306a56c01a1f1/asteroids/index-f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8.json",
+    "url": "https://sn3p.github.io/orrery-data/paired/asteroids/f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8/index-f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8.json",
     "sha256": "f83dd056cb36594475ccf82827fb07d5845d131387ea41c41fcf7c282cb300c8",
     "bytes": 256907
   },
@@ -47,6 +47,11 @@ No merge, mark-ready, deployment, server or live-browser permission is conveyed.
   }
 }
 ```
+
+Asteroid payloads are shared by index hash across science-only pairs. The initial
+draft asteroid URL changed to that shared location; scientific bytes and hashes
+are unchanged. Never infer pairing from root latest, which may advance while a
+new pair is deferred.
 
 This candidate has 895,910 asteroid rows, all thirteen definitions and all five
 present dwarf mappings. It reuses the retained PR22 candidate exactly; the

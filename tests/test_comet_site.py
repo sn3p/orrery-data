@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from orrery_data.formats import DataError
+from orrery_data import publication
 from orrery_data.site import verify_site
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,7 +58,7 @@ class SitePublication(unittest.TestCase):
             path = self.data/url.removeprefix(base)
             if not path.exists(): raise HTTPError(url,404,'Not found',{},None)
             return io.BytesIO(path.read_bytes())
-        with patch.object(site,'urlopen',side_effect=opening):
+        with patch.object(publication,'urlopen',side_effect=opening):
             self.assertTrue(site.published_site_matches(self.data,base+'latest.json'))
         self.assertEqual(requests, [base+'latest.json',base+'comets/latest.json',base+'paired/latest.json',base+'paired/retention.json'])
 
@@ -74,7 +75,7 @@ class SitePublication(unittest.TestCase):
             if not path.exists(): raise HTTPError(url,404,'Not found',{},None)
             return io.BytesIO(path.read_bytes())
         output = self.root/'replacement'
-        with patch.object(site, 'ROOT', self.root), patch.object(site, 'urlopen', side_effect=opening), \
+        with patch.object(site, 'ROOT', self.root), patch.object(publication, 'urlopen', side_effect=opening), \
              patch.object(sys, 'argv', ['prepare', '--output', str(output), '--latest-url', base+'latest.json']), \
              patch('sys.stdout', new_callable=io.StringIO) as stdout:
             self.assertEqual(site.main(), 0)
@@ -102,7 +103,7 @@ class SitePublication(unittest.TestCase):
         for name,args in [('merge',['--publication-base',before]),
                           ('rerun',['--publication-base',before]),('manual',['--force'])]:
             with self.subTest(name=name), chdir(self.root), patch.object(site,'ROOT',self.root), \
-                 patch.object(site,'urlopen',side_effect=AssertionError('force must not consult cached hosting')), \
+                 patch.object(publication,'urlopen',side_effect=AssertionError('force must not consult cached hosting')), \
                  patch.object(sys,'argv',['prepare','--output',str(self.root/name),
                     '--latest-url','https://example.test/sub/latest.json',*args]), \
                  patch('sys.stdout',new_callable=io.StringIO) as stdout:
@@ -116,7 +117,7 @@ class SitePublication(unittest.TestCase):
             return io.BytesIO(path.read_bytes())
         # Reconcile optional product presence as well as active products.
         with chdir(self.root), patch.object(site,'ROOT',self.root), \
-             patch.object(site,'urlopen',side_effect=opening), \
+             patch.object(publication,'urlopen',side_effect=opening), \
              patch.object(sys,'argv',['prepare','--output',str(self.root/'unchanged'),
                  '--latest-url','https://example.test/sub/latest.json','--publication-base',git('rev-parse','HEAD')]), \
              patch('sys.stdout',new_callable=io.StringIO) as stdout:

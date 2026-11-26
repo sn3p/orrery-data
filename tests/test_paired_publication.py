@@ -11,7 +11,8 @@ from scripts import update_browser, named_body_candidate, prepare_browser_site
 from orrery_data import paired
 from orrery_data.browser import export_browser
 from orrery_data.formats import DataError
-from orrery_data.site import verify_site, copy_site_snapshot
+from orrery_data import publication
+from orrery_data.site import verify_site, verify_asteroids, copy_site_snapshot
 from orrery_data.storage import read_json, file_info, write_json
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -121,12 +122,14 @@ class PairedPublication(unittest.TestCase):
         self.assertIn('data/paired/latest.json',changes['paths'])
         self.assertNotIn('data/latest.json',changes['paths'])
 
-    def test_refresh_reports_installed_comet_path(self):
+    def test_refresh_preserves_comets_without_claiming_their_verification(self):
         from scripts.comet_baseline import SCHEMA2_BASELINE
         shutil.copytree(SCHEMA2_BASELINE,self.output/'comets')
+        before={str(p.relative_to(self.output)):p.read_bytes() for p in (self.output/'comets').rglob('*') if p.is_file()}
         result=self.update()
-        self.assertEqual(result['comets']['path'],str(self.output/'comets'))
-        self.assertTrue(Path(result['comets']['path']).is_dir())
+        self.assertNotIn('comets',result)
+        self.assertEqual(before,{p:(self.output/p).read_bytes() for p in before})
+        self.assertEqual(verify_site(self.output)['comets']['path'],str(self.output/'comets'))
 
     def test_full_unstamped_ledger_commits_evidence_and_recovers_in_clone(self):
         from scripts import prepare_scheduled_refresh as helper
@@ -174,17 +177,12 @@ class PairedPublication(unittest.TestCase):
         self.assertEqual(old['asteroids']['sha256'],self.latest()['asteroids']['sha256'])
         self.assertTrue(self.latest()['asteroids']['url'].startswith(base));verify_site(self.output)
         import io
-        with patch.object(paired,'urlopen',return_value=io.BytesIO(json.dumps(self.latest()).encode())) as request:
+        with patch.object(publication,'urlopen',return_value=io.BytesIO(json.dumps(self.latest()).encode())) as request:
             self.assertEqual(paired.published_descriptor(base),self.latest())
             self.assertEqual(request.call_args.args[0],base+'paired/latest.json')
         before=self.tree()
         with self.assertRaises(DataError):self.update(base_url='https://user:password@example.test/')
         self.assertEqual(before,self.tree())
-
-    def test_diff_does_not_rehash_validated_immutable_files(self):
-        self.update()
-        with patch.object(paired,'file_info',side_effect=AssertionError('redundant diff hashing')):
-            self.assertEqual(self.update()['status'],'unchanged')
 
     def test_base_migration_resets_old_host_retirement_clocks(self):
         for n in range(1,5):self.update(n,science=n)
@@ -200,9 +198,9 @@ class PairedPublication(unittest.TestCase):
     def test_remote_metadata_reconciliation_enforces_4096_bytes(self):
         import io
         raw=b'{}'+b' '*4094
-        with patch.object(prepare_browser_site,'urlopen',return_value=io.BytesIO(raw)):
+        with patch.object(publication,'urlopen',return_value=io.BytesIO(raw)):
             self.assertEqual(prepare_browser_site.remote_descriptor('https://example.test/retention.json'),{})
-        with patch.object(prepare_browser_site,'urlopen',return_value=io.BytesIO(raw+b' ')):
+        with patch.object(publication,'urlopen',return_value=io.BytesIO(raw+b' ')):
             with self.assertRaisesRegex(ValueError,'Oversized'):
                 prepare_browser_site.remote_descriptor('https://example.test/retention.json')
 
@@ -217,3 +215,112 @@ class PairedPublication(unittest.TestCase):
         self.assertEqual(good.returncode,0,good.stderr)
         self.assertTrue(read_json(target/'paired/latest.json')['asteroids']['url'].startswith('https://fork.example.test/repository/'))
         verify_site(target)
+
+    def test_full_ledger_without_confirmation_keeps_root_fresh_and_pair_intact(self):
+        for n in range(1,5): self.update(n,science=n)
+        latest=self.latest()
+        retained={str(p.relative_to(self.output)):p.read_bytes() for p in (self.output/'paired').rglob('*') if p.is_file()}
+        old_root=read_json(self.output/'latest.json')
+        for hosted in (None,{'stale':True}):
+            with self.subTest(hosted=hosted):
+                result=self.update(6,science=5,fixture='empty',published=hosted)
+                self.assertTrue(result['deferred'])
+                self.assertNotEqual(old_root,read_json(self.output/'latest.json'))
+                self.assertEqual(self.latest(),latest)
+                self.assertEqual(retained,{p:(self.output/p).read_bytes() for p in retained})
+                verify_site(self.output)
+        self.update(7,science=5,published=latest)
+        self.assertIsNone(self.update(22,science=5,fixture='empty',published=latest)['deferred'])
+        self.assertEqual(self.latest()['asteroids']['sha256'],read_json(self.output/'latest.json')['index']['sha256'])
+
+    def test_science_pairs_share_one_asteroid_catalogue(self):
+        first=self.update(science=1)
+        url=self.latest()['asteroids']['url']
+        for n in range(2,5):
+            self.update(n,science=n)
+            self.assertEqual(self.latest()['asteroids']['url'],url)
+        self.assertEqual(len(list((self.output/'paired/asteroids').iterdir())),1)
+        self.assertFalse(any(p.name=='asteroids' for p in (self.output/'paired/generations').rglob('*')))
+        self.assertLess(verify_site(self.output)['bytes']-first['bytes'],100_000)
+
+    def test_comet_corruption_does_not_block_authoring_but_blocks_pages(self):
+        from scripts.comet_baseline import SCHEMA2_BASELINE
+        shutil.copytree(SCHEMA2_BASELINE,self.output/'comets')
+        self.update()
+        orphan=self.output/'comets/objects'/('0'*64+'.json');orphan.write_text('{}')
+        comets={str(p.relative_to(self.output)):p.read_bytes() for p in (self.output/'comets').rglob('*') if p.is_file()}
+        previous=self.latest()
+        result=self.update(2,fixture='empty')
+        self.assertNotEqual(self.latest(),previous)
+        self.assertEqual(result['pin'],verify_asteroids(self.output)['pin'])
+        self.assertEqual(comets,{p:(self.output/p).read_bytes() for p in comets})
+        with self.assertRaisesRegex(DataError,'Comet inventory differs'):verify_site(self.output)
+        import sys
+        attempt=subprocess.run([sys.executable,str(ROOT/'scripts/prepare_browser_site.py'),
+                                '--source',str(self.output),'--output',str(self.root/'pages')],capture_output=True,text=True)
+        self.assertNotEqual(attempt.returncode,0);self.assertFalse((self.root/'pages').exists())
+        self.assertIn('Comet inventory differs',attempt.stderr)
+
+    def test_noop_hardlinks_payloads_and_verifies_retained_catalogue_once_outside_lock(self):
+        from orrery_data.storage import writer_lock, site_lock_path
+        for n in range(1,5):self.update(n,science=n)
+        verify=paired.verify_browser
+        visits=[]
+        def checking(directory,**kwargs):
+            with writer_lock(site_lock_path(self.output)):pass
+            old=self.output/'paired/asteroids'/directory.name
+            chunk=next((old/'chunks').iterdir())
+            self.assertEqual(chunk.stat().st_ino,(directory/'chunks'/chunk.name).stat().st_ino)
+            visits.append(directory)
+            return verify(directory,**kwargs)
+        with patch.object(paired,'verify_browser',side_effect=checking):
+            self.assertEqual(self.update(5,science=4)['status'],'unchanged')
+        self.assertEqual(len(visits),1)
+
+    def test_concurrent_comet_writer_is_preserved_and_refresh_can_retry(self):
+        from orrery_data.storage import writer_lock, site_lock_path
+        self.update()
+        previous=self.latest()
+        build=paired.build_candidate
+        def racing(*args,**kwargs):
+            with writer_lock(site_lock_path(self.output)):
+                (self.output/'comets').mkdir()
+                (self.output/'comets/new-object.json').write_text('concurrent writer')
+            return build(*args,**kwargs)
+        with patch.object(paired,'build_candidate',side_effect=racing):
+            with self.assertRaisesRegex(DataError,'site changed during refresh'):self.update(2,fixture='empty')
+        self.assertEqual(self.latest(),previous)
+        self.assertEqual((self.output/'comets/new-object.json').read_text(),'concurrent writer')
+        self.update(2,fixture='empty')
+        self.assertNotEqual(self.latest(),previous)
+        self.assertEqual((self.output/'comets/new-object.json').read_text(),'concurrent writer')
+
+    def test_pages_http_and_unavailable_configuration_at_cli_boundary(self):
+        import sys
+        command=[sys.executable,str(ROOT/'scripts/update_browser.py'),'--from-bundle',
+                 str(ROOT/'tests/fixtures/consumer-v1/ties'),'--pages-base-url']
+        for base,paired_expected in [('http://example.test/project/',True),('',False)]:
+            with self.subTest(base=base):
+                target=self.root/('http-site' if base else 'unconfigured-site')
+                result=subprocess.run([*command,base,'--output',str(target)],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+                verify_asteroids(target)
+                self.assertEqual((target/'paired/latest.json').exists(),paired_expected)
+                if paired_expected:
+                    self.assertTrue(read_json(target/'paired/latest.json')['asteroids']['url'].startswith('https://example.test/project/'))
+                else:self.assertTrue(json.loads(result.stdout)['deferred'])
+        self.update();latest=self.latest()
+        result=self.update(2,fixture='empty',base_url=None)
+        self.assertTrue(result['deferred']);self.assertEqual(self.latest(),latest)
+        self.assertNotEqual(result['pin']['sha256'],latest['asteroids']['sha256'])
+        verify_site(self.output)
+
+    def test_expiry_removes_only_unreferenced_shared_catalogues(self):
+        for day in range(1,5):
+            self.update(day,science=day,fixture='ties' if day%2 else 'empty')
+        self.assertEqual(len(list((self.output/'paired/asteroids').iterdir())),2)
+        self.update(5,science=5,fixture='empty',published=self.latest())
+        self.update(20,science=5,fixture='empty',published=self.latest())
+        checked=verify_site(self.output)
+        self.assertEqual(checked['paired']['generations'],2)
+        self.assertEqual([p.name for p in (self.output/'paired/asteroids').iterdir()],[self.latest()['asteroids']['sha256']])

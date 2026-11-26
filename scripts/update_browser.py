@@ -17,6 +17,19 @@ from scripts.named_body_candidate import build as build_named_candidate
 from orrery_data.paths import validate_writable_path, validate_disjoint_paths
 
 
+def pages_base(value):
+    """Pages can report HTTP when enforcement is off; consumers require HTTPS.
+
+    An unconfigured Pages host defers pairing, not asteroid acquisition. A host
+    without working HTTPS cannot confirm supersession or expire retained pins.
+    """
+    if not value:
+        return None
+    if value.startswith('http://'):
+        value = 'https://' + value[len('http://'):]
+    return validate_base(value)
+
+
 def command(*args):
     result = subprocess.run([sys.executable, '-m', 'orrery_data', *map(str, args)],
                             cwd=ROOT, capture_output=True, text=True)
@@ -39,7 +52,9 @@ def update_from_bundle(bundle, output, *, base_url=BASE):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--base-url', default=BASE, help='absolute HTTPS Pages base for pair references and publication confirmation')
+    base = parser.add_mutually_exclusive_group()
+    base.add_argument('--base-url', default=BASE, help='absolute HTTPS base for pair references and publication confirmation')
+    base.add_argument('--pages-base-url', help='configure-pages base; normalize HTTP to HTTPS, or defer pairing if empty')
     parser.add_argument('--from-bundle', type=Path, help='reuse a complete verified indexed bundle without acquiring new data')
     parser.add_argument('--output', type=Path, default=ROOT / 'data')
     parser.add_argument('--mpcorb', type=Path)
@@ -57,7 +72,7 @@ def main():
         if value is not None:
             setattr(args, key, value.resolve())
     try:
-        validate_base(args.base_url)
+        base_url = pages_base(args.pages_base_url) if args.pages_base_url is not None else validate_base(args.base_url)
         validate_writable_path(args.output, label='Browser output')
         validate_disjoint_paths(args.output, (ROOT / '.data', ROOT / 'artifacts'), label='Browser output')
         managed_files(args.output)
@@ -75,7 +90,7 @@ def main():
             exported = command('export', '--snapshot', snapshot['snapshot_version'])
             indexed = command('export-indexed', '--export', exported['path'])
             bundle = ROOT / indexed['path']
-        result = update_from_bundle(bundle, args.output, base_url=args.base_url)
+        result = update_from_bundle(bundle, args.output, base_url=base_url)
         print(json.dumps(result, indent=2))
         return 0
     except (OSError, ValueError) as exc:
