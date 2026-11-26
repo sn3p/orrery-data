@@ -33,11 +33,21 @@ class NamedBodyMapping(unittest.TestCase):
         result=build(export,browser,output)
         before={p.name:p.read_bytes() for p in output.iterdir()}
         self.assertEqual(result,build(export,browser,output))
-        subprocess.run(['node',str(ROOT/'scripts/verify_named_bodies.mjs'),str(output),str(browser)],check=True,capture_output=True)
         self.assertEqual(before,{p.name:p.read_bytes() for p in output.iterdir()})
         (output/'index.json').write_text('{}')
         with self.assertRaises(DataError):build(export,browser,output)
         with self.assertRaises(DataError):build(export,browser,ROOT/'data/named-bodies')
+
+
+    @unittest.skipUnless(shutil.which('node'), 'Candidate verification requires Node')
+    def test_real_fixture_candidate_with_node_reader(self):
+        export=ROOT/'tests/fixtures/consumer-v1/ties/full';browser=ROOT/'tests/fixtures/browser-v1/ties'
+        output=ROOT/'.context/named-body-candidates'/('test-'+uuid.uuid4().hex)
+        self.addCleanup(lambda:shutil.rmtree(output,ignore_errors=True))
+        build(export,browser,output)
+        before={p.name:p.read_bytes() for p in output.iterdir()}
+        subprocess.run(['node',str(ROOT/'scripts/verify_named_bodies.mjs'),str(output),str(browser)],check=True,capture_output=True)
+        self.assertEqual(before,{p.name:p.read_bytes() for p in output.iterdir()})
 
 
     def test_real_export_limit_and_missing_date_mapping(self):
