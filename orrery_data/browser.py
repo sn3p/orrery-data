@@ -223,7 +223,7 @@ def sync_candidate(stage, output, *, inventory=managed_files):
     return {'added': added, 'changed': changed, 'unchanged': unchanged, 'deleted': deleted}
 
 
-def export_browser(bundle, output, *, before_install=None):
+def export_browser(bundle, output):
     bundle, output = Path(bundle), Path(output)
     validate_writable_path(output, label='Browser output')
     validate_disjoint_paths(output, (bundle,), label='Browser output')
@@ -236,8 +236,6 @@ def export_browser(bundle, output, *, before_install=None):
         with tempfile.TemporaryDirectory(prefix='.browser-', dir=output.parent) as temp:
             stage = Path(temp)
             build_candidate(bundle, stage, previous)
-            if before_install is not None:
-                before_install(bundle, stage)
             changes = sync_candidate(stage, output)
             result = verify_browser(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',

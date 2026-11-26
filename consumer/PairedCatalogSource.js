@@ -1,5 +1,5 @@
 // Resolve once; callers commit the returned immutable pair as one scene.
-import {keys, requireValue, freeze, validatePin} from './contract.js';
+import {keys, requireValue, freeze, validatePin, MAX_INDEX_BYTES} from './contract.js';
 import {fetchLatest, validatedURL} from './transport.js';
 import CatalogSource from './CatalogSource.js';
 import {loadNamedBodies} from './NamedBodySource.js';
@@ -7,7 +7,7 @@ import {loadNamedBodies} from './NamedBodySource.js';
 export function validatePairedDescriptor(value) {
   keys(value, ['paired_catalogue_version', 'asteroids', 'namedBodies']);
   requireValue(value.paired_catalogue_version === 1, 'paired version');
-  for (const [key, max] of [['asteroids', 4 * 1024 * 1024], ['namedBodies', 128 * 1024]]) {
+  for (const [key, max] of [['asteroids', MAX_INDEX_BYTES], ['namedBodies', 128 * 1024]]) {
     const ref = value[key];
     keys(ref, ['url', 'bytes', 'sha256']);
     requireValue(typeof ref.url === 'string' && /^[a-f0-9]{64}$/.test(ref.sha256)

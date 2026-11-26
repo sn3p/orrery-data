@@ -256,47 +256,33 @@ def site_lock_path(site):
     return site.parent / ('.' + site.name + '-browser-lock')
 
 
-def rename_new(source, destination):
-    """Atomically install a directory without replacing any concurrent entry.
-
-    macOS renamex_np(RENAME_EXCL) and Linux renameat2(RENAME_NOREPLACE).
-    Unsupported platforms/filesystems fail closed; never emulate with exists().
-    """
+def _rename_directory(source, destination, *, exchange):
+    """Use the platform's atomic rename flags; never emulate with exists()."""
     import ctypes
     import sys
     libc = ctypes.CDLL(None, use_errno=True)
-    if sys.platform == 'darwin':
+    if sys.platform == 'darwin' and hasattr(libc, 'renamex_np'):
         rename = libc.renamex_np
         rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-        args = (os.fsencode(source), os.fsencode(destination), 4)  # RENAME_EXCL
+        args = (os.fsencode(source), os.fsencode(destination), 2 if exchange else 4)  # SWAP / EXCL
     elif sys.platform == 'linux' and hasattr(libc, 'renameat2'):
         rename = libc.renameat2
         rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-        args = (-100, os.fsencode(source), -100, os.fsencode(destination), 1)  # AT_FDCWD, NOREPLACE
+        args = (-100, os.fsencode(source), -100, os.fsencode(destination), 2 if exchange else 1)
     else:
-        raise DataError('Atomic exclusive directory installation is unavailable')
+        operation = 'exchange' if exchange else 'exclusive installation'
+        raise DataError(f'Atomic directory {operation} is unavailable')
     rename.restype = ctypes.c_int
     if rename(*args) != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(destination))
 
 
+def rename_new(source, destination):
+    """Atomically install a directory without replacing a concurrent entry."""
+    _rename_directory(source, destination, exchange=False)
+
+
 def exchange_directories(first, second):
     """Atomically exchange two complete same-filesystem directories; no gap."""
-    import ctypes
-    import sys
-    libc = ctypes.CDLL(None, use_errno=True)
-    if sys.platform == 'darwin':
-        rename = libc.renamex_np
-        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-        args = (os.fsencode(first), os.fsencode(second), 2)  # RENAME_SWAP
-    elif sys.platform == 'linux' and hasattr(libc, 'renameat2'):
-        rename = libc.renameat2
-        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-        args = (-100, os.fsencode(first), -100, os.fsencode(second), 2)  # RENAME_EXCHANGE
-    else:
-        raise DataError('Atomic directory exchange is unavailable')
-    rename.restype = ctypes.c_int
-    if rename(*args) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error), str(second))
+    _rename_directory(first, second, exchange=True)

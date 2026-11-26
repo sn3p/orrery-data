@@ -42,3 +42,13 @@ test('published fixture resolves once, verifies pair, reads rows and rejects cor
   globalThis.fetch=async()=>new Response(' '.repeat(4097));
   await assert.rejects(resolvePairedLatest(base+'paired/latest.json'),/size/);
 });
+
+test('paired asteroid references use the shared index size boundary', async () => {
+  const {MAX_INDEX_BYTES} = await import('../consumer/contract.js');
+  const hash='a'.repeat(64), namedHash='b'.repeat(64);
+  const descriptor={paired_catalogue_version:1,
+    asteroids:{url:`${base}paired/asteroids/${hash}/index-${hash}.json`,sha256:hash,bytes:MAX_INDEX_BYTES},
+    namedBodies:{url:`${base}paired/generations/pair/named/index-${namedHash}.json`,sha256:namedHash,bytes:1}};
+  assert.equal(validatePairedDescriptor(descriptor).pin.bytes,MAX_INDEX_BYTES);
+  assert.throws(()=>validatePairedDescriptor({...descriptor,asteroids:{...descriptor.asteroids,bytes:MAX_INDEX_BYTES+1}}));
+});
