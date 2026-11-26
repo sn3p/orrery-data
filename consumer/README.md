@@ -11,6 +11,7 @@ relative paths):
 ```text
 CatalogSource.js
 NamedBodySource.js
+PairedCatalogSource.js
 CometCatalogSource.js
 CometHistorySource.js
 CometDirectorySource.js
@@ -59,8 +60,10 @@ See the [directory contract](../docs/comet-directory.md) and
 The draft prepares the committed replacement; hosted activation requires a
 separately authorized merge/deployment. The endpoint URL remains unchanged.
 
-## Named reference bodies (unpublished)
+## Named reference bodies and paired publication
 
 `NamedBodySource.js` supplies all thirteen producer-owned definitions and a strict,
 asteroid-index-pinned dwarf mapping. See [the contract and migration guide](../docs/named-bodies.md).
 It has no latest endpoint and is not activated by existing catalogue readers.
+
+`PairedCatalogSource.js` resolves the [paired descriptor](../docs/paired-catalogue.md) once into exact immutable references. Application migration remains separate.

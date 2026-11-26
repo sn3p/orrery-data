@@ -18,13 +18,35 @@ def verify_optional_product(directory, verifier):
     return None
 
 
-def verify_site(directory):
+MAX_SITE_BYTES = 900_000_000  # headroom below the Pages 1 GB publication limit
+
+
+def verify_asteroids(directory, *, catalogues=None):
+    """Verify the independently authored legacy and paired asteroid products."""
     directory = Path(directory)
     asteroids = verify_browser(directory)
+    from .paired import verify_paired
+    paired = verify_paired(directory, catalogues=catalogues)
     return {
         **asteroids,
-        'comets': verify_optional_product(directory / 'comets', verify_current_comets),
+        'files': asteroids['files'] + (paired['files'] if paired else 0),
+        'bytes': asteroids['bytes'] + (paired['bytes'] if paired else 0),
+        'paired': paired,
     }
+
+
+def verify_site(directory):
+    """The complete artifact, including comets, must pass before publication."""
+    directory = Path(directory)
+    asteroids = verify_asteroids(directory)
+    comets = verify_optional_product(directory / 'comets', verify_current_comets)
+    enforce_byte_budget(asteroids['bytes'] + (comets['bytes'] if comets else 0))
+    return {**asteroids, 'comets': comets}
+
+
+def enforce_byte_budget(total):
+    if total > MAX_SITE_BYTES:
+        raise DataError(f'Complete site exceeds publication byte budget ({total} > {MAX_SITE_BYTES})')
 
 
 def site_descriptors(directory):
@@ -33,7 +55,7 @@ def site_descriptors(directory):
     asteroid_files(directory)
     comet_files(directory / 'comets')
     descriptors = {name: descriptor_bytes(directory / name)
-                   for name in ('latest.json', 'comets/latest.json')}
+                   for name in ('latest.json', 'comets/latest.json', 'paired/latest.json', 'paired/retention.json')}
     if descriptors['latest.json'] is None:
         raise DataError('Missing asteroid descriptor')
     for value in descriptors.values():

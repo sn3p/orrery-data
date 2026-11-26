@@ -21,7 +21,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from scripts.comet_baseline import SCHEMA2_BASELINE
-from orrery_data import comets, horizons
+from orrery_data import comets, horizons, publication
 from orrery_data.browser import sync_candidate, verify_browser
 from orrery_data.cli import main
 from orrery_data.formats import DataError
@@ -380,7 +380,7 @@ class PublicationCases(CometFixture):
             return io.BytesIO(remote[url])
         def invoke(name):
             out = self.root / name
-            with patch.object(site, 'ROOT', self.root), patch.object(site, 'urlopen', side_effect=open_remote), \
+            with patch.object(site, 'ROOT', self.root), patch.object(publication, 'urlopen', side_effect=open_remote), \
                  patch.object(site.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(verify_browser(data)), '')), \
                  patch.object(sys, 'argv', ['prepare', '--output', str(out), '--latest-url', 'https://example.test/sub/latest.json']), \
                  patch('sys.stdout', new_callable=io.StringIO) as stdout:
@@ -421,11 +421,11 @@ class PublicationCases(CometFixture):
             if url not in remote:
                 raise HTTPError(url, 404, 'missing', {}, None)
             return io.BytesIO(remote[url])
-        with patch.object(site, 'urlopen', side_effect=opening):
+        with patch.object(publication, 'urlopen', side_effect=opening):
             self.assertTrue(site.published_site_matches(data, discovery))
             self.assertEqual(requests[0], discovery)
             self.assertFalse(site.published_site_matches(data, discovery + '-missing'))
-        with patch.object(site, 'urlopen', side_effect=HTTPError(discovery, 500, 'unavailable', {}, None)):
+        with patch.object(publication, 'urlopen', side_effect=HTTPError(discovery, 500, 'unavailable', {}, None)):
             self.assertFalse(site.published_site_matches(data, discovery))
-        with patch.object(site, 'urlopen', return_value=io.BytesIO(b'{broken')):
+        with patch.object(publication, 'urlopen', return_value=io.BytesIO(b'{broken')):
             self.assertFalse(site.published_site_matches(data, discovery))

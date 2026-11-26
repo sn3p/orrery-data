@@ -1,4 +1,4 @@
-# Named reference bodies, contract 1 (unpublished)
+# Named reference bodies, contract 1
 
 OrreryData owns one scientific product for Mercury, Venus, Earth, Mars, Jupiter,
 Saturn, Uranus, Neptune, Ceres, Pluto, Haumea, Makemake and Eris. The prototype has
@@ -99,7 +99,7 @@ The output must be a direct child of that isolated candidate namespace. Assembly
 uses a writer lock and atomic directory installation. Repeating an identical build
 is a no-op; a different generation cannot overwrite an existing candidate. A failed
 build leaves the prior candidate intact. Use a new name for a reviewed refresh.
-No site inventory or publication command accepts/installs this candidate automatically.
+The maintained refresh path installs a verified companion through the [paired publication contract](paired-catalogue.md). Direct candidate creation remains unpublished.
 
 Copy `NamedBodySource.js`, `contract.js` and `transport.js` with the existing
 `CatalogSource` package (see consumer/README.md). With a verified open asteroid source:
@@ -176,17 +176,11 @@ Its exact pins/paths and local verification results are in the workspace consume
 handoff. It must not be mixed with the current hosted asteroid index. Publication,
 activation and consumer integration are separate future steps.
 
-## Ongoing inactive refreshes
+## Ongoing paired refreshes
 
-The maintained `scripts/update_browser.py` path (manual acquisition, offline
-`--from-bundle`, and scheduled MPC refresh) prepares a matching immutable companion
-before installing the asteroid generation. Failures stop that installation. Candidate
-names include both the final asteroid-index hash and scientific-definition hash;
-unchanged refreshes reuse identical candidates. Scheduled runs retain candidates
-as review artifacts for 90 days, outside Git's `data/` and outside Pages. See the
-[concise consumer handoff](named-bodies-handoff.md) for retrieval and acceptance.
-
-This is preparation, not activation. Raw `export-browser` remains a projection
-primitive whose direct callers must explicitly prepare a companion. A future
-activation must enforce matching pins at its installation/publication boundary;
-no activation is provided by this change.
+Manual, offline and scheduled `scripts/update_browser.py` updates now construct
+and verify a complete pair before atomic installation. Review candidates remain
+under `.context/named-body-candidates/` and workflow evidence lasts 90 days;
+published pair retention is separately defined in [paired-catalogue.md](paired-catalogue.md).
+Use that contract for activation, bounded retention, failure recovery and the
+fresh Orrery follow-up. Raw export-browser cannot update a paired site.

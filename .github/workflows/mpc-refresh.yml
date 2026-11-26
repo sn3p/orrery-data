@@ -39,17 +39,24 @@ jobs:
           restore-keys: |
             mpc-http-${{ runner.os }}-content-
 
+      - name: Read the Pages configuration
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@v6
+
       - name: Acquire, rebuild and verify browser data
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
           mkdir -p .context/scheduled-refresh
-          python3 scripts/update_browser.py > .context/scheduled-refresh/update.json
-          python3 -m orrery_data verify-browser --directory data > .context/scheduled-refresh/verification.json
+          python3 scripts/update_browser.py --pages-base-url "$PAGES_BASE_URL" > .context/scheduled-refresh/update.json
+          python3 -m orrery_data verify-asteroids --directory data > .context/scheduled-refresh/verification.json
 
-      # Review artifact only: never copy named bodies into data/ or Pages.
-      - name: Retain inactive named-body candidate
+      # Retain generation evidence in addition to the verified paired publication.
+      - name: Retain named-body generation evidence
         uses: actions/upload-artifact@v4
         with:
-          name: inactive-named-bodies-${{ github.run_id }}-${{ github.run_attempt }}
+          name: named-bodies-${{ github.run_id }}-${{ github.run_attempt }}
           include-hidden-files: true
           path: |
             .context/named-body-candidates/refresh-*/
@@ -72,76 +79,8 @@ jobs:
             --github-output "$GITHUB_OUTPUT" \
             --github-summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Set up Python 3.11 regression boundary
-        if: steps.validation.outputs.changed == 'true'
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-
-      - name: Test on Python 3.11
-        if: steps.validation.outputs.changed == 'true'
-        run: |
-          python -m pip install '.[test]'
-          orrery-data --version
-          python -m unittest discover -s tests -v
-
-      - name: Set up Python 3.12 regression boundary
-        if: steps.validation.outputs.changed == 'true'
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Test on Python 3.12
-        if: steps.validation.outputs.changed == 'true'
-        run: |
-          python -m pip install '.[test]'
-          orrery-data --version
-          python -m unittest discover -s tests -v
-
-      - name: Restore Python 3.13 regression boundary
-        if: steps.validation.outputs.changed == 'true'
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-
-      - name: Test on Python 3.13
-        if: steps.validation.outputs.changed == 'true'
-        run: |
-          python -m pip install '.[test]'
-          orrery-data --version
-          python -m unittest discover -s tests -v
-
-      - name: Set up Node regression boundary
-        if: steps.validation.outputs.changed == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - name: Test browser source integration
-        if: steps.validation.outputs.changed == 'true'
-        env:
-          FULL_BROWSER_DATA: data
-        run: |
-          npm ci
-          npm test
-
-      - name: Read the Pages configuration
-        id: pages
-        uses: actions/configure-pages@v6
-
-      - name: Reconcile committed and published browser data
-        id: publication
-        env:
-          BASE_URL: ${{ steps.pages.outputs.base_url }}
-        run: |
-          python3 scripts/prepare_browser_site.py \
-            --output .context/scheduled-refresh/pages-site \
-            --latest-url "$BASE_URL/latest.json" \
-            > .context/scheduled-refresh/publication.json
-          python3 -c 'import json; print("status=" + json.load(open(".context/scheduled-refresh/publication.json"))["status"])' >> "$GITHUB_OUTPUT"
-          cat .context/scheduled-refresh/publication.json
-
+      # Authoring has its own verified/count-guarded boundary. Regression tests
+      # and complete-site reconciliation below still gate Pages publication.
       - name: Commit and push changed browser data
         if: steps.validation.outputs.changed == 'true'
         env:
@@ -157,6 +96,73 @@ jobs:
           git commit -m "$COMMIT_TITLE"
           git push origin HEAD:refs/heads/master
           echo "Committed and pushed verified browser data: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reconcile committed and published browser data
+        id: publication
+        if: steps.pages.outcome == 'success'
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          python3 scripts/prepare_browser_site.py \
+            --output .context/scheduled-refresh/pages-site \
+            --latest-url "$BASE_URL/latest.json" \
+            > .context/scheduled-refresh/publication.json
+          python3 -c 'import json; print("status=" + json.load(open(".context/scheduled-refresh/publication.json"))["status"])' >> "$GITHUB_OUTPUT"
+          cat .context/scheduled-refresh/publication.json
+
+      - name: Set up Python 3.11 regression boundary
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Test on Python 3.11
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Set up Python 3.12 regression boundary
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Test on Python 3.12
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Restore Python 3.13 regression boundary
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Test on Python 3.13
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        run: |
+          python -m pip install '.[test]'
+          orrery-data --version
+          python -m unittest discover -s tests -v
+
+      - name: Set up Node regression boundary
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Test browser source integration
+        if: steps.validation.outputs.changed == 'true' || steps.publication.outputs.status == 'prepared'
+        env:
+          FULL_BROWSER_DATA: data
+        run: |
+          npm ci
+          npm test
 
       - name: Publish the committed browser data
         if: steps.publication.outputs.status == 'prepared'

@@ -8,35 +8,22 @@ import tempfile
 from contextlib import nullcontext
 import subprocess
 import sys
-from urllib.request import urlopen
-from urllib.error import HTTPError
 from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from orrery_data.storage import writer_lock, site_lock_path, rename_new
 from orrery_data.site import copy_site_snapshot
+from orrery_data.publication import remote_descriptor
 from orrery_data.paths import validate_writable_path, validate_disjoint_paths
 # Keep in sync with the workflow's non-data push paths. The CLI imports the
 # producer package transitively; no installation or external config is needed.
 PUBLICATION_PATHS = ('.github/workflows/browser-pages.yml', 'scripts/prepare_browser_site.py', 'orrery_data')
 
 
-def remote_descriptor(url, *, optional=False):
-    """Read a bounded descriptor; only optional products may be absent."""
-    try:
-        with urlopen(url, timeout=20) as response:
-            return json.loads(response.read(4097))
-    except HTTPError as exc:
-        if not optional or exc.code != 404:
-            raise
-        exc.close()
-        return None
-
-
 def published_site_matches(source, latest_url):
     """Every product must match, including optional product presence/removal."""
-    descriptors = ('latest.json', 'comets/latest.json')
+    descriptors = ('latest.json', 'comets/latest.json', 'paired/latest.json', 'paired/retention.json')
     try:
         for name in descriptors:
             optional = name != 'latest.json'

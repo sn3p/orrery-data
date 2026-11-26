@@ -25,5 +25,7 @@ test('documented consumer files load from an isolated copied package', async t =
   assert.equal(typeof Directory.openLatest, 'function');
   const named = await import(pathToFileURL(path.join(directory, 'NamedBodySource.js')));
   assert.equal(typeof named.loadNamedBodies, 'function');
+  const paired = await import(pathToFileURL(path.join(directory, 'PairedCatalogSource.js')));
+  assert.equal(typeof paired.resolvePairedLatest, 'function');
   assert.equal(fetchVerified.length, 3);
 });

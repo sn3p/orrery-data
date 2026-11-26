@@ -64,15 +64,23 @@ projection stages only `data/`, creates one dated commit on the checked-out
 advanced during acquisition, the push is non-fast-forward and fails; the job
 does not rebase, force-push or retry stale output.
 
-After acquire and `verify-browser`, the workflow inventories `data/` in Git.
-When that inventory is empty it skips Python 3.11, 3.12, 3.13 and the Node
-source traversal, then still reconciles Pages so a prior dispatch/deploy
-failure can retry. Before any data push it still runs those Python suites plus
-the Node source-integration suite, including a complete non-image traversal of
-the candidate through the production consumer adapter. Source, validation or
-regression failures therefore leave `master` untouched. The rendered Playwright
-suite remains in the normal PR/push test workflow; scheduled data refreshes do
-not create its image artifacts.
+After acquisition and `verify-asteroids`, the workflow inventories `data/` in Git
+and enforces source-count guards before committing generated asteroid/pair changes.
+It then reconciles a complete-site Pages candidate and runs Python 3.11, 3.12,
+3.13 and the Node source-integration suite on changed data or a prepared
+publication. Unpublished no-change retries also run these tests, so a failed
+regression cannot be bypassed just because its data was already committed. Source/asteroid validation
+and count failures leave `master` untouched. A later regression or separate comet
+failure can leave verified asteroid data committed, but blocks Pages dispatch.
+This preserves repository freshness when the independent comet product is faulty.
+The Pages publisher always re-verifies the entire site before deployment.
+
+When the inventory is empty and the hosted site already matches, the workflow
+skips the regression suites. It still reconciles Pages for publication retries. Paired-capacity deferral preserves the last valid pair
+while root asteroids advance. An unavailable Pages configuration similarly defers
+pairing and publishing, not asteroid acquisition. The rendered Playwright suite
+remains in the normal PR/push test workflow; scheduled refreshes do not create its
+image artifacts.
 
 The repository keeps its read-only default workflow token and does not need the
 setting that permits Actions to create or approve pull requests. This workflow
@@ -265,3 +273,5 @@ Scientific positional accuracy, physical-device speed and production app GPU
 performance remain separate from distribution correctness. The first real
 refresh churn measurement is recorded above; later byte-size boundaries and old
 orbital corrections can still change a different number of files.
+
+Named-body activation uses the separate [paired publication contract](paired-catalogue.md); the existing root descriptor format is unchanged.

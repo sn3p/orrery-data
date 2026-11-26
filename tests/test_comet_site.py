@@ -2,6 +2,7 @@
 from contextlib import chdir
 import importlib.util
 import io
+from urllib.error import HTTPError
 import json
 from pathlib import Path
 import shutil
@@ -11,6 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from orrery_data.formats import DataError
+from orrery_data import publication
 from orrery_data.site import verify_site
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,10 +55,12 @@ class SitePublication(unittest.TestCase):
         requests = []
         def opening(url, timeout):
             requests.append(url)
-            return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
-        with patch.object(site,'urlopen',side_effect=opening):
+            path = self.data/url.removeprefix(base)
+            if not path.exists(): raise HTTPError(url,404,'Not found',{},None)
+            return io.BytesIO(path.read_bytes())
+        with patch.object(publication,'urlopen',side_effect=opening):
             self.assertTrue(site.published_site_matches(self.data,base+'latest.json'))
-        self.assertEqual(requests, [base+'latest.json',base+'comets/latest.json'])
+        self.assertEqual(requests, [base+'latest.json',base+'comets/latest.json',base+'paired/latest.json',base+'paired/retention.json'])
 
     def test_cached_schema1_descriptor_triggers_complete_publication(self):
         base = 'https://example.test/sub/'
@@ -67,9 +71,11 @@ class SitePublication(unittest.TestCase):
             requests.append(url)
             if url == base+'comets/latest.json':
                 return io.BytesIO(json.dumps(stale).encode())
-            return io.BytesIO((self.data/url.removeprefix(base)).read_bytes())
+            path = self.data/url.removeprefix(base)
+            if not path.exists(): raise HTTPError(url,404,'Not found',{},None)
+            return io.BytesIO(path.read_bytes())
         output = self.root/'replacement'
-        with patch.object(site, 'ROOT', self.root), patch.object(site, 'urlopen', side_effect=opening), \
+        with patch.object(site, 'ROOT', self.root), patch.object(publication, 'urlopen', side_effect=opening), \
              patch.object(sys, 'argv', ['prepare', '--output', str(output), '--latest-url', base+'latest.json']), \
              patch('sys.stdout', new_callable=io.StringIO) as stdout:
             self.assertEqual(site.main(), 0)
@@ -97,7 +103,7 @@ class SitePublication(unittest.TestCase):
         for name,args in [('merge',['--publication-base',before]),
                           ('rerun',['--publication-base',before]),('manual',['--force'])]:
             with self.subTest(name=name), chdir(self.root), patch.object(site,'ROOT',self.root), \
-                 patch.object(site,'urlopen',side_effect=AssertionError('force must not consult cached hosting')), \
+                 patch.object(publication,'urlopen',side_effect=AssertionError('force must not consult cached hosting')), \
                  patch.object(sys,'argv',['prepare','--output',str(self.root/name),
                     '--latest-url','https://example.test/sub/latest.json',*args]), \
                  patch('sys.stdout',new_callable=io.StringIO) as stdout:
@@ -105,10 +111,13 @@ class SitePublication(unittest.TestCase):
                 self.assertEqual(json.loads(stdout.getvalue())['status'],'prepared')
             self.assertFalse((self.root/name/'comets-v2').exists())
             self.assertTrue((self.root/name/'comets/latest.json').is_file())
-        # Normal scheduled/manual reconciliation uses current products only.
+        def opening(url, timeout):
+            path = self.data/url.removeprefix('https://example.test/sub/')
+            if not path.exists(): raise HTTPError(url,404,'Not found',{},None)
+            return io.BytesIO(path.read_bytes())
+        # Reconcile optional product presence as well as active products.
         with chdir(self.root), patch.object(site,'ROOT',self.root), \
-             patch.object(site,'urlopen',side_effect=lambda url,timeout: io.BytesIO(
-                (self.data/url.removeprefix('https://example.test/sub/')).read_bytes())), \
+             patch.object(publication,'urlopen',side_effect=opening), \
              patch.object(sys,'argv',['prepare','--output',str(self.root/'unchanged'),
                  '--latest-url','https://example.test/sub/latest.json','--publication-base',git('rev-parse','HEAD')]), \
              patch('sys.stdout',new_callable=io.StringIO) as stdout:
