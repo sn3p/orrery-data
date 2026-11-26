@@ -88,3 +88,9 @@ test('cancellation during reader cleanup skips checksum work', async t => {
     { name: 'AbortError', message: 'Comet read cancelled.' });
   assert.equal(digests, 0); assert.equal(released, 1);
 });
+
+test('shared URL policy permits HTTPS and canonical loopback HTTP only',async()=>{
+ const {validatedURL}=await import('../consumer/transport.js');
+ for(const url of ['https://example.org/a','http://localhost/a','http://127.1/a','http://[::1]/a'])assert.equal(typeof validatedURL(url).href,'string');
+ for(const url of ['http://example.org/a','https://user:secret@example.org/a','file:///a','http://[::2]/a'])assert.throws(()=>validatedURL(url));
+});

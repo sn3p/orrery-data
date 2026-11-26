@@ -53,12 +53,7 @@ export async function fetchVerified(ref, url, signal, product = 'catalogue') {
 
 export async function fetchLatest(url, signal, product = 'catalogue') {
   try {
-    const location = new URL(url);
-    // URL parsing normalizes IPv4 spellings and compressed IPv6 addresses.
-    const loopback = ['localhost', 'localhost.', '[::1]'].includes(location.hostname)
-      || /^127(?:\.\d{1,3}){3}$/.test(location.hostname);
-    requireValue((location.protocol === 'https:' || (location.protocol === 'http:' && loopback))
-      && !location.username && !location.password, 'latest URL (HTTPS required outside loopback)', product);
+    const location = validatedURL(url, product, 'latest URL');
     check(signal, product);
     const response = await fetch(location.href, { signal, cache: 'no-cache', redirect: 'error' });
     check(signal, product);
@@ -70,4 +65,14 @@ export async function fetchLatest(url, signal, product = 'catalogue') {
     check(signal, product);
     throw error;
   }
+}
+
+export function validatedURL(url, product = 'catalogue', label = 'URL') {
+  const location = new URL(url);
+  // URL parsing normalizes IPv4 spellings and compressed IPv6 addresses.
+  const loopback = ['localhost', 'localhost.', '[::1]'].includes(location.hostname)
+    || /^127(?:\.\d{1,3}){3}$/.test(location.hostname);
+  requireValue((location.protocol === 'https:' || (location.protocol === 'http:' && loopback))
+    && !location.username && !location.password, `${label} (HTTPS required outside loopback)`, product);
+  return location;
 }

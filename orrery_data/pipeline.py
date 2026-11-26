@@ -283,19 +283,47 @@ def refresh(store, urls, local, metadata, timeout, allow_count_decrease=False, r
                 "snapshot_version": version, "counts": manifest["counts"], "path": str(destination)}
 
 
-def selected_master(path, counts, limit):
+def select_discovery_rows(rows, limit, project=lambda row: row):
+    """Shared selection: first known dates in input order, then stable date sort.
+
+    Exhaust input even when limited so callers can validate counts/identities.
+    """
     selected = []
+    for row in rows:
+        if row['disc'] is not None and (limit is None or len(selected) < limit):
+            selected.append((row['disc'], project(row)))
+    selected.sort(key=lambda item: item[0])
+    return [item[1] for item in selected]
+
+
+def selected_master(path, counts, limit, *, identity_ids=None):
     total = known = 0
-    for row in iter_master(path):
-        total += 1
-        known += row["disc"] is not None
-        if row["disc"] is not None and (limit is None or len(selected) < limit):
-            selected.append(tuple(row[key] for key in FIELDS))
+    found, seen = {}, set()
+    def records():
+        nonlocal total, known
+        for row in iter_master(path):
+            total += 1
+            known += row['disc'] is not None
+            if identity_ids is not None:
+                if row['id'] in seen:
+                    raise DataError('Duplicate master identity')
+                seen.add(row['id'])
+                if row['id'] in identity_ids:
+                    found[row['id']] = {'discovery_jd': row['disc'], 'ordinal': None}
+            yield row
+    def project(row):
+        fields = tuple(row[key] for key in FIELDS)
+        return (fields, row['id']) if identity_ids is not None else fields
+    selected = select_discovery_rows(records(), limit, project)
     if (total, known, total - known) != tuple(counts[key] for key in
-                                             ("master_records", "known_discovery", "missing_discovery")):
-        raise DataError("Master contents do not match snapshot counts")
-    selected.sort(key=lambda row: row[0])
-    return selected
+                                             ('master_records', 'known_discovery', 'missing_discovery')):
+        raise DataError('Master contents do not match snapshot counts')
+    if identity_ids is None:
+        return selected
+    for ordinal, (_, identity) in enumerate(selected):
+        if identity in found:
+            found[identity]['ordinal'] = ordinal
+    return [fields for fields, _ in selected], found
 
 
 def validate_export_pointer(output):

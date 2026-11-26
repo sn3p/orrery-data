@@ -12,7 +12,7 @@ from .indexed import verify_indexed, MAX_INDEX_BYTES, MAX_CHUNK_BYTES
 from .paths import validate_disjoint_paths, validate_writable_path, managed_tree
 from .pipeline import validate_snapshot_counts
 from .records import validate_catalog_record
-from .storage import read_json, write_json, file_info, verify_file, writer_lock, site_lock_path
+from .storage import read_json, write_json, file_info, verify_file, writer_lock, site_lock_path, loads_json
 
 LATEST = obj({'browser_contract_version': literal(1), 'index': obj({'url': TEXT, **FILE_FIELDS})})
 MANAGED = re.compile(r'(?:latest\.json|index-[a-f0-9]{64}\.json|(?:header|notice)-[a-f0-9]{64}\.txt|chunks/[a-f0-9]{64}\.json)')
@@ -40,7 +40,16 @@ def managed_files(directory):
     return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets',), label='Browser output')
 
 
-def verify_browser(directory, index_sha256=None):
+def read_verified_json(path, ref):
+    """Parse exactly the bytes whose digest was checked, never reopen the file."""
+    with path.open('rb') as stream:
+        raw = stream.read(ref['bytes'] + 1)
+    if len(raw) != ref['bytes'] or hashlib.sha256(raw).hexdigest() != ref['sha256']:
+        raise DataError(f'Checksum or size mismatch: {path.name}')
+    return loads_json(raw)
+
+
+def verify_browser(directory, index_sha256=None, *, expected_rows=None, capture_index=False):
     directory = Path(directory)
     names = managed_files(directory)
     if 'latest.json' not in names or (directory / 'latest.json').stat().st_size > 4096:
@@ -55,8 +64,7 @@ def verify_browser(directory, index_sha256=None):
         raise DataError('Browser index pin mismatch')
     if pin['url'] not in names:
         raise DataError('Missing browser index')
-    verify_file(directory / pin['url'], pin)
-    index = read_json(directory / pin['url'])
+    index = read_verified_json(directory / pin['url'], pin)
     validate_contract('browser', index)
     counts, selection = index['counts'], index['selection']
     validate_snapshot_counts({key: value for key, value in counts.items() if key != 'discovery_export'})
@@ -84,11 +92,12 @@ def verify_browser(directory, index_sha256=None):
         (directory / ref['url']).read_text(encoding='utf-8')
     dates, ordinal = [], 0
     for chunk in index['chunks']:
-        verify_file(directory / chunk['url'], chunk)
-        rows = read_json(directory / chunk['url'])
+        rows = read_verified_json(directory / chunk['url'], chunk)
         if (not isinstance(rows, list) or not rows or chunk['start'] != ordinal
                 or chunk['end'] != ordinal + len(rows)):
             raise DataError('Browser ordinal coverage mismatch')
+        if expected_rows is not None and rows != expected_rows[ordinal:ordinal+len(rows)]:
+            raise DataError('Browser rows differ from source export')
         for row in rows:
             validate_catalog_record(row)
             ordinal += 1
@@ -102,8 +111,13 @@ def verify_browser(directory, index_sha256=None):
             raise DataError('Browser chunk dates mismatch')
     if ordinal != expected or dates != index['date_counts']:
         raise DataError('Browser date/count coverage mismatch')
-    return {'path': str(directory), 'pin': pin, 'records': ordinal, 'chunks': len(index['chunks']),
+    result = {'path': str(directory), 'pin': pin, 'records': ordinal, 'chunks': len(index['chunks']),
             'files': len(names), 'bytes': sum((directory / name).stat().st_size for name in names)}
+    if expected_rows is not None and ordinal != len(expected_rows):
+        raise DataError('Browser/source coverage mismatch')
+    if read_json(directory / 'latest.json') != latest:
+        raise DataError('Browser descriptor changed during verification')
+    return (result, index) if capture_index else result
 
 
 def published_index(directory):
@@ -209,7 +223,7 @@ def sync_candidate(stage, output, *, inventory=managed_files):
     return {'added': added, 'changed': changed, 'unchanged': unchanged, 'deleted': deleted}
 
 
-def export_browser(bundle, output):
+def export_browser(bundle, output, *, before_install=None):
     bundle, output = Path(bundle), Path(output)
     validate_writable_path(output, label='Browser output')
     validate_disjoint_paths(output, (bundle,), label='Browser output')
@@ -220,6 +234,8 @@ def export_browser(bundle, output):
         with tempfile.TemporaryDirectory(prefix='.browser-', dir=output.parent) as temp:
             stage = Path(temp)
             build_candidate(bundle, stage, previous)
+            if before_install is not None:
+                before_install(bundle, stage)
             changes = sync_candidate(stage, output)
             result = verify_browser(output)
     return {**result, 'status': 'updated' if any(changes[k] for k in ('added', 'changed', 'deleted')) else 'unchanged',

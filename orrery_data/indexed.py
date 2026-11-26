@@ -29,19 +29,24 @@ def chunk_limit(value):
     return value
 
 
-def verify_source_export(directory):
+def verify_source_export(directory, *, identity_ids=None):
     """Use the existing manifest/master contract; do not acquire new sources."""
     validate_flat_inventory(directory, EXPORT_FILES | {"manifest.json", "SHA256SUMS"}, label="Export")
     manifest = read_json(directory / "manifest.json")
     validate_export_manifest(manifest)
     for name, info in manifest["artifacts"].items():
         verify_file(directory / name, info)
-    sums = "".join(f"{file_info(directory / name)['sha256']}  {name}\n"
-                   for name in sorted([*EXPORT_FILES, "manifest.json"]))
+    # Artifact hashes above already establish these bytes; only the manifest
+    # itself is not one of its own artifact references.
+    verified = {name: info['sha256'] for name, info in manifest['artifacts'].items()}
+    verified['manifest.json'] = file_info(directory / 'manifest.json')['sha256']
+    sums = ''.join(f"{verified[name]}  {name}\n" for name in sorted(verified))
     if (directory / "SHA256SUMS").read_text() != sums:
         raise DataError("Export SHA256SUMS mismatch")
-    verify_generated_gzip(directory / "master.jsonl.gz")
-    selected = selected_master(directory / "master.jsonl.gz", manifest["counts"], manifest["selection"]["limit"])
+    # iter_master already checks the complete generated gzip frame.
+    selected = selected_master(directory / "master.jsonl.gz", manifest["counts"], manifest["selection"]["limit"], identity_ids=identity_ids)
+    if identity_ids is not None:
+        selected, identities = selected
     rows = read_json(directory / "catalog.json")
     if not isinstance(rows, list) or len(rows) != len(selected):
         raise DataError("Export catalog differs from selected master data")
@@ -50,7 +55,7 @@ def verify_source_export(directory):
         if tuple(row[key] for key in FIELDS) != expected:
             raise DataError("Export catalog differs from selected master data")
     verify_compressed(directory / "catalog.json.gz", manifest["artifacts"]["catalog.json"])
-    return manifest, rows
+    return (manifest, rows, identities) if identity_ids is not None else (manifest, rows)
 
 
 def verify_compressed(path, decoded):
