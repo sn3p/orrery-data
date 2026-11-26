@@ -1,14 +1,8 @@
-import copy
 import gzip
 import hashlib
 import json
 from pathlib import Path
-import shutil
-import subprocess
-import sys
 import unittest
-import uuid
-from unittest.mock import patch
 from orrery_data.formats import DataError
 from orrery_data.named_bodies import IDS, START, END, position, validate_definitions
 
@@ -77,7 +71,3 @@ class NamedBodies(unittest.TestCase):
                        lambda d:d.update(extra=1)]:
             d=self.definitions();change(d)
             with self.assertRaises(DataError):validate_definitions(d)
-
-
-
-
