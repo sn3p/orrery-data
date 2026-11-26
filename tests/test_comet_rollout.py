@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.comet_baseline import SCHEMA2_BASELINE
+from orrery_data import publication
 from orrery_data.comet_rollout import HISTORY_PIN, prepare_rollout, verify_history
 from orrery_data.formats import DataError
 from orrery_data.site import verify_site
@@ -91,12 +92,14 @@ class CometRollout(unittest.TestCase):
             shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__'))
         shutil.copytree(self.output / 'site', project / 'data')
         staged = self.root / 'pages'
-        with patch.object(publisher, 'ROOT', project), patch.object(publisher, 'urlopen', side_effect=lambda url, timeout:
-                io.BytesIO((self.site / url.removeprefix('https://example.test/')).read_bytes())), \
+        with patch.object(publisher, 'ROOT', project), patch.object(publication, 'urlopen', side_effect=lambda url, timeout:
+                io.BytesIO((self.site / url.removeprefix('https://example.test/')).read_bytes())) as remote, \
              patch.object(sys, 'argv', ['prepare', '--output', str(staged), '--latest-url', 'https://example.test/latest.json']), \
              patch('sys.stdout', new_callable=io.StringIO) as stdout:
             self.assertEqual(publisher.main(), 0)
             self.assertEqual(json.loads(stdout.getvalue())['status'], 'prepared')
+            self.assertEqual([call.args[0] for call in remote.call_args_list], [
+                'https://example.test/latest.json', 'https://example.test/comets/latest.json'])
         self.assertEqual(inventory(staged), {**inventory(self.output / 'site'), '.nojekyll': b''})
 
     def test_stale_pin_existing_output_overlap_and_lock_leave_source_unchanged(self):
