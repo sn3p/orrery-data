@@ -61,3 +61,9 @@ opening/All/Belt views, under 0.4px in Distant and up to 4.6px in Hungarias. Tha
 assessment used the earlier held-out subset, not a rerender or a bound for every
 zoom/orientation. No Ceres-specific model complexity was added. Keep extrapolation
 explicit and the selectable timeline unrestricted.
+
+Normal manual/scheduled asteroid refreshes now regenerate the exact inactive dwarf
+mapping before installing their output. Scientific coefficients are reused until
+a separate reviewed science refresh; no Horizons refit runs during MPC updates.
+See the [consumer handoff](../../docs/named-bodies-handoff.md). Activation remains
+blocked on verified Orrery integration and a separate reviewed activation step.

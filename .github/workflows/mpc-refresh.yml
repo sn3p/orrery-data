@@ -45,6 +45,18 @@ jobs:
           python3 scripts/update_browser.py > .context/scheduled-refresh/update.json
           python3 -m orrery_data verify-browser --directory data > .context/scheduled-refresh/verification.json
 
+      # Review artifact only: never copy named bodies into data/ or Pages.
+      - name: Retain inactive named-body candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: inactive-named-bodies-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          path: |
+            .context/named-body-candidates/refresh-*/
+            .context/scheduled-refresh/update.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Save verified MPC HTTP source cache
         uses: actions/cache/save@v6
         with:

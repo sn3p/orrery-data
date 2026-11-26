@@ -175,3 +175,18 @@ the identity-bearing inputs for the current hosted catalogue were unavailable.
 Its exact pins/paths and local verification results are in the workspace consumer
 handoff. It must not be mixed with the current hosted asteroid index. Publication,
 activation and consumer integration are separate future steps.
+
+## Ongoing inactive refreshes
+
+The maintained `scripts/update_browser.py` path (manual acquisition, offline
+`--from-bundle`, and scheduled MPC refresh) prepares a matching immutable companion
+before installing the asteroid generation. Failures stop that installation. Candidate
+names include both the final asteroid-index hash and scientific-definition hash;
+unchanged refreshes reuse identical candidates. Scheduled runs retain candidates
+as review artifacts for 90 days, outside Git's `data/` and outside Pages. See the
+[concise consumer handoff](named-bodies-handoff.md) for retrieval and acceptance.
+
+This is preparation, not activation. Raw `export-browser` remains a projection
+primitive whose direct callers must explicitly prepare a companion. A future
+activation must enforce matching pins at its installation/publication boundary;
+no activation is provided by this change.

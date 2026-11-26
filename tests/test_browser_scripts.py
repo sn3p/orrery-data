@@ -23,6 +23,7 @@ class BrowserScripts(unittest.TestCase):
         self.checkout.mkdir()
         for name in ('orrery_data', 'scripts', '.github'):
             shutil.copytree(ROOT / name, self.checkout / name, ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT / 'research/named-bodies', self.checkout / 'research/named-bodies')
         for name in ('MPCORB.DAT', 'NumberedMPs.txt'):
             shutil.copyfile(ROOT / 'tests/fixtures' / name, self.root / name)
 
