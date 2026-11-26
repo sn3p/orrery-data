@@ -182,6 +182,8 @@ def update(bundle, output, make_companion, *, timestamp=None, published=None):
                 write_json(root/'latest.json',pair)
             write_json(root/'retention.json',ledger)
             checked = verify_site(stage)
+            if checked['comets'] is not None:
+                checked['comets']['path'] = str(output/'comets')
             new = owned_files(stage)
             changes = {'added':sorted(new-old),'deleted':sorted(old-new),'changed':[], 'unchanged':[]}
             for name in sorted(old & new):

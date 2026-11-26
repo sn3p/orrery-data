@@ -118,3 +118,10 @@ class PairedPublication(unittest.TestCase):
         helper.validate_results(self.root,result,verify_site(self.output),changes)
         self.assertIn('data/paired/latest.json',changes['paths'])
         self.assertNotIn('data/latest.json',changes['paths'])
+
+    def test_refresh_reports_installed_comet_path(self):
+        from scripts.comet_baseline import SCHEMA2_BASELINE
+        shutil.copytree(SCHEMA2_BASELINE,self.output/'comets')
+        result=self.update()
+        self.assertEqual(result['comets']['path'],str(self.output/'comets'))
+        self.assertTrue(Path(result['comets']['path']).is_dir())
