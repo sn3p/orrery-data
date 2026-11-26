@@ -6,7 +6,7 @@ import sys
 import tempfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from orrery_data.named_bodies import validate_definitions, need
-from orrery_data.named_body_mapping import build_mapping
+from orrery_data.named_body_mapping import build_mapping, validate_mapping
 from orrery_data.storage import read_json, json_bytes, file_info, writer_lock, rename_new
 from orrery_data.browser import bytes_reference
 ROOT=Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ def build(export, browser, output, definitions=ROOT/'research/named-bodies/defin
     namespace=ROOT/'.context/named-body-candidates';output=Path(output).absolute()
     need(namespace.resolve()==namespace and not output.is_symlink() and output.parent.resolve()==namespace, 'candidate destination')
     definitions=validate_definitions(read_json(Path(definitions)))
-    mapping=build_mapping(export,browser)
+    mapping=validate_mapping(build_mapping(export,browser))
     raw=json_bytes(definitions); dref=bytes_reference(raw,'definitions-')
     mraw=json_bytes(mapping); mref=bytes_reference(mraw,'mapping-')
     files={dref['url']:raw,mref['url']:mraw,'index.json':json_bytes(dict(named_body_product_version=1,definitions=dref,mapping=mref))}

@@ -2,10 +2,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
+import copy
+import json
+import tempfile
+from unittest.mock import patch
 import uuid
 from orrery_data.formats import DataError
 from orrery_data.named_bodies import IDS
-from orrery_data.named_body_mapping import selected_identities, build_mapping
+from orrery_data.named_body_mapping import build_mapping, validate_mapping
+from orrery_data.pipeline import select_discovery_rows
 from scripts.named_body_candidate import build
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -13,11 +18,9 @@ ROOT=Path(__file__).resolve().parents[1]
 class NamedBodyMapping(unittest.TestCase):
     def test_selection_limit_precedes_sort_and_ties_keep_identity(self):
         rows=[dict(id=IDS[8],disc=20),dict(id=IDS[9],disc=10),dict(id=IDS[10],disc=10),dict(id=IDS[11],disc=None)]
-        selected,found=selected_identities(rows,2)
+        selected=select_discovery_rows(rows,2)
         self.assertEqual([r['id'] for r in selected],[IDS[9],IDS[8]])
-        self.assertIn(IDS[11],found)
-        self.assertEqual([r['id'] for r in selected_identities(rows,None)[0]],[IDS[9],IDS[10],IDS[8]])
-        with self.assertRaises(DataError):selected_identities(rows+rows[:1],None)
+        self.assertEqual([r['id'] for r in select_discovery_rows(rows,None)],[IDS[9],IDS[10],IDS[8]])
 
 
     def test_real_fixture_candidate_roundtrip_noop_and_corruption(self):
@@ -69,6 +72,54 @@ class NamedBodyMapping(unittest.TestCase):
             m=build_mapping(Path(e['path']),root/'other-browser')['members'][0]
             self.assertEqual((m['status'],m['reason'],m['discovery_jd']),('absent-from-export','unknown-discovery-date',None))
 
+
+    def test_invalid_mapping_is_rejected_before_candidate_installation(self):
+        export=ROOT/'tests/fixtures/consumer-v1/ties/full';browser=ROOT/'tests/fixtures/browser-v1/ties'
+        good=build_mapping(export,browser)
+        output=ROOT/'.context/named-body-candidates'/('test-'+uuid.uuid4().hex)
+        for mutation in [lambda m:m['members'][0].update(ordinal=True),
+                         lambda m:m['members'][1].update(status='unknown'),
+                         lambda m:m.update(records=-1)]:
+            bad=copy.deepcopy(good);mutation(bad)
+            with self.assertRaises(DataError):validate_mapping(bad)
+            with patch('scripts.named_body_candidate.build_mapping',return_value=bad),self.assertRaises(DataError):build(export,browser,output)
+            self.assertFalse(output.exists())
+
+    def test_captured_index_is_not_reopened_and_chunks_are_read_once(self):
+        import orrery_data.browser as module
+        import orrery_data.indexed as indexed
+        import orrery_data.pipeline as pipeline
+        export=ROOT/'tests/fixtures/consumer-v1/ties/full';browser=ROOT/'tests/fixtures/browser-v1/ties'
+        with patch.object(module,'read_verified_json',wraps=module.read_verified_json) as reads, \
+             patch.object(pipeline,'iter_master',wraps=pipeline.iter_master) as master:
+            build_mapping(export,browser)
+        self.assertEqual(master.call_count,1)
+        paths=[c.args[0] for c in reads.call_args_list]
+        self.assertEqual(len(paths),len(set(paths)))
+        self.assertEqual(sum(p.name.startswith('index-') for p in paths),1)
+        # Corrupt the index file after the verified bytes were captured. Mapping
+        # must use the captured object, not the subsequently replaced contents.
+        with tempfile.TemporaryDirectory() as temp:
+            local=Path(temp)/'browser';shutil.copytree(browser,local)
+            real=module.read_verified_json
+            def replace_after_read(path,ref):
+                value=real(path,ref)
+                if path.name.startswith('index-'):path.write_text('{}')
+                return value
+            with patch.object(module,'read_verified_json',side_effect=replace_after_read):
+                actual=build_mapping(export,local)
+            self.assertEqual(actual['members'][0]['ordinal'],1)
+            with self.assertRaises(DataError):build_mapping(export,local)
+
+    def test_duplicate_identity_after_limit_is_rejected_in_shared_selection(self):
+        import orrery_data.pipeline as pipeline
+        from orrery_data.records import iter_master
+        export=ROOT/'tests/fixtures/consumer-v1/ties/full'
+        rows=list(iter_master(export/'master.jsonl.gz'))
+        counts=json.loads((export/'manifest.json').read_text())['counts']
+        with patch.object(pipeline,'iter_master',return_value=iter(rows+rows[:1])):
+            with self.assertRaisesRegex(DataError,'Duplicate master identity'):
+                pipeline.selected_master(export/'master.jsonl.gz',counts,1,identity_ids=set(IDS[8:]))
 
     def test_mismatched_browser_generation_rejected(self):
         with self.assertRaises(DataError):build_mapping(ROOT/'tests/fixtures/consumer-v1/ties/full',ROOT/'tests/fixtures/browser-v1/empty')

@@ -75,7 +75,9 @@ Example member (ordinal is derived for a particular export, never hardcoded):
 `unknown-discovery-date`, or `selection-limit`. Discovery date is retained when
 known. Failure to verify or join is an error, never an absence record.
 
-The builder verifies the full identity-bearing export, applies its known-date
+The builder validates the mapping schema before installation. It captures identities
+during the full export verification pass and compares hash-verified browser bytes
+without reopening the index or chunks. It applies its known-date
 selection limit **before** stable discovery-date sorting, compares every selected
 row with the export and browser chunks, and joins the five exact MPC IDs. Ties
 retain input order. Duplicate master IDs, wrong generations, missing/corrupt files
@@ -109,6 +111,10 @@ const next = await loadNamedBodies(asteroids, trustedProductRef, productIndexURL
 const earth = next.definitions.bodies.find(b => b.id === 'orrery:planet:earth');
 const {position: [x, y, z], status} = namedPosition(earth, jdTDB);
 ```
+
+The resolved `trustedProductRef.url` must equal `productIndexURL`; absolute and
+relative references are accepted, but a different host/path/query is rejected
+before fetching. HTTPS is required except for loopback HTTP.
 
 All payloads are bounded and hash-verified before the result is returned. Returned
 objects are frozen. Loading needs the asteroid index, **not discovery chunks**.
