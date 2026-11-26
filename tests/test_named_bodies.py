@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
 import unittest
 from orrery_data.formats import DataError
@@ -22,15 +23,23 @@ class NamedBodies(unittest.TestCase):
             self.assertFalse(training & {r[0] for r in source['validation']})
             self.assertEqual(len(source['validation']),b['validation']['samples'])
             errors=[]; angles=[]
-            import math
             for jd,x,y,z in source['validation']:
                 actual=position(b,jd);self.assertEqual(actual['status'],'validated-interval')
                 errors.append(math.dist(actual['position'],[x,y,z]))
                 xyz=actual['position']; ref=[x,y,z]
-                cosine=sum(a*b for a,b in zip(xyz,ref))/math.sqrt(sum(a*a for a in xyz)*sum(a*a for a in ref))
-                angles.append(math.degrees(math.acos(min(1,max(-1,cosine)))))
+                # atan2(cross, dot) stays well-conditioned at small angles;
+                # acos(dot / norms) amplifies platform rounding near cosine=1.
+                cross=[xyz[1]*ref[2]-xyz[2]*ref[1],
+                       xyz[2]*ref[0]-xyz[0]*ref[2],
+                       xyz[0]*ref[1]-xyz[1]*ref[0]]
+                dot=math.fsum(a*b for a,b in zip(xyz,ref))
+                angles.append(math.degrees(math.atan2(math.hypot(*cross),dot)))
             self.assertAlmostEqual(max(errors),b['validation']['max_position_error_au'],places=12)
-            self.assertAlmostEqual(max(angles),b['validation']['max_direction_error_degrees'],places=10)
+            # Recorded evidence used acos. Allow 1e-9 degrees (3.6 microarcseconds)
+            # for its rounding, independently of the model's scientific error.
+            # Linux CI differed by 5.32e-11 degrees for Haumea with identical inputs.
+            self.assertAlmostEqual(max(angles),b['validation']['max_direction_error_degrees'],
+                                   delta=1e-9,msg=b['name'])
 
     def test_extrapolation_keeps_moving_and_is_continuous_without_invalid_shape(self):
         for b in self.definitions()['bodies']:
