@@ -9,7 +9,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.browser import managed_files, export_browser
+from orrery_data.paired import update as update_paired
+from orrery_data.browser import managed_files
 from orrery_data.storage import read_json, file_info
 from orrery_data.named_bodies import validate_definitions
 from scripts.named_body_candidate import build as build_named_candidate
@@ -25,18 +26,15 @@ def command(*args):
 
 
 def update_from_bundle(bundle, output):
-    """Refresh the exact inactive companion before installing the asteroid pin."""
+    """Publish a verified pair and bounded retained generations atomically."""
     definitions = ROOT / 'research/named-bodies/definitions.json'
     validate_definitions(read_json(definitions))
-    companion = None
     def prepare(bundle, stage):
-        nonlocal companion
         pin = read_json(stage / 'latest.json')['index']['sha256']
         science = file_info(definitions)['sha256']
         destination = ROOT / '.context/named-body-candidates' / f'refresh-{pin}-{science}'
-        companion = build_named_candidate(bundle / 'full', stage, destination, definitions)
-    result = export_browser(bundle, output, before_install=prepare)
-    return {**result, 'named_bodies': {**companion, 'activation': 'inactive'}}
+        return build_named_candidate(bundle / 'full', stage, destination, definitions)
+    return update_paired(bundle, output, prepare)
 
 
 def main():

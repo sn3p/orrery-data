@@ -64,7 +64,7 @@ projection stages only `data/`, creates one dated commit on the checked-out
 advanced during acquisition, the push is non-fast-forward and fails; the job
 does not rebase, force-push or retry stale output.
 
-After acquire and `verify-browser`, the workflow inventories `data/` in Git.
+After acquire and `verify-site`, the workflow inventories `data/` in Git.
 When that inventory is empty it skips Python 3.11, 3.12, 3.13 and the Node
 source traversal, then still reconciles Pages so a prior dispatch/deploy
 failure can retry. Before any data push it still runs those Python suites plus
@@ -265,3 +265,5 @@ Scientific positional accuracy, physical-device speed and production app GPU
 performance remain separate from distribution correctness. The first real
 refresh churn measurement is recorded above; later byte-size boundaries and old
 orbital corrections can still change a different number of files.
+
+Named-body activation uses the separate [paired publication contract](paired-catalogue.md); the existing root descriptor format is unchanged.

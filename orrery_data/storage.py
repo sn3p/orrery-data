@@ -279,3 +279,24 @@ def rename_new(source, destination):
     if rename(*args) != 0:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(destination))
+
+
+def exchange_directories(first, second):
+    """Atomically exchange two complete same-filesystem directories; no gap."""
+    import ctypes
+    import sys
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == 'darwin':
+        rename = libc.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        args = (os.fsencode(first), os.fsencode(second), 2)  # RENAME_SWAP
+    elif sys.platform == 'linux' and hasattr(libc, 'renameat2'):
+        rename = libc.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        args = (-100, os.fsencode(first), -100, os.fsencode(second), 2)  # RENAME_EXCHANGE
+    else:
+        raise DataError('Atomic directory exchange is unavailable')
+    rename.restype = ctypes.c_int
+    if rename(*args) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(second))

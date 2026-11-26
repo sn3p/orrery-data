@@ -22,7 +22,7 @@ from urllib.error import HTTPError
 
 from scripts.comet_baseline import SCHEMA2_BASELINE
 from orrery_data import comets, horizons
-from orrery_data.browser import sync_candidate, verify_browser
+from orrery_data.browser import sync_candidate, verify_browser, export_browser
 from orrery_data.cli import main
 from orrery_data.formats import DataError
 from orrery_data.site import verify_site
@@ -324,7 +324,7 @@ class PublicationCases(CometFixture):
         self.output = self.root / 'data' / self.product_name
         shutil.copytree(SCHEMA2_BASELINE, self.output)
 
-    def test_orphan_comets_do_not_block_asteroid_update_but_block_publication(self):
+    def test_orphan_comets_block_paired_update_and_publication_but_not_raw_projection(self):
         orphan = self.output / 'objects' / ('0' * 64 + '.json')
         orphan.write_text('{}')
         before = {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()}
@@ -332,8 +332,12 @@ class PublicationCases(CometFixture):
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/update_browser.py'),
                                  '--from-bundle', str(ROOT / 'tests/fixtures/consumer-v1/ties'),
                                  '--output', str(self.output.parent)], cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertGreater(json.loads(result.stdout)['records'], 0)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Comet inventory differs', result.stderr)
+        self.assertFalse((self.output.parent/'latest.json').exists())
+        self.assertEqual(before, {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
+        # The lower-level asteroid-only projection still leaves comets alone.
+        export_browser(ROOT/'tests/fixtures/consumer-v1/ties',self.output.parent)
         verify_browser(self.output.parent)
         self.assertEqual(before, {p.relative_to(self.output): p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
         with self.assertRaises(DataError): verify_site(self.output.parent)

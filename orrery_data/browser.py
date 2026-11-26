@@ -37,7 +37,7 @@ def check_reference(ref, prefix, suffix):
 
 def managed_files(directory):
     """Own asteroid files; comets have an independent verifier and inventory."""
-    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets',), label='Browser output')
+    return managed_tree(directory, MANAGED, children=('chunks',), reserved=('comets', 'paired'), label='Browser output')
 
 
 def read_verified_json(path, ref):
@@ -228,8 +228,12 @@ def export_browser(bundle, output, *, before_install=None):
     validate_writable_path(output, label='Browser output')
     validate_disjoint_paths(output, (bundle,), label='Browser output')
     managed_files(output)
+    if (output / 'paired').exists():
+        raise DataError('Paired sites require scripts/update_browser.py')
     lock = site_lock_path(output)
     with writer_lock(lock):
+        if (output / 'paired').exists() or (output / 'paired').is_symlink():
+            raise DataError('Paired sites require scripts/update_browser.py')
         previous = published_index(output)
         with tempfile.TemporaryDirectory(prefix='.browser-', dir=output.parent) as temp:
             stage = Path(temp)

@@ -36,7 +36,7 @@ def remote_descriptor(url, *, optional=False):
 
 def published_site_matches(source, latest_url):
     """Every product must match, including optional product presence/removal."""
-    descriptors = ('latest.json', 'comets/latest.json')
+    descriptors = ('latest.json', 'comets/latest.json', 'paired/latest.json', 'paired/retention.json')
     try:
         for name in descriptors:
             optional = name != 'latest.json'

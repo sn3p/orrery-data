@@ -299,7 +299,7 @@ class RefreshWorkflow(unittest.TestCase):
         acquire = named_steps["Acquire, rebuild and verify browser data"]
         self.assertNotIn("if", acquire)
         self.assertIn("python3 scripts/update_browser.py", acquire["run"])
-        self.assertIn("python3 -m orrery_data verify-browser --directory data", acquire["run"])
+        self.assertIn("python3 -m orrery_data verify-site --directory data", acquire["run"])
         validation = named_steps["Validate the scheduled update"]
         self.assertEqual(validation["id"], "validation")
         self.assertNotIn("if", validation)

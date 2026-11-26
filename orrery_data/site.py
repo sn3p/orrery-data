@@ -21,8 +21,13 @@ def verify_optional_product(directory, verifier):
 def verify_site(directory):
     directory = Path(directory)
     asteroids = verify_browser(directory)
+    from .paired import verify_paired
+    paired = verify_paired(directory)
     return {
         **asteroids,
+        'files': asteroids['files'] + (paired['files'] if paired else 0),
+        'bytes': asteroids['bytes'] + (paired['bytes'] if paired else 0),
+        'paired': paired,
         'comets': verify_optional_product(directory / 'comets', verify_current_comets),
     }
 
@@ -33,7 +38,7 @@ def site_descriptors(directory):
     asteroid_files(directory)
     comet_files(directory / 'comets')
     descriptors = {name: descriptor_bytes(directory / name)
-                   for name in ('latest.json', 'comets/latest.json')}
+                   for name in ('latest.json', 'comets/latest.json', 'paired/latest.json', 'paired/retention.json')}
     if descriptors['latest.json'] is None:
         raise DataError('Missing asteroid descriptor')
     for value in descriptors.values():
