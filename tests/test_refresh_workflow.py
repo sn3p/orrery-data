@@ -298,6 +298,8 @@ class RefreshWorkflow(unittest.TestCase):
 
         acquire = named_steps["Acquire, rebuild and verify browser data"]
         self.assertNotIn("if", acquire)
+        self.assertLess(names.index("Read the Pages configuration"), names.index("Acquire, rebuild and verify browser data"))
+        self.assertIn('--base-url "${{ steps.pages.outputs.base_url }}"', acquire["run"])
         self.assertIn("python3 scripts/update_browser.py", acquire["run"])
         self.assertIn("python3 -m orrery_data verify-site --directory data", acquire["run"])
         validation = named_steps["Validate the scheduled update"]

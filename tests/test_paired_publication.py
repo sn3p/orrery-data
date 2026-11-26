@@ -22,12 +22,12 @@ class PairedPublication(unittest.TestCase):
         shutil.copyfile(ROOT/'research/named-bodies/definitions.json',d/'definitions.json')
         for module in (update_browser,named_body_candidate):
             p=patch.object(module,'ROOT',self.root);p.start();self.addCleanup(p.stop)
-    def update(self,day=1,science=None,published=None,fixture='ties'):
+    def update(self,day=1,science=None,published=None,fixture='ties',base_url=paired.BASE):
         if science is not None:
             p=self.root/'research/named-bodies/definitions.json';d=read_json(p)
             d['bodies'][0]['sources']['fit']['retrieved_at']=f'2026-11-{science:02}T00:00:00Z';write_json(p,d)
         with patch.object(paired,'now',return_value=f'2026-12-{day:02}T00:00:00Z'),patch.object(paired,'published_descriptor',return_value=published or {}):
-            return update_browser.update_from_bundle(ROOT/'tests/fixtures/consumer-v1'/fixture,self.output)
+            return update_browser.update_from_bundle(ROOT/'tests/fixtures/consumer-v1'/fixture,self.output,base_url=base_url)
     def tree(self):
         return {str(p.relative_to(self.output)):file_info(p) for p in self.output.rglob('*') if p.is_file()}
     def latest(self): return read_json(self.output/'paired/latest.json')
@@ -37,12 +37,14 @@ class PairedPublication(unittest.TestCase):
         # Only a confirmed hosted replacement starts the older pair's clock.
         self.update(3,science=3,published=self.latest());self.update(4,science=4,published=self.latest())
         before=self.tree()
-        with self.assertRaisesRegex(DataError,'retention capacity'):self.update(5,science=5,published=self.latest())
-        self.assertEqual(before,self.tree())
-        with self.assertRaisesRegex(DataError,'retention capacity'):self.update(20,science=5)
+        old_pair=self.latest()
+        result=self.update(5,science=5,published=self.latest())
+        self.assertTrue(result['deferred']); self.assertEqual(self.latest(),old_pair)
+        before=self.tree()
+        self.assertTrue(self.update(20,science=5)['deferred'])
         self.assertEqual(before,self.tree())
         self.update(20,science=5,published=self.latest());verify_site(self.output)
-        self.assertEqual(len(read_json(self.output/'paired/retention.json')['generations']),3)
+        self.assertEqual(len(read_json(self.output/'paired/retention.json')['generations']),2)
         # First no-op may record a newly confirmed supersession; next is byte stable.
         self.update(21,science=5,published=self.latest());before=self.tree()
         self.assertEqual(self.update(22,science=5,published=self.latest())['status'],'unchanged')
@@ -125,3 +127,93 @@ class PairedPublication(unittest.TestCase):
         result=self.update()
         self.assertEqual(result['comets']['path'],str(self.output/'comets'))
         self.assertTrue(Path(result['comets']['path']).is_dir())
+
+    def test_full_unstamped_ledger_commits_evidence_and_recovers_in_clone(self):
+        from scripts import prepare_scheduled_refresh as helper
+        for n in range(1,5): self.update(n,science=n)
+        def git(*args):
+            subprocess.run(['git','-c','user.name=Test','-c','user.email=test@example.invalid',
+                            '-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null',*args],
+                           cwd=self.root,check=True,capture_output=True)
+        git('init','--quiet');(self.root/'.gitignore').write_text('.context/\nresearch/\n.*-browser-lock/\nclone/\n')
+        git('add','.gitignore','data');git('commit','-qm','four pairs')
+        latest=self.latest();result=self.update(5,science=5,published=latest)
+        self.assertEqual(result['status'],'updated');self.assertTrue(result['deferred'])
+        self.assertEqual(self.latest(),latest)
+        changes=helper.worktree_changes(self.root)
+        helper.validate_results(self.root,result,verify_site(self.output),changes)
+        self.assertEqual(changes['paths'],{'data/paired/retention.json'})
+        git('add','data');git('commit','-qm','confirm retirement')
+        git('clone','--quiet',str(self.root),str(self.root/'clone'))
+        self.output=self.root/'clone/data'
+        self.assertIsNone(self.update(20,science=5,published=self.latest())['deferred'])
+        self.assertNotEqual(self.latest(),latest)
+
+    def test_size_missing_file_and_budget_boundaries(self):
+        from orrery_data import site
+        self.update();p=self.output/'paired/retention.json';raw=p.read_bytes()
+        p.write_bytes(raw+b' '*(4096-len(raw)));verify_site(self.output)
+        copy_site_snapshot(self.output,self.root/'copy')
+        p.write_bytes(p.read_bytes()+b' ')
+        with self.assertRaises(DataError):verify_site(self.output)
+        with self.assertRaises(DataError):copy_site_snapshot(self.output,self.root/'oversize')
+        p.unlink()
+        with self.assertRaises(DataError):verify_site(self.output)
+        p.write_bytes(raw);before=self.tree()
+        with patch.object(site,'MAX_SITE_BYTES',1):
+            with self.assertRaisesRegex(DataError,'byte budget'):self.update(science=2)
+        self.assertEqual(before,self.tree())
+        generation=read_json(p)['generations'][0]['id']
+        (self.output/'paired/generations'/generation/'pair.json').unlink()
+        with self.assertRaises(DataError):verify_site(self.output)
+
+    def test_fork_base_and_migration(self):
+        self.update();old=self.latest()
+        base='https://fork.example.test/project/'
+        result=self.update(base_url=base)
+        self.assertEqual(old['asteroids']['sha256'],self.latest()['asteroids']['sha256'])
+        self.assertTrue(self.latest()['asteroids']['url'].startswith(base));verify_site(self.output)
+        import io
+        with patch.object(paired,'urlopen',return_value=io.BytesIO(json.dumps(self.latest()).encode())) as request:
+            self.assertEqual(paired.published_descriptor(base),self.latest())
+            self.assertEqual(request.call_args.args[0],base+'paired/latest.json')
+        before=self.tree()
+        with self.assertRaises(DataError):self.update(base_url='https://user:password@example.test/')
+        self.assertEqual(before,self.tree())
+
+    def test_diff_does_not_rehash_validated_immutable_files(self):
+        self.update()
+        with patch.object(paired,'file_info',side_effect=AssertionError('redundant diff hashing')):
+            self.assertEqual(self.update()['status'],'unchanged')
+
+    def test_base_migration_resets_old_host_retirement_clocks(self):
+        for n in range(1,5):self.update(n,science=n)
+        self.update(5,science=5,published=self.latest())
+        base='https://fork.example.test/new/'
+        self.update(20,science=4,base_url=base)
+        ledger=read_json(self.output/'paired/retention.json')
+        self.assertTrue(all(e['superseded_at'] is None for e in ledger['generations']))
+        result=self.update(21,science=5,base_url=base,published=self.latest())
+        self.assertTrue(result['deferred'])
+        self.assertEqual(len(read_json(self.output/'paired/retention.json')['generations']),4)
+
+    def test_remote_metadata_reconciliation_enforces_4096_bytes(self):
+        import io
+        raw=b'{}'+b' '*4094
+        with patch.object(prepare_browser_site,'urlopen',return_value=io.BytesIO(raw)):
+            self.assertEqual(prepare_browser_site.remote_descriptor('https://example.test/retention.json'),{})
+        with patch.object(prepare_browser_site,'urlopen',return_value=io.BytesIO(raw+b' ')):
+            with self.assertRaisesRegex(ValueError,'Oversized'):
+                prepare_browser_site.remote_descriptor('https://example.test/retention.json')
+
+    def test_cli_configured_base_and_invalid_port(self):
+        import sys
+        target=self.root/'cli-site'
+        command=[sys.executable,str(ROOT/'scripts/update_browser.py'),'--from-bundle',
+                 str(ROOT/'tests/fixtures/consumer-v1/ties'),'--output',str(target),'--base-url']
+        bad=subprocess.run([*command,'https://example.test:invalid/'],capture_output=True,text=True)
+        self.assertNotEqual(bad.returncode,0);self.assertFalse(target.exists())
+        good=subprocess.run([*command,'https://fork.example.test/repository/'],capture_output=True,text=True)
+        self.assertEqual(good.returncode,0,good.stderr)
+        self.assertTrue(read_json(target/'paired/latest.json')['asteroids']['url'].startswith('https://fork.example.test/repository/'))
+        verify_site(target)

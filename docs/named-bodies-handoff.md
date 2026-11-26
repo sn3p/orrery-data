@@ -25,7 +25,7 @@ the old scene, reacquire pairedLatest once and validate a complete new pair;
 show retry if it still fails. Never retry by independently reading asteroid latest.
 Permanent fixed clients must store their own complete product copy. Legacy root
 asteroid URLs retain their previous current-only policy. See the contract for
-capacity deferral, publication-confirmation clocks and manual rollback limitations.
+metadata-only capacity deferral, configured-host publication-confirmation clocks and manual rollback limitations.
 
 Check current provider state and actual hosted descriptor/reader before rollout.
 No merge, mark-ready, deployment, server or live-browser permission is conveyed.

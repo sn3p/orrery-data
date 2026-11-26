@@ -39,10 +39,14 @@ jobs:
           restore-keys: |
             mpc-http-${{ runner.os }}-content-
 
+      - name: Read the Pages configuration
+        id: pages
+        uses: actions/configure-pages@v6
+
       - name: Acquire, rebuild and verify browser data
         run: |
           mkdir -p .context/scheduled-refresh
-          python3 scripts/update_browser.py > .context/scheduled-refresh/update.json
+          python3 scripts/update_browser.py --base-url "${{ steps.pages.outputs.base_url }}" > .context/scheduled-refresh/update.json
           python3 -m orrery_data verify-site --directory data > .context/scheduled-refresh/verification.json
 
       # Retain generation evidence in addition to the verified paired publication.
@@ -125,10 +129,6 @@ jobs:
         run: |
           npm ci
           npm test
-
-      - name: Read the Pages configuration
-        id: pages
-        uses: actions/configure-pages@v6
 
       - name: Reconcile committed and published browser data
         id: publication

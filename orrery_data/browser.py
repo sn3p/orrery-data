@@ -228,8 +228,6 @@ def export_browser(bundle, output, *, before_install=None):
     validate_writable_path(output, label='Browser output')
     validate_disjoint_paths(output, (bundle,), label='Browser output')
     managed_files(output)
-    if (output / 'paired').exists():
-        raise DataError('Paired sites require scripts/update_browser.py')
     lock = site_lock_path(output)
     with writer_lock(lock):
         if (output / 'paired').exists() or (output / 'paired').is_symlink():

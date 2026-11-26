@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from orrery_data.paired import update as update_paired
+from orrery_data.paired import update as update_paired, BASE, validate_base
 from orrery_data.browser import managed_files
 from orrery_data.storage import read_json, file_info
 from orrery_data.named_bodies import validate_definitions
@@ -25,7 +25,7 @@ def command(*args):
     return json.loads(result.stdout)
 
 
-def update_from_bundle(bundle, output):
+def update_from_bundle(bundle, output, *, base_url=BASE):
     """Publish a verified pair and bounded retained generations atomically."""
     definitions = ROOT / 'research/named-bodies/definitions.json'
     validate_definitions(read_json(definitions))
@@ -34,11 +34,12 @@ def update_from_bundle(bundle, output):
         science = file_info(definitions)['sha256']
         destination = ROOT / '.context/named-body-candidates' / f'refresh-{pin}-{science}'
         return build_named_candidate(bundle / 'full', stage, destination, definitions)
-    return update_paired(bundle, output, prepare)
+    return update_paired(bundle, output, prepare, base_url=base_url)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--base-url', default=BASE, help='absolute HTTPS Pages base for pair references and publication confirmation')
     parser.add_argument('--from-bundle', type=Path, help='reuse a complete verified indexed bundle without acquiring new data')
     parser.add_argument('--output', type=Path, default=ROOT / 'data')
     parser.add_argument('--mpcorb', type=Path)
@@ -56,6 +57,7 @@ def main():
         if value is not None:
             setattr(args, key, value.resolve())
     try:
+        validate_base(args.base_url)
         validate_writable_path(args.output, label='Browser output')
         validate_disjoint_paths(args.output, (ROOT / '.data', ROOT / 'artifacts'), label='Browser output')
         managed_files(args.output)
@@ -73,7 +75,7 @@ def main():
             exported = command('export', '--snapshot', snapshot['snapshot_version'])
             indexed = command('export-indexed', '--export', exported['path'])
             bundle = ROOT / indexed['path']
-        result = update_from_bundle(bundle, args.output)
+        result = update_from_bundle(bundle, args.output, base_url=args.base_url)
         print(json.dumps(result, indent=2))
         return 0
     except (OSError, ValueError) as exc:

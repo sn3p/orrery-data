@@ -259,6 +259,8 @@ def main():
                    f"- Records: {refresh['records']:,}\n"
                    f"- Chunks: {refresh['chunks']}\n"
                    f"- Index: `{refresh['pin']['sha256']}`\n")
+        if refresh.get("deferred"):
+            summary += f"- New generation deferred: {refresh['deferred']}\n"
         if args.github_summary:
             with args.github_summary.open("a", encoding="utf-8") as target:
                 target.write(summary)

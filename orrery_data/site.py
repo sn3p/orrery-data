@@ -18,17 +18,24 @@ def verify_optional_product(directory, verifier):
     return None
 
 
+MAX_SITE_BYTES = 900_000_000  # headroom below the Pages 1 GB publication limit
+
+
 def verify_site(directory):
     directory = Path(directory)
     asteroids = verify_browser(directory)
     from .paired import verify_paired
     paired = verify_paired(directory)
+    comets = verify_optional_product(directory / 'comets', verify_current_comets)
+    total = asteroids['bytes'] + (paired['bytes'] if paired else 0) + (comets['bytes'] if comets else 0)
+    if total > MAX_SITE_BYTES:
+        raise DataError(f'Complete site exceeds publication byte budget ({total} > {MAX_SITE_BYTES})')
     return {
         **asteroids,
         'files': asteroids['files'] + (paired['files'] if paired else 0),
         'bytes': asteroids['bytes'] + (paired['bytes'] if paired else 0),
         'paired': paired,
-        'comets': verify_optional_product(directory / 'comets', verify_current_comets),
+        'comets': comets,
     }
 
 

@@ -3,6 +3,8 @@ from datetime import timedelta
 import hashlib
 from pathlib import Path
 from urllib.request import urlopen
+from urllib.parse import urlsplit
+from .formats import DataError
 import re
 import shutil
 import tempfile
@@ -43,12 +45,29 @@ def ref_schema(ref, maximum):
     need(type(ref['bytes']) is int and 0 < ref['bytes'] <= maximum, 'paired reference size')
 
 
+def validate_base(value):
+    need(isinstance(value, str), 'publication base')
+    try:
+        url = urlsplit(value)
+        url.port  # Validate malformed/out-of-range ports before generating references.
+    except ValueError as exc:
+        raise DataError(f'Invalid publication base: {exc}') from exc
+    need(url.scheme == 'https' and bool(url.hostname) and not url.username and not url.password
+         and not url.query and not url.fragment, 'publication base requires HTTPS without credentials/query/fragment')
+    return value.rstrip('/')+'/'
+
+
 def descriptor(value, generation):
     keys(value, 'paired_catalogue_version asteroids namedBodies')
     need(type(value['paired_catalogue_version']) is int and value['paired_catalogue_version'] == 1, 'paired version')
+    bases = set()
     for field, prefix, maximum in [('asteroids', 'asteroids/', MAX_INDEX_BYTES), ('namedBodies', 'named/', 128*1024)]:
         ref = value[field]; ref_schema(ref, maximum)
-        need(ref['url'] == BASE + f'paired/generations/{generation}/' + prefix + f'index-{ref["sha256"]}.json', 'paired URL')
+        suffix = f'paired/generations/{generation}/' + prefix + f'index-{ref["sha256"]}.json'
+        need(isinstance(ref['url'], str) and ref['url'].endswith(suffix), 'paired URL')
+        base = ref['url'][:-len(suffix)]
+        need(validate_base(base) == base, 'paired base'); bases.add(base)
+    need(len(bases) == 1, 'paired base mismatch')
     expected = hashlib.sha256(json_bytes([value['asteroids']['sha256'], value['namedBodies']['sha256']])).hexdigest()
     need(generation == expected, 'paired generation identity')
     return value
@@ -84,11 +103,18 @@ def verify_generation(root, generation):
 
 
 def verify_paired(site):
+    try:
+        return _verify_paired(site)
+    except OSError as exc:
+        raise DataError(f'Unable to read paired publication: {exc}') from exc
+
+
+def _verify_paired(site):
     root = Path(site)/'paired'
     if not root.exists() and not root.is_symlink():
         return None
     names = inventory(root)
-    need((root/'latest.json').stat().st_size <= 4096 and (root/'retention.json').stat().st_size <= 16384, 'paired metadata size')
+    need((root/'latest.json').stat().st_size <= 4096 and (root/'retention.json').stat().st_size <= 4096, 'paired metadata size')
     ledger = read_json(root/'retention.json'); keys(ledger, 'version generations')
     need(type(ledger['version']) is int and ledger['version'] == 1, 'retention version')
     entries = ledger['generations']
@@ -113,21 +139,22 @@ def owned_files(site):
     return managed_files(site) | {'paired/'+name for name in inventory(Path(site)/'paired')}
 
 
-def published_descriptor():
+def published_descriptor(base_url=BASE):
     try:
         from .storage import loads_json
-        with urlopen(BASE+'paired/latest.json', timeout=20) as response:
+        with urlopen(validate_base(base_url)+'paired/latest.json', timeout=20) as response:
             raw = response.read(4097)
         return loads_json(raw) if len(raw) <= 4096 else None
     except (OSError, ValueError):
         return None
 
 
-def update(bundle, output, make_companion, *, timestamp=None, published=None):
+def update(bundle, output, make_companion, *, timestamp=None, published=None, base_url=BASE):
     from .site import verify_site
     bundle, output = Path(bundle).resolve(), Path(output).resolve()
     validate_writable_path(output, label='Paired output')
     validate_disjoint_paths(output, (bundle,), label='Paired output')
+    base_url = validate_base(base_url)
     moment = utc_timestamp(timestamp or now(), 'refresh')
     output.parent.mkdir(parents=True, exist_ok=True)
     with writer_lock(site_lock_path(output)):
@@ -145,12 +172,19 @@ def update(bundle, output, make_companion, *, timestamp=None, published=None):
             else:
                 root.mkdir(); (root/'generations').mkdir(); ledger = {'version':1,'generations':[]}
             asteroid = read_json(stage/'latest.json')['index']
+            deferred = None
             named = reference(Path(companion['path'])/'index.json','index-','.json')
+            companion_index = read_verified_json(Path(companion['path'])/'index.json', named)
             identity = hashlib.sha256(json_bytes([asteroid['sha256'],named['sha256']])).hexdigest()
             entries = ledger['generations']
             # A grace clock starts only after observing a successfully hosted
             # replacement. Preparation/commit timestamps do not prove publication.
-            confirmed = bool(entries and (published if published is not None else published_descriptor()) == read_json(root/'latest.json'))
+            migrating = bool(entries and not read_json(root/'latest.json')['asteroids']['url'].startswith(base_url+'paired/generations/'))
+            if migrating:
+                # Old-host publication evidence cannot expire newly hosted URLs.
+                for entry in entries:
+                    entry['superseded_at'] = None
+            confirmed = bool(entries and not migrating and (published if published is not None else published_descriptor(base_url)) == read_json(root/'latest.json'))
             if confirmed:
                 for entry in entries[:-1]:
                     if entry['superseded_at'] is None:
@@ -164,33 +198,54 @@ def update(bundle, output, make_companion, *, timestamp=None, published=None):
                     shutil.rmtree(root/'generations'/entry['id']); entries.remove(entry)
                 existing = next((e for e in entries if e['id']==identity),None)
                 if existing: entries.remove(existing)
-                need(len(entries) < MAX_GENERATIONS, 'retention capacity: refresh deferred to preserve 14-day pins; retry after expiry/publication')
-                folder = root/'generations'/identity
-                if not folder.exists():
-                    folder.mkdir(); (folder/'named').mkdir(); (folder/'asteroids').mkdir()
-                    for name in managed_files(stage):
-                        target=folder/'asteroids'/name; target.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(stage/name,target)
-                    for name in ('definitions','mapping'):
-                        ref=read_json(Path(companion['path'])/'index.json')[name]
-                        shutil.copyfile(Path(companion['path'])/ref['url'],folder/'named'/ref['url'])
-                    shutil.copyfile(Path(companion['path'])/'index.json',folder/'named'/named['url'])
-                pair = {'paired_catalogue_version':1,
-                        'asteroids':{**asteroid,'url':BASE+f'paired/generations/{identity}/asteroids/'+asteroid['url']},
-                        'namedBodies':{**named,'url':BASE+f'paired/generations/{identity}/named/'+named['url']}}
-                write_json(folder/'pair.json',pair)
-                entries.append({'id':identity,'superseded_at':None})
-                write_json(root/'latest.json',pair)
+                if len(entries) >= MAX_GENERATIONS:
+                    # Commit observed supersession even when the new generation
+                    # cannot fit yet. Raising here loses evidence on fresh runners.
+                    deferred = 'retention capacity: retry after hosted confirmation and 14-day expiry'
+                    shutil.rmtree(stage)
+                    shutil.copytree(output,stage,symlinks=True)
+                    root = stage/'paired'
+                else:
+                    folder = root/'generations'/identity
+                    if not folder.exists():
+                        folder.mkdir(); (folder/'named').mkdir(); (folder/'asteroids').mkdir()
+                        for name in managed_files(stage):
+                            target=folder/'asteroids'/name; target.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(stage/name,target)
+                        for name in ('definitions','mapping'):
+                            ref=companion_index[name]
+                            shutil.copyfile(Path(companion['path'])/ref['url'],folder/'named'/ref['url'])
+                        shutil.copyfile(Path(companion['path'])/'index.json',folder/'named'/named['url'])
+                    pair = {'paired_catalogue_version':1,
+                            'asteroids':{**asteroid,'url':base_url+f'paired/generations/{identity}/asteroids/'+asteroid['url']},
+                            'namedBodies':{**named,'url':base_url+f'paired/generations/{identity}/named/'+named['url']}}
+                    write_json(folder/'pair.json',pair)
+                    entries.append({'id':identity,'superseded_at':None})
+                    write_json(root/'latest.json',pair)
             write_json(root/'retention.json',ledger)
+            # A fork/base migration keeps immutable payloads and rebases all
+            # retained pair references; confirmation used the configured host.
+            for entry in entries:
+                path = root/'generations'/entry['id']/'pair.json'
+                pair = read_json(path)
+                for field, prefix in [('asteroids','asteroids/'),('namedBodies','named/')]:
+                    pair[field]['url'] = base_url+f"paired/generations/{entry['id']}/{prefix}index-{pair[field]['sha256']}.json"
+                write_json(path,pair)
+            write_json(root/'latest.json',pair)
             checked = verify_site(stage)
             if checked['comets'] is not None:
                 checked['comets']['path'] = str(output/'comets')
             new = owned_files(stage)
             changes = {'added':sorted(new-old),'deleted':sorted(old-new),'changed':[], 'unchanged':[]}
             for name in sorted(old & new):
-                changes['unchanged' if file_info(output/name)==file_info(stage/name) else 'changed'].append(name)
+                # Both trees passed full verification: equal hash-addressed paths
+                # already prove equal bytes. Only mutable metadata needs comparison.
+                immutable = re.fullmatch(r'(?:index-|definitions-|mapping-|header-|notice-)?[a-f0-9]{64}\.(?:json|txt)', Path(name).name)
+                equal = bool(immutable) or (output/name).read_bytes() == (stage/name).read_bytes()
+                changes['unchanged' if equal else 'changed'].append(name)
             changed = any(changes[k] for k in ('added','changed','deleted'))
             if changed:
                 if output.exists(): exchange_directories(stage,output)
                 else: rename_new(stage,output)
             return {**checked,'path':str(output),'status':'updated' if changed else 'unchanged','changes':changes,
-                    'named_bodies':{**companion,'activation':'paired'}}
+                    'deferred':deferred,
+                    'named_bodies':{**companion,'activation':'deferred' if deferred else 'paired'}}

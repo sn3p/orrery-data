@@ -53,8 +53,12 @@ refresh may record this confirmation. Network failure/mismatch cannot authorize
 pruning. Expired pairs are pruned only while installing a new pair, with matching
 hosted confirmation. The current and immediately previous pair are never pruned.
 
-If four slots fill before a safe expiry, the next new-pair refresh fails before
-installation. Retry after successful publication and grace expiry; never delete
+If four slots fill before a safe expiry, refresh defers the new pair and returns
+`deferred` with an explanation. It successfully commits newly observed supersession
+stamps while preserving the current pair; with no new evidence it is unchanged.
+The scheduled summary reports deferral. This metadata-only success allows a fresh
+runner to resume after expiry instead of repeatedly losing the clocks. Retry after
+successful publication and grace expiry; never delete
 ledger entries to bypass support promises. Re-selecting an already retained pair
 uses no new slot and renews its protection. Science-only releases consume a pair
 slot; unchanged science/catalogue bytes do not. Normal weekly refreshes fit this budget; expiry-boundary scheduling jitter,
@@ -65,7 +69,16 @@ The measured asteroid payload is about 119 MB per generation: four retained pair
 plus the current root copy use about 595 MB before comet data and compression.
 Git may deduplicate shared blobs; Pages contains the actual copies. This is a
 count bound, not a fixed-byte guarantee as the catalogue grows. Check artifact
-size before increasing limits or adding products. Git history is not pruned.
+size before increasing limits or adding products. Git history is not pruned. Complete-site verification also enforces a 900,000,000-byte
+publication budget including comets, leaving headroom below 1 GB. An oversized site
+cannot replace the current installation or reach Pages. Current science-only pair
+copies remain an explicit storage tradeoff. The measured old/new real catalogues
+share 0 of 114 chunk hashes; deduplicating those generations would not save payload.
+
+Both old and staged retained files are integrity-verified. Change detection then
+compares mutable metadata directly and recognizes already-verified equal hash
+paths without hashing both copies again. It does not replace either verification
+with filename trust.
 
 This guarantee applies to **paired generation URLs**. The pre-existing root
 asteroid endpoint remains current-only, with its existing pruning behaviour;
@@ -104,3 +117,17 @@ lines, dates and absent dwarfs, cancellation, stale/concurrent loading, offline
 failure/recovery and unchanged cameras/group fits. All thirteen remain reference
 bodies independent of discovery date; ordinary clipping/display controls remain.
 No comet playback, new camera action, or standalone Orrery3D rollout is included.
+
+## Forks and Pages base changes
+
+`update_browser.py --base-url https://owner.github.io/repository/` selects both
+the absolute reference base and publication-confirmation host. The scheduled
+workflow gets this value from configure-pages before refresh. HTTPS bases may
+not contain credentials, query or fragment. The default remains production for
+manual compatibility. Migrating a base rewrites retained pair-reference metadata
+without changing scientific payloads or hashes, and resets retirement clocks so
+old-host evidence cannot prematurely expire new-host URLs. Confirmation always reads the
+configured host; it cannot use production's availability to authorize fork pruning.
+All paired metadata, including retention.json, has the same 4096-byte bound at
+verification, snapshot and remote reconciliation boundaries. Missing paired files
+raise contextual DataError exceptions.

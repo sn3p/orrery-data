@@ -26,7 +26,10 @@ def remote_descriptor(url, *, optional=False):
     """Read a bounded descriptor; only optional products may be absent."""
     try:
         with urlopen(url, timeout=20) as response:
-            return json.loads(response.read(4097))
+            raw = response.read(4097)
+            if len(raw) > 4096:
+                raise ValueError('Oversized publication descriptor')
+            return json.loads(raw)
     except HTTPError as exc:
         if not optional or exc.code != 404:
             raise
