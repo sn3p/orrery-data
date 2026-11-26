@@ -15,6 +15,12 @@ CONVENTIONS = {'origin': 'Sun centre', 'frame': 'Horizons ecliptic J2000 (IAU76 
 EXTRAPOLATION = 'freeze-shape-at-nearest-boundary; continue-mean-anomaly-at-fitted-rate'
 
 
+def centre_kind(target):
+    # Horizons major-body codes 1..9 denote system barycentres; centre codes
+    # are three digits and small-body searches carry a semicolon.
+    return 'system-barycentre' if target in tuple(str(n) for n in range(1, 10)) else 'body-centre'
+
+
 def need(ok, label):
     if not ok:
         raise DataError('Invalid named bodies: ' + label)
@@ -39,7 +45,7 @@ def validate_definitions(value):
         keys(body, 'id name classification target centre_kind elements rates sources validation')
         need((body['id'], body['name'], body['target']) == (IDS[i], NAMES[i], TARGETS[i]), 'identity/target')
         need(body['classification'] == ('planet' if i < 8 else 'dwarf-planet'), 'classification')
-        need(body['centre_kind'] == ('system-barycentre' if i in (3,4,5,6,7,9) else 'body-centre'), 'centre')
+        need(body['centre_kind'] == centre_kind(TARGETS[i]), 'centre')
         for key in ('elements', 'rates'):
             need(isinstance(body[key], list) and len(body[key]) == 6 and all(finite(v) for v in body[key]), key)
         need(body['rates'][5] > 0, 'forward mean motion')

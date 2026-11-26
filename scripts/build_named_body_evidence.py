@@ -6,10 +6,12 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from orrery_data.named_bodies import *
+from orrery_data.named_bodies import (NAMES, IDS, TARGETS, START, END, CONVENTIONS,
+                                      EXTRAPOLATION, need, position, centre_kind, validate_definitions)
 from orrery_data.storage import json_bytes
 from orrery_data.named_body_sources import parse_source
 
@@ -34,7 +36,7 @@ def build(cache, output):
         training = {r[0] for r in tables['fit'][1::2]}
         refs = [r[:4] for r in tables['fit'][::2]] + [r[:4] for r in tables['validation'] if r[0] not in training]
         body = dict(id=IDS[i], name=NAMES[i], classification='planet' if i < 8 else 'dwarf-planet', target=TARGETS[i],
-                    centre_kind='system-barycentre' if i in (3,4,5,6,7,9) else 'body-centre',
+                    centre_kind=centre_kind(TARGETS[i]),
                     elements=fit['parameters'][:6], rates=fit['parameters'][6:], sources=sources)
         errors, angles = [], []
         for row in refs:

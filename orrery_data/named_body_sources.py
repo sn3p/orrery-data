@@ -3,10 +3,21 @@ import json
 import math
 import re
 from urllib.parse import parse_qs, urlparse
-from .named_bodies import TARGETS, NAMES, START, END, EPOCH, need
+from .named_bodies import TARGETS, NAMES, START, END, EPOCH, need, centre_kind
+from .formats import DataError
 
 
 def parse_source(raw, url, index, kind):
+    try:
+        return _parse_source(raw, url, index, kind)
+    except DataError:
+        raise
+    except (ValueError, TypeError, AttributeError, IndexError, KeyError, OverflowError) as exc:
+        raise DataError(f'Invalid named-body Horizons payload ({kind}): {exc}') from exc
+
+
+def _parse_source(raw, url, index, kind):
+    need(type(index) is int and 0 <= index < len(TARGETS), 'source body index')
     params=dict(format='json', COMMAND=repr(TARGETS[index]), EPHEM_TYPE=repr('ELEMENTS' if kind=='elements' else 'VECTORS'),
                 CENTER="'500@10'",OUT_UNITS="'AU-D'",REF_PLANE="'ECLIPTIC'",REF_SYSTEM="'ICRF'",CSV_FORMAT="'YES'",TIME_TYPE="'TDB'",OBJ_DATA="'YES'")
     if kind=='elements':params['TLIST']="'2451545.0'"
@@ -17,14 +28,14 @@ def parse_source(raw, url, index, kind):
          and parsed.path=='/api/horizons.api' and not parsed.fragment
          and parse_qs(parsed.query)=={k:[v] for k,v in params.items()},'Horizons query contract')
     envelope=json.loads(raw)
-    need(not envelope.get('error') and envelope.get('signature') in ({'source':'NASA/JPL Horizons API','version':v} for v in ('1.2','1.3')),'Horizons envelope')
+    need(isinstance(envelope, dict) and not envelope.get('error') and envelope.get('signature') in ({'source':'NASA/JPL Horizons API','version':v} for v in ('1.2','1.3')),'Horizons envelope')
     result=envelope.get('result','')
     need(isinstance(result,str) and result.count('$$SOE')==result.count('$$EOE')==1,'Horizons table')
     header,table=result.split('$$SOE');table=table.split('$$EOE')[0]
     target=re.search(r'^Target body name:\s*(.*?)\s+\{source: ([A-Za-z0-9#./_-]+)\}',header,re.M)
     name=NAMES[index];target_id=TARGETS[index]
     expected=(rf'{target_id[:-1]} {name} \([^\n]+\)' if target_id.endswith(';') else
-              rf'{name}'+(' Barycenter' if index in (3,4,5,6,7,9) else '')+rf' \({target_id}\)')
+              rf'{name}'+(' Barycenter' if centre_kind(target_id) == 'system-barycentre' else '')+rf' \({target_id}\)')
     need(target is not None and re.fullmatch(expected,target[1]),'Horizons target/centre kind')
     patterns=[r'Center body name:\s*Sun \(10\)',r'Center-site name:\s*BODY CENTER',
               r'Reference frame\s*:\s*Ecliptic of J2000.0\s*$',r'\bJDTDB,',

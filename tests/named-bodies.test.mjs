@@ -51,3 +51,18 @@ test('an in-flight obsolete generation cannot replace the accepted result',async
   assert.equal(accepted.mapping.members.length,5);
  }finally{globalThis.fetch=original;}
 });
+test('reference location is bound before fetch, with canonical relative resolution',async()=>{
+ const s=source(),original=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>{calls++;throw new Error('reached fetch');};
+ const ref={url:'index.json',sha256:'a'.repeat(64),bytes:2};
+ try{
+  for(const url of ['https://wrong.invalid/other.json','https://wrong.invalid/index.json?other=1','http://remote.invalid/index.json']){
+   await assert.rejects(loadNamedBodies(s,ref,url));assert.equal(calls,0);
+  }
+  await assert.rejects(loadNamedBodies(s,{...ref,url:'https://trusted.invalid/index.json'},'https://wrong.invalid/index.json'));assert.equal(calls,0);
+  for(const [location,url] of [['index.json','https://valid.invalid/path/index.json'],['https://VALID.invalid:443/a/../index.json','https://valid.invalid/index.json']]){
+   await assert.rejects(loadNamedBodies(s,{...ref,url:location},url),/reached fetch/);
+  }
+  assert.equal(calls,2);
+ }finally{globalThis.fetch=original;}
+});

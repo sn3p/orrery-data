@@ -64,6 +64,18 @@ class NamedBodies(unittest.TestCase):
             with self.assertRaises(DataError):parse_source(json.dumps(changed).encode(),url,8,kind)
             with self.assertRaises(DataError):parse_source(raw,url.replace('AU-D','KM-S'),8,kind)
 
+    def test_malformed_source_failures_are_data_errors(self):
+        from orrery_data.named_body_sources import parse_source
+        url=self.definitions()['bodies'][8]['sources']['elements']['url']
+        for raw in [b'{',b'[]',b'null',b'3',b'"text"',b'\xff']:
+            with self.subTest(raw=raw), self.assertRaises(DataError):parse_source(raw,url,8,'elements')
+        raw=gzip.decompress((ROOT/'research/named-bodies/ceres-elements-raw.json.gz').read_bytes())
+        envelope=json.loads(raw);head,table=envelope['result'].split('$$SOE')
+        rows=table.splitlines();n=next(i for i,line in enumerate(rows) if line.strip())
+        cells=rows[n].split(',');cells[2]='not-a-number';rows[n]=','.join(cells)
+        envelope['result']=head+'$$SOE'+'\n'.join(rows)
+        with self.assertRaises(DataError):parse_source(json.dumps(envelope).encode(),url,8,'elements')
+
     def test_corrupt_definition_rejected(self):
         for change in [lambda d:d['bodies'].pop(),lambda d:d['bodies'][0].update(id=IDS[1]),
                        lambda d:d['bodies'][2].update(centre_kind='system-barycentre'),

@@ -1,6 +1,6 @@
 // One pinned, immutable generation. No discovery-chunk dependency or automatic activation.
 import {keys,requireValue,freeze} from './contract.js';
-import {fetchVerified,decodeJSON,check,linkCancellation} from './transport.js';
+import {fetchVerified,decodeJSON,check,linkCancellation,validatedURL} from './transport.js';
 const product='named bodies', need=(ok,label)=>requireValue(ok,label,product);
 const fields=(v,k)=>keys(v,k.split(' '),[],product);
 const hash=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
@@ -21,7 +21,7 @@ export function validateNamedDefinitions(v){
  v.bodies.forEach((b,i)=>{
   fields(b,'id name classification target centre_kind elements rates sources validation');
   need(b.id===ids[i]&&b.name===names[i]&&b.target===targets[i]&&b.classification===(i<8?'planet':'dwarf-planet'),'identity');
-  need(b.centre_kind===([3,4,5,6,7,9].includes(i)?'system-barycentre':'body-centre'),'centre');
+  need(b.centre_kind===(/^[1-9]$/.test(targets[i])?'system-barycentre':'body-centre'),'centre');
   for(const k of ['elements','rates'])need(Array.isArray(b[k])&&b[k].length===6&&b[k].every(number),k);
   need(b.rates[5]>0,'mean motion');
   for(const jd of [start,end]){const t=(jd-epoch)/36525,a=b.elements[0]+b.rates[0]*t,e=b.elements[1]+b.rates[1]*t;need(a>0&&e>=0&&e<1,'elliptic interval');}
@@ -69,8 +69,8 @@ export async function loadNamedBodies(source,ref,url,{signal}={}){
  try{
   need(!source.closed,'closed asteroid source');reference(ref);
   unlink=linkCancellation(controller,[source.lifetime.signal,...(signal?[signal]:[])]);check(controller.signal,product);
-  const base=new URL(url),loopback=['localhost','localhost.','[::1]'].includes(base.hostname)||/^127(?:\.\d{1,3}){3}$/.test(base.hostname);
-  need((base.protocol==='https:'||base.protocol==='http:'&&loopback)&&!base.username&&!base.password,'URL');
+  const base=validatedURL(url,product);
+  need(new URL(ref.url,base).href===base.href,'reference URL mismatch');
   const index=decodeJSON(await fetchVerified(ref,base.href,controller.signal,product),product);
   fields(index,'named_body_product_version definitions mapping');need(index.named_body_product_version===1,'product version');
   reference(index.definitions,'definitions-');reference(index.mapping,'mapping-');
